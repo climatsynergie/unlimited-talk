@@ -17,6 +17,17 @@ class DeploymentRequestTests(unittest.TestCase):
                         'image': 'ghcr.io/climatsynergie/unlimited-talk-api@sha256:' + 'b' * 64,
                         'registry_user': 'example-user', 'token': 'x' * 48}
 
+    def test_identity_migration_requires_a_compatible_rollback_target(self):
+        labels={'io.unlimitedtalk.schema':'0002_identity'}
+        for running in [
+            {'migration':'0001_foundation','revision':'d6ffee3e4d6d3cb293b433f2ff47e1b3e1445b0a'},
+            {'migration':'0002_identity','revision':'a'*40}]:
+            with patch.object(deployer,'check_health',return_value=running):
+                deployer.require_identity_rollback_target(labels)
+        for running in [{}, {'migration':'0001_foundation','revision':'a'*40}, {'migration':'unexpected'}]:
+            with patch.object(deployer,'check_health',return_value=running), self.assertRaises(ValueError):
+                deployer.require_identity_rollback_target(labels)
+
     def test_expected_request(self):
         self.assertEqual(deployer.parse_request(json.dumps(self.request)), self.request)
 
@@ -55,6 +66,7 @@ class DeploymentRequestTests(unittest.TestCase):
             (base / 'current').symlink_to(previous)
             (config / 'postgres-runtime.json').write_text(json.dumps({'host': 'private-db-example.d.db.ondigitalocean.com'}))
             (config / 'deployment-network.json').write_text(json.dumps({'database_cidr': '10.0.0.0/24'}))
+            (config / 'identity-config.json').write_text(json.dumps({'origin':'https://staging.example.com'}))
             (template / 'compose.managed.yaml').write_text('fixture')
             (template / 'nginx.conf').write_text('fixture')
             def api(path, token):

@@ -41,4 +41,4 @@ def make_engine():
                      host=host, port=port, database='unlimited_talk_staging')
     return create_engine(url, pool_size=1 if user == 'ut_staging_migrator' else 2,
                          max_overflow=0, pool_timeout=3, pool_recycle=300,
-                         pool_pre_ping=True, connect_args=connection_options)
+                         pool_pre_ping=True, hide_parameters=True, connect_args=connection_options)

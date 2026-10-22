@@ -1,18 +1,19 @@
 """Generate only missing staging credentials; never replace initialized secrets."""
 import os
+import base64
 from pathlib import Path
 import secrets
 
 root = Path(__file__).resolve().parents[1] / 'secrets'
 root.mkdir(mode=0o700, exist_ok=True)
 root.chmod(0o700)
-for name in ('postgres_password', 'migrator_password', 'runtime_password'):
+for name in ('postgres_password', 'migrator_password', 'runtime_password', 'identity_key'):
     path = root / name
     if path.exists():
         continue
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o400)
     with os.fdopen(fd, 'w') as stream:
-        stream.write(secrets.token_urlsafe(48) + '\n')
+        stream.write((base64.urlsafe_b64encode(secrets.token_bytes(32)).decode() if name=='identity_key' else secrets.token_urlsafe(48)) + '\n')
     # Compose file secrets bind-mount these files. Non-root container users need
     # read permission; the containing host directory remains private (0700).
     path.chmod(0o444)

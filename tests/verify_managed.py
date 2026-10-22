@@ -23,7 +23,7 @@ for path in ('/', '/health/live', '/health/ready', '/openapi.json'):
         assert response.headers['Cache-Control'] == 'no-store'
         body = json.load(response)
         if path == '/health/ready':
-            assert body['database'] == 'connected' and body['migration'] == '0001_foundation'
+            assert body['database'] == 'connected' and body['migration'] == '0002_identity'
             assert body['communications'] == 'disabled'
 
 config = json.loads(run('config', '--format', 'json'))
@@ -31,7 +31,7 @@ assert set(config['services']) == {'api', 'migrate', 'gateway'}
 assert not config.get('volumes')
 assert 'ports' not in config['services']['api']
 assert config['services']['gateway']['ports'][0]['host_ip'] == '127.0.0.1'
-assert [s['source'] for s in config['services']['api']['secrets']] == ['postgres_ca', 'runtime_password']
+assert [s['source'] for s in config['services']['api']['secrets']] == ['postgres_ca', 'runtime_password', 'identity_key']
 assert [s['source'] for s in config['services']['migrate']['secrets']] == ['postgres_ca', 'migrator_password']
 for service in config['services'].values():
     assert service['read_only']

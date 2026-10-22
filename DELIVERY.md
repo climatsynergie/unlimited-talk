@@ -143,8 +143,17 @@ marker. Unknown revisions remain unhealthy. This does not run or implement the
 identity migration; its future changes must be additive and preserve the tables
 used by this release.
 
-CI verifies readiness with a simulated additive table and revision, preservation
-of its data, rejection of an unknown revision and wrong environment, and recovery.
-This is a prerequisite test, not proof of the actual identity migration or its
-rollback. When shipping identity, record this deployed compatibility image as the
-preceding release and test the actual migration and application rollback too.
+The compatibility release was tested with a simulated additive table/revision.
+Identity CI now migrates the actual schema, exercises real synthetic accounts,
+switches to the exact preceding compatibility image, verifies preserved user
+data and migration state, then restores the new application. The host deployer
+refuses identity's first migration unless that compatible release is running.
+
+Before deploying identity, install the reviewed managed Compose template and
+root deployer, run `scripts/prepare-identity-host.py --origin <HTTPS-origin>` as
+the staging administrator, and install the console launcher from
+`scripts/bootstrap-staging-admin.py` at `/root/bootstrap-staging-admin.py`.
+Provisioning preserves an existing encryption key and never displays it. These
+are host preparation steps; they do not migrate PostgreSQL, switch the running
+application or create a real account. Follow [IDENTITY.md](IDENTITY.md) for the
+browser API, first-admin setup, encryption-key recovery and remaining UI scope.

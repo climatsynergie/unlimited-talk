@@ -41,9 +41,11 @@ services:
     <<: *app
     environment:
       <<: *environment
+      APP_ORIGIN: ${STAGING_APP_ORIGIN:?Set the HTTPS staging origin}
+      IDENTITY_KEY_FILE: /run/secrets/identity_key
       DB_USER: ut_staging_runtime
       DB_PASSWORD_FILE: /run/secrets/runtime_password
-    secrets: [postgres_ca, runtime_password]
+    secrets: [postgres_ca, runtime_password, identity_key]
     depends_on:
       migrate: {condition: service_completed_successfully}
     mem_limit: 512m
@@ -91,3 +93,5 @@ secrets:
     file: /etc/unlimited-talk-staging/container-secrets/runtime_password
   migrator_password:
     file: /etc/unlimited-talk-staging/container-secrets/migrator_password
+  identity_key:
+    file: /etc/unlimited-talk-staging/container-secrets/identity_key

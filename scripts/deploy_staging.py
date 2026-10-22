@@ -84,6 +84,18 @@ def check_health(revision=None):
     return result
 
 
+
+def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') != '0002_identity':
+        return
+    running = check_health()
+    if running.get('migration') == '0002_identity':
+        return
+    if running.get('migration') == '0001_foundation' and running.get('revision') == 'd6ffee3e4d6d3cb293b433f2ff47e1b3e1445b0a':
+        return
+    raise ValueError('Deploy the identity compatibility release first')
+
+
 def deploy(request):
     revision, image, token = request['revision'], request['image'], request['token']
     main = github('commits/main', token)
@@ -120,7 +132,13 @@ def deploy(request):
             shutil.copy2(TEMPLATE / 'compose.managed.yaml', release / 'compose.managed.yaml')
             (release / 'scripts').mkdir(mode=0o755)
             shutil.copy2(TEMPLATE / 'nginx.conf', release / 'scripts/nginx.conf')
-            settings = ('STAGING_IMAGE=' + image + '\nSTAGING_DB_HOST=' + profile['host'] +
+            identity_config = json.loads((ROOT / 'identity-config.json').read_text())
+            from urllib.parse import urlsplit
+            origin = identity_config['origin']
+            parsed_origin = urlsplit(origin)
+            if parsed_origin.scheme != 'https' or not parsed_origin.hostname or any(c.isspace() for c in origin) or parsed_origin.path or parsed_origin.query or parsed_origin.fragment or parsed_origin.username:
+                raise ValueError('Invalid staging HTTPS origin')
+            settings = ('STAGING_APP_ORIGIN=' + origin + '\nSTAGING_IMAGE=' + image + '\nSTAGING_DB_HOST=' + profile['host'] +
                         '\nSTAGING_DB_CIDR=' + network['database_cidr'] + '\n')
             (release / '.env').write_text(settings)
             (release / '.env').chmod(0o600)
@@ -130,6 +148,7 @@ def deploy(request):
             raise ValueError('Unexpected root-owned deployment template')
         if config['services']['api']['image'] != image or config['services']['migrate']['image'] != image:
             raise ValueError('Migration and API must use the same tested image')
+        require_identity_rollback_target(labels)
         # Migrations must follow expand/contract compatibility. Never downgrade
         # data automatically, including when application health checks fail.
         compose(release, 'run', '--rm', '--no-deps', 'migrate', env=env)

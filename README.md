@@ -81,3 +81,9 @@ loopback-only bindings until HTTPS and access control are configured.
 Never commit database dumps, customer files, recordings, private keys,
 certificates, passwords, tokens or deployment environment files. Operational
 reports and legacy application data are not part of this repository.
+
+## Identity backend
+
+See [IDENTITY.md](IDENTITY.md) for the individual account API, admin MFA,
+invitation/session contract, operational bootstrap and activation boundaries.
+The React login screens and automatic invitation email delivery are not built yet.

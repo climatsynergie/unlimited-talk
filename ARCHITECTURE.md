@@ -105,5 +105,6 @@ and provider tests; a mocked test cannot establish voice quality or capacity.
 Currently delivered: staging foundation, private managed PostgreSQL, migrations,
 isolated CI, attested image publication and verified restricted GitHub delivery.
 Staging HTTPS uses a host Caddy service with a separate perimeter password.
-Business modules, individual application authentication and the frontend are
-not implemented yet.
+The individual identity backend is implemented and tested as described in
+IDENTITY.md; its managed staging activation is a separate deployment check.
+Business modules and the React frontend are not implemented yet.

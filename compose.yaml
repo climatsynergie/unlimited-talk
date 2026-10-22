@@ -66,9 +66,11 @@ services:
       COMMUNICATIONS_MODE: disabled
       DB_HOST: db
       DB_NAME: unlimited_talk_staging
+      APP_ORIGIN: http://127.0.0.1:8110
+      IDENTITY_KEY_FILE: /run/secrets/identity_key
       DB_USER: ut_staging_runtime
       DB_PASSWORD_FILE: /run/secrets/runtime_password
-    secrets: [runtime_password]
+    secrets: [runtime_password, identity_key]
     depends_on:
       migrate: {condition: service_completed_successfully}
     mem_limit: 512m
@@ -109,3 +111,4 @@ secrets:
   postgres_password: {file: ./secrets/postgres_password}
   migrator_password: {file: ./secrets/migrator_password}
   runtime_password: {file: ./secrets/runtime_password}
+  identity_key: {file: ./secrets/identity_key}
