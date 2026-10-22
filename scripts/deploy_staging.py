@@ -61,7 +61,10 @@ def run(args, *, env=None, data=None, timeout=180):
 
 
 def compose(release, *args, env=None, timeout=180):
-    return run(['docker', 'compose', '-f', str(release / 'compose.managed.yaml'), *args],
+    command = ['docker', 'compose', '--project-directory', str(release)]
+    if (release / '.env').is_file():
+        command += ['--env-file', str(release / '.env')]
+    return run([*command, '-f', str(release / 'compose.managed.yaml'), *args],
                env=env, timeout=timeout)
 
 
