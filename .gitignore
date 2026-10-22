@@ -1,0 +1,12 @@
+secrets/*
+!secrets/.gitkeep
+__pycache__/
+*.pyc
+.env*
+!.env.example
+*.pem
+*.key
+*.crt
+*.db
+*.dump
+artifacts/

@@ -1,0 +1,93 @@
+# Independent deployment file. Do not combine with compose.yaml (local DB).
+name: unlimited-talk-staging-managed
+
+x-app: &app
+  image: unlimited-talk-staging-api:managed-foundation
+  build: .
+  user: "10001:10001"
+  networks: [staging]
+  read_only: true
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 100
+  logging:
+    driver: local
+    options: {max-size: 5m, max-file: "2"}
+
+x-environment: &environment
+  APP_ENV: staging
+  COMMUNICATIONS_MODE: disabled
+  DB_DEPLOYMENT: managed
+  DB_PRIVATE_CIDR: ${STAGING_DB_CIDR:?Set the private staging database CIDR}
+  DB_HOST: ${STAGING_DB_HOST:?Set the private staging database hostname}
+  DB_NAME: unlimited_talk_staging
+  DB_SSLMODE: verify-full
+  DB_SSLROOTCERT: /run/secrets/postgres_ca
+
+services:
+  migrate:
+    <<: *app
+    environment:
+      <<: *environment
+      DB_USER: ut_staging_migrator
+      DB_PASSWORD_FILE: /run/secrets/migrator_password
+    secrets: [postgres_ca, migrator_password]
+    command: [alembic, upgrade, head]
+    mem_limit: 256m
+    cpus: 0.25
+    restart: "no"
+  api:
+    <<: *app
+    environment:
+      <<: *environment
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+    secrets: [postgres_ca, runtime_password]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    mem_limit: 512m
+    cpus: 1
+    restart: "on-failure:5"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 10s
+  gateway:
+    image: nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+    ports: ["127.0.0.1:8110:8080"]
+    volumes: ["./scripts/nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    networks: [staging]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 30
+    restart: "on-failure:5"
+    logging:
+      driver: local
+      options: {max-size: 5m, max-file: "2"}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+
+networks:
+  staging:
+    driver: bridge
+    ipam:
+      config: [{subnet: 172.30.8.0/24}]
+secrets:
+  postgres_ca:
+    file: /etc/unlimited-talk-staging/postgres-ca.crt
+  runtime_password:
+    file: /etc/unlimited-talk-staging/container-secrets/runtime_password
+  migrator_password:
+    file: /etc/unlimited-talk-staging/container-secrets/migrator_password

@@ -1,0 +1,17 @@
+[Unit]
+Description=Unlimited Talks staging API with managed PostgreSQL
+Requires=docker.service unlimited-talk-staging-egress.service
+Wants=network-online.target
+After=network-online.target docker.service unlimited-talk-staging-egress.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/unlimited-talk-staging/current
+ExecStart=/usr/bin/docker compose -f compose.managed.yaml up -d --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose -f compose.managed.yaml stop
+TimeoutStartSec=240
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

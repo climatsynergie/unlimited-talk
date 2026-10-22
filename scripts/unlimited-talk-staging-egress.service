@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict dedicated staging container egress to private PostgreSQL
+Requires=docker.service
+After=docker.service network-online.target
+Before=unlimited-talk-staging-managed.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/unlimited-talk-staging/network.env
+ExecStart=/usr/local/sbin/unlimited-talk-staging-egress
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

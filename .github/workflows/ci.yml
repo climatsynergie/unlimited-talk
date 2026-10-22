@@ -1,0 +1,52 @@
+name: Foundation CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Generate disposable CI database credentials
+        run: python3 scripts/bootstrap-secrets.py
+      - name: Validate configuration and build image
+        run: |
+          docker compose config --quiet
+          docker compose build api
+      - name: Test database configuration guards
+        run: >-
+          docker run --rm --network none --read-only
+          --tmpfs /tmp:rw,noexec,nosuid,size=32m --cap-drop ALL
+          --security-opt no-new-privileges --memory 128m
+          -v "$PWD/tests:/tests:ro"
+          unlimited-talk-staging-api:foundation
+          python -m unittest discover -s /tests -p test_database_configuration.py -v
+      - name: Start disposable local environment
+        run: docker compose up -d --wait --wait-timeout 180
+      - name: Verify HTTP, PostgreSQL and isolation
+        run: python3 tests/verify_foundation.py
+      - name: Verify database outage and recovery
+        run: python3 tests/verify_recovery.py
+      - name: Show service diagnostics
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --tail 50 api migrate gateway
+      - name: Stop disposable environment
+        if: always()
+        run: docker compose down
