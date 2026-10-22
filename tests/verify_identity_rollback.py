@@ -11,7 +11,12 @@ import urllib.request
 
 root=Path(__file__).resolve().parents[1]
 compose=['sudo','-n','docker','compose','--project-directory',str(root)]
-compose+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
+extra=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
+# Once any -f is supplied Compose stops discovering compose.yaml implicitly.
+# Keep the base file explicit before adding the temporary rollback override.
+if not any(arg in {'-f','--file'} or arg.startswith('--file=') for arg in extra):
+    compose+=['-f',str(root/'compose.yaml')]
+compose+=extra
 base=os.environ.get('FOUNDATION_TEST_URL','http://127.0.0.1:8110')
 config=json.loads(subprocess.check_output([*compose,'config','--format','json']))
 assert 'db' in config['services'] and config['services']['api']['environment']['DB_HOST']=='db'
