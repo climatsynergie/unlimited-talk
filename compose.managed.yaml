@@ -2,8 +2,8 @@
 name: unlimited-talk-staging-managed
 
 x-app: &app
-  image: unlimited-talk-staging-api:managed-foundation
-  build: .
+  image: ${STAGING_IMAGE:?Set a tested image by immutable digest}
+  pull_policy: never
   user: "10001:10001"
   networks: [staging]
   read_only: true

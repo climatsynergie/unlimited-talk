@@ -27,21 +27,37 @@ jobs:
       - name: Validate configuration and build image
         run: |
           docker compose config --quiet
-          docker compose build api
+          docker compose build --build-arg GIT_REVISION="$GITHUB_SHA" api
       - name: Test database configuration guards
         run: >-
           docker run --rm --network none --read-only
           --tmpfs /tmp:rw,noexec,nosuid,size=32m --cap-drop ALL
           --security-opt no-new-privileges --memory 128m
           -v "$PWD/tests:/tests:ro"
+          -v "$PWD/scripts:/scripts:ro"
           unlimited-talk-staging-api:foundation
-          python -m unittest discover -s /tests -p test_database_configuration.py -v
+          python -m unittest discover -s /tests -p 'test_*.py' -v
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
         run: python3 tests/verify_foundation.py
       - name: Verify database outage and recovery
         run: python3 tests/verify_recovery.py
+      - name: Export the tested image
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          mkdir -p artifacts
+          docker save unlimited-talk-staging-api:foundation | gzip > artifacts/tested-image.tar.gz
+          docker image inspect unlimited-talk-staging-api:foundation --format '{{.Id}}' > artifacts/image-id.txt
+          sha256sum artifacts/tested-image.tar.gz > artifacts/image.sha256
+      - name: Keep the exact tested image for publication
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tested-image-${{ github.sha }}
+          path: artifacts/
+          retention-days: 3
+          compression-level: 0
       - name: Show service diagnostics
         if: failure()
         run: |
@@ -50,3 +66,44 @@ jobs:
       - name: Stop disposable environment
         if: always()
         run: docker compose down
+
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Retrieve the image that passed tests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tested-image-${{ github.sha }}
+          path: artifacts/
+      - name: Verify and publish without rebuilding
+        id: publish
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          sha256sum -c artifacts/image.sha256
+          gunzip -c artifacts/tested-image.tar.gz | docker load
+          test "$(docker image inspect unlimited-talk-staging-api:foundation --format '{{.Id}}')" = "$(cat artifacts/image-id.txt)"
+          test "$(docker image inspect unlimited-talk-staging-api:foundation --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          image="ghcr.io/climatsynergie/unlimited-talk-api:git-$GITHUB_SHA"
+          docker tag unlimited-talk-staging-api:foundation "$image"
+          docker push "$image"
+          reference=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')
+          printf 'digest=%s\n' "${reference##*@}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$reference" >> "$GITHUB_STEP_SUMMARY"
+      - name: Attest the tested image provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-name: ghcr.io/climatsynergie/unlimited-talk-api
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true

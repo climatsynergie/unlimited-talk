@@ -3,6 +3,7 @@
 Run after `docker compose up -d`. No real calls, customer records or provider API.
 """
 import json
+import os
 from pathlib import Path
 import subprocess
 import urllib.request
@@ -28,7 +29,8 @@ assert get('/')['business_features'] == 'not_implemented'
 assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
                               'database': 'connected', 'migration': '0001_foundation',
-                              'communications': 'disabled'}
+                              'communications': 'disabled',
+                              'revision': os.environ.get('GITHUB_SHA', 'development')}
 config = json.loads(run('config', '--format', 'json'))
 assert config['name'] == 'unlimited-talk-staging'
 assert config['networks']['staging']['internal'] is True

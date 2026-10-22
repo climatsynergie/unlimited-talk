@@ -1,0 +1,62 @@
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full main-branch commit SHA with successful Foundation CI
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Validate deployment request and resolve immutable image
+        env:
+          REQUESTED_REVISION: ${{ inputs.revision }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_REVISION" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          test "$(gh api repos/climatsynergie/unlimited-talk/commits/main --jq .sha)" = "$REQUESTED_REVISION"
+          test "$(gh api "repos/climatsynergie/unlimited-talk/actions/workflows/ci.yml/runs?head_sha=$REQUESTED_REVISION&branch=main&status=success" --jq '.total_count')" -gt 0
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          tag="ghcr.io/climatsynergie/unlimited-talk-api:git-$REQUESTED_REVISION"
+          docker pull "$tag"
+          test "$(docker image inspect "$tag" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REQUESTED_REVISION"
+          image=$(docker image inspect "$tag" --format '{{index .RepoDigests 0}}')
+          [[ "$image" =~ ^ghcr.io/climatsynergie/unlimited-talk-api@sha256:[a-f0-9]{64}$ ]] || exit 1
+          gh attestation verify "oci://$image" --repo climatsynergie/unlimited-talk --signer-workflow climatsynergie/unlimited-talk/.github/workflows/ci.yml --source-ref refs/heads/main --source-digest "$REQUESTED_REVISION" --deny-self-hosted-runners
+          printf 'STAGING_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+      - name: Deploy through a restricted SSH command
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          REQUESTED_REVISION: ${{ inputs.revision }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_SSH_HOST" && test -n "$STAGING_SSH_KEY" && test -n "$STAGING_SSH_KNOWN_HOSTS" || { echo 'Configure the three staging environment secrets first.'; exit 1; }
+          umask 077
+          temp_dir=$(mktemp -d)
+          trap 'rm -rf "$temp_dir"' EXIT
+          printf '%s\n' "$STAGING_SSH_KEY" > "$temp_dir/key"
+          printf '%s\n' "$STAGING_SSH_KNOWN_HOSTS" > "$temp_dir/known_hosts"
+          python3 -c 'import json,os; print(json.dumps({"revision":os.environ["REQUESTED_REVISION"],"image":os.environ["STAGING_IMAGE"],"registry_user":os.environ["REGISTRY_USER"],"token":os.environ["GH_TOKEN"]}))' > "$temp_dir/request.json"
+          ssh -T -i "$temp_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlias=staging-target -o UserKnownHostsFile="$temp_dir/known_hosts" -o ConnectTimeout=10 "stagingci@$STAGING_SSH_HOST" < "$temp_dir/request.json"

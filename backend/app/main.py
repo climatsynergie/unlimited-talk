@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+import os
 import time
 import uuid
 
@@ -41,7 +42,8 @@ async def request_metadata(request: Request, call_next):
 def root():
     return {'application': 'Unlimited Talks', 'environment': 'staging',
             'milestone': 'foundation', 'communications': 'disabled',
-            'business_features': 'not_implemented', 'readiness': '/health/ready'}
+            'business_features': 'not_implemented', 'readiness': '/health/ready',
+            'revision': os.environ.get('APP_REVISION', 'development')}
 
 
 @app.get('/health/live')
@@ -61,4 +63,5 @@ def ready(request: Request):
         logger.warning('Staging database readiness failed')
         return JSONResponse(status_code=503, content={'status': 'not_ready'})
     return {'status': 'ready', 'environment': 'staging', 'database': 'connected',
-            'migration': version, 'communications': 'disabled'}
+            'migration': version, 'communications': 'disabled',
+            'revision': os.environ.get('APP_REVISION', 'development')}

@@ -45,16 +45,20 @@ recovery test deliberately stops and restarts the local development database.
 Do not run it against a shared or managed database.
 
 GitHub Actions builds and tests an isolated environment using disposable
-credentials. It does not access staging/production credentials or deploy to a
-server. Continuous deployment will be configured separately after GitHub access
-and staging deployment approvals are in place.
+credentials. Successful main builds publish the exact tested image to GHCR.
+Tests never receive staging/production credentials. The separate **Deploy
+staging** workflow requires the staging environment's restricted SSH settings
+and an explicit request for a successful current-main commit.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system boundaries and the agreed
+business invariants, and [DELIVERY.md](DELIVERY.md) for deployment and recovery.
 
 ## Managed staging
 
 `compose.managed.yaml` is an independent deployment file. Do not combine it with
 `compose.yaml`, which starts a local database.
 
-Set `STAGING_DB_HOST` and `STAGING_DB_CIDR` in the deployment environment, using
+Set `STAGING_IMAGE`, `STAGING_DB_HOST` and `STAGING_DB_CIDR` in the deployment environment, using
 `.env.example` as a format reference. Replace example values with the private
 database endpoint and network. Managed connections require TLS `verify-full`
 and the provider's CA certificate. No environment-specific endpoints are stored
