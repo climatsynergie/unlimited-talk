@@ -102,6 +102,8 @@ Public access additionally requires HTTPS and access control. Valuable data
 requires backup restoration testing. Telephony requires real controlled audio
 and provider tests; a mocked test cannot establish voice quality or capacity.
 
-Currently delivered: staging foundation, private managed PostgreSQL, migrations
-and isolated CI. Image publication and restricted deployment are being wired
-through GitHub. Business modules and the frontend are not implemented yet.
+Currently delivered: staging foundation, private managed PostgreSQL, migrations,
+isolated CI, attested image publication and verified restricted GitHub delivery.
+Staging HTTPS uses a host Caddy service with a separate perimeter password.
+Business modules, individual application authentication and the frontend are
+not implemented yet.

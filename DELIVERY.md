@@ -125,3 +125,10 @@ Configuration and isolated database tests must remain green.
 The first complete GitHub → registry → staging delivery is not considered
 verified until the three environment secrets are configured and a real workflow
 run succeeds. A prepared workflow or a unit test alone does not establish this.
+
+## HTTPS access
+
+The host Caddy service provides staging HTTPS and a password-protected perimeter.
+See [the installation and verification contract](infrastructure/caddy/README.md).
+This configuration and its credentials are independent of application releases.
+The first restricted GitHub delivery has been verified on staging.

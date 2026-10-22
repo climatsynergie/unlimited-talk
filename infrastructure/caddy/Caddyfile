@@ -1,0 +1,17 @@
+# STAGING_DOMAIN is provided by the root-owned systemd EnvironmentFile.
+{$STAGING_DOMAIN} {
+	route {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Robots-Tag "noindex, nofollow, noarchive"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "no-referrer"
+			-Server
+		}
+		import /etc/caddy/staging-access.caddy
+		reverse_proxy 127.0.0.1:8110 {
+			# The perimeter credential must never reach the application.
+			header_up -Authorization
+		}
+	}
+}
