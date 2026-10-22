@@ -6,10 +6,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shlex
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ['sudo', '-n', 'docker', 'compose', '--project-directory', str(ROOT)]
+COMPOSE += shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS', ''))
 
 
 def run(*args, data=None):
@@ -18,7 +20,7 @@ def run(*args, data=None):
 
 
 def get(path):
-    with urllib.request.urlopen('http://127.0.0.1:8110' + path, timeout=8) as response:
+    with urllib.request.urlopen(os.environ.get('FOUNDATION_TEST_URL', 'http://127.0.0.1:8110') + path, timeout=8) as response:
         assert response.status == 200
         assert response.headers['Cache-Control'] == 'no-store'
         assert response.headers['X-Request-ID']
@@ -32,7 +34,7 @@ assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
                               'communications': 'disabled',
                               'revision': os.environ.get('GITHUB_SHA', 'development')}
 config = json.loads(run('config', '--format', 'json'))
-assert config['name'] == 'unlimited-talk-staging'
+assert config['name'] == os.environ.get('FOUNDATION_TEST_PROJECT', 'unlimited-talk-staging')
 assert config['networks']['staging']['internal'] is True
 assert 'ports' not in config['services']['db']
 assert 'ports' not in config['services']['api']

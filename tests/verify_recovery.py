@@ -1,18 +1,21 @@
 """Interrupt only the staging database and verify honest health and recovery."""
 import json
+import os
 from pathlib import Path
 import subprocess
+import shlex
 import time
 import urllib.error
 import urllib.request
 
 root = Path(__file__).resolve().parents[1]
 compose = ['sudo', '-n', 'docker', 'compose', '--project-directory', str(root)]
+compose += shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS', ''))
 
 
 def status(path):
     try:
-        with urllib.request.urlopen('http://127.0.0.1:8110' + path, timeout=8) as r:
+        with urllib.request.urlopen(os.environ.get('FOUNDATION_TEST_URL', 'http://127.0.0.1:8110') + path, timeout=8) as r:
             return r.status
     except urllib.error.HTTPError as e:
         return e.code

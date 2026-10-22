@@ -13,6 +13,10 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
+# The identity migration is additive: this release remains a valid rollback
+# target after it is applied. Unknown schema revisions still fail closed.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0001_foundation', '0002_identity'})
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -57,7 +61,7 @@ def ready(request: Request):
         with request.app.state.engine.connect() as connection:
             version = connection.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one()
             marker = connection.execute(text("SELECT value FROM staging.environment_metadata WHERE key='environment'")).scalar_one()
-            if version != '0001_foundation' or marker != 'staging':
+            if version not in COMPATIBLE_SCHEMA_REVISIONS or marker != 'staging':
                 raise ValueError('Schema/environment mismatch')
     except (SQLAlchemyError, ValueError):
         logger.warning('Staging database readiness failed')

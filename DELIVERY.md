@@ -132,3 +132,19 @@ The host Caddy service provides staging HTTPS and a password-protected perimeter
 See [the installation and verification contract](infrastructure/caddy/README.md).
 This configuration and its credentials are independent of application releases.
 The first restricted GitHub delivery has been verified on staging.
+
+## Identity migration rollout prerequisite
+
+Deploy the schema compatibility release before introducing `0002_identity`.
+The original foundation image accepts only `0001_foundation` and cannot serve as
+an operational rollback target after a new revision is recorded. The compatibility
+release explicitly accepts both revisions while still checking the staging
+marker. Unknown revisions remain unhealthy. This does not run or implement the
+identity migration; its future changes must be additive and preserve the tables
+used by this release.
+
+CI verifies readiness with a simulated additive table and revision, preservation
+of its data, rejection of an unknown revision and wrong environment, and recovery.
+This is a prerequisite test, not proof of the actual identity migration or its
+rollback. When shipping identity, record this deployed compatibility image as the
+preceding release and test the actual migration and application rollback too.

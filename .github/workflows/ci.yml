@@ -43,6 +43,8 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
         run: python3 tests/verify_foundation.py
+      - name: Verify schema compatibility for identity rollout
+        run: python3 tests/verify_schema_compatibility.py
       - name: Verify database outage and recovery
         run: python3 tests/verify_recovery.py
       - name: Export the tested image
