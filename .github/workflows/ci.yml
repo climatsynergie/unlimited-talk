@@ -24,6 +24,8 @@ jobs:
           persist-credentials: false
       - name: Generate disposable CI database credentials
         run: python3 scripts/bootstrap-secrets.py
+      - name: Validate SSH secret formatting and key identity
+        run: python3 -m unittest discover -s tests/host -p 'test_*.py' -v
       - name: Validate configuration and build image
         run: |
           docker compose config --quiet

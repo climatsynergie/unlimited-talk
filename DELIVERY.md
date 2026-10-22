@@ -40,11 +40,14 @@ a time for direct entry into GitHub Settings:
 
 ```sh
 python3 /root/github-staging-setup.py host
-python3 /root/github-staging-setup.py key
+python3 /root/github-staging-setup.py key-base64
 python3 /root/github-staging-setup.py known-hosts
 ```
 
 Never paste the private key into an issue, pull request, workflow log or chat.
+The base64 output is still a private credential, not encryption. The workflow
+decodes it locally, validates it with OpenSSH and prints only its public-key
+fingerprint. Multiline OpenSSH secrets remain supported, including CRLF input.
 Do not reuse the administrative SSH key. Rotate this restricted key if it is
 exposed; remove/replace its authorized-key entry and GitHub environment secret.
 

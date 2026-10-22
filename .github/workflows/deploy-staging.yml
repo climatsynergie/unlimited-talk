@@ -43,6 +43,11 @@ jobs:
           [[ "$image" =~ ^ghcr.io/climatsynergie/unlimited-talk-api@sha256:[a-f0-9]{64}$ ]] || exit 1
           gh attestation verify "oci://$image" --repo climatsynergie/unlimited-talk --signer-workflow climatsynergie/unlimited-talk/.github/workflows/ci.yml --source-ref refs/heads/main --source-digest "$REQUESTED_REVISION" --deny-self-hosted-runners
           printf 'STAGING_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+      - name: Check out the validated deployment tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
       - name: Deploy through a restricted SSH command
         env:
           STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
@@ -57,7 +62,7 @@ jobs:
           umask 077
           temp_dir=$(mktemp -d)
           trap 'rm -rf "$temp_dir"' EXIT
-          printf '%s\n' "$STAGING_SSH_KEY" > "$temp_dir/key"
+          python3 scripts/prepare_ssh_key.py "$temp_dir/key"
           printf '%s\n' "$STAGING_SSH_KNOWN_HOSTS" > "$temp_dir/known_hosts"
           python3 -c 'import json,os; print(json.dumps({"revision":os.environ["REQUESTED_REVISION"],"image":os.environ["STAGING_IMAGE"],"registry_user":os.environ["REGISTRY_USER"],"token":os.environ["GH_TOKEN"]}))' > "$temp_dir/request.json"
           ssh -T -i "$temp_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlias=staging-target -o UserKnownHostsFile="$temp_dir/known_hosts" -o ConnectTimeout=10 "stagingci@$STAGING_SSH_HOST" < "$temp_dir/request.json"
