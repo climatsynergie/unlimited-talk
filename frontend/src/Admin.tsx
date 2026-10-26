@@ -117,7 +117,7 @@ export function ShareLink({
     <Modal title={value.heading} onClose={onClose}>
       <p className="intro">
         Transmettez ce lien directement à la personne concernée, par un canal
-        privé. Aucun email n’est envoyé automatiquement.
+        privé. Aucun courriel n’est envoyé automatiquement.
       </p>
       <span className="badge badge-purple">Valable {value.duration}</span>
       <label className="share-label" htmlFor="private-link">
@@ -196,7 +196,7 @@ export function InviteForm({
           maxLength={200}
         />
         <Field
-          label="Adresse email"
+          label="Adresse courriel"
           name="email"
           type="email"
           autoComplete="email"
@@ -216,7 +216,7 @@ export function InviteForm({
         </div>
         {role === "admin" ? (
           <Notice>
-            Ce membre devra activer Authenticator avant d’accéder à
+            Ce membre devra activer la double authentification avant d’accéder à
             l’administration.
           </Notice>
         ) : null}
@@ -305,7 +305,7 @@ function ManageUser({
         ) : null}
         <p className="intro">
           {action === "reset"
-            ? "Un lien privé permettra à ce membre de choisir son nouveau mot de passe. Sa protection MFA reste nécessaire."
+            ? "Un lien privé permettra à ce membre de choisir son nouveau mot de passe. Sa double authentification reste nécessaire."
             : action === "active" && !target.is_active
               ? "Ce membre pourra à nouveau se connecter avec ses identifiants."
               : "Cette action déconnectera ce membre de tous ses appareils."}
@@ -408,7 +408,7 @@ export function Users({
               id="user-search"
               name="search"
               type="search"
-              placeholder="Nom ou adresse email"
+              placeholder="Nom ou adresse courriel"
               maxLength={100}
             />
             <button className="button secondary small" type="submit">
@@ -724,7 +724,7 @@ const ACTIONS: Record<string, string> = {
   "session.login_failed": "Connexion refusée",
   "session.logout": "Déconnexion",
   "session.all_revoked": "Tous les appareils déconnectés",
-  "session.admin_revoked": "Appareils déconnectés par un admin",
+  "session.admin_revoked": "Appareils déconnectés par un administrateur",
   "user.permissions_changed": "Accès du compte modifiés",
   "user.password_changed": "Mot de passe modifié",
   "user.password_reset_issued": "Lien de réinitialisation créé",
@@ -732,8 +732,9 @@ const ACTIONS: Record<string, string> = {
   "invitation.created": "Invitation créée",
   "invitation.accepted": "Invitation acceptée",
   "invitation.revoked": "Invitation révoquée",
-  "mfa.enrollment_started": "Configuration Authenticator commencée",
-  "mfa.enrolled": "Protection Authenticator activée",
+  "mfa.enrollment_started":
+    "Configuration de la double authentification commencée",
+  "mfa.enrolled": "Double authentification activée",
   "mfa.recovery_used": "Code de récupération utilisé",
   "user.bootstrap_admin": "Premier administrateur créé",
 };

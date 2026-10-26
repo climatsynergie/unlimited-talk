@@ -44,7 +44,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="story-footer">
           <span>Unlimited Talks</span>
-          <span>Environnement staging</span>
+          <span>Environnement de préproduction</span>
         </div>
       </aside>
       <main className="auth-main" id="main">
@@ -54,7 +54,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         <div className="auth-top">
           <span className="environment">
             <span />
-            STAGING
+            PRÉPRODUCTION
           </span>
           <span className="subtle">Accès réservé à votre équipe</span>
         </div>
@@ -163,7 +163,7 @@ export function AuthForm({
         <form method="post" onSubmit={submit}>
           {entry ? null : (
             <Field
-              label="Adresse email"
+              label="Adresse courriel"
               name="email"
               type="email"
               autoComplete="username"
@@ -197,13 +197,13 @@ export function AuthForm({
           ) : null}
           {entry?.kind === "invitation" ? null : (
             <Field
-              label="Code Authenticator ou de récupération"
+              label="Code d’authentification ou de récupération"
               name="factor"
               type="text"
               autoComplete="one-time-code"
               maxLength={64}
               spellCheck={false}
-              hint="Obligatoire pour les administrateurs ayant activé le MFA."
+              hint="Obligatoire pour les administrateurs ayant activé la double authentification."
             />
           )}
           <Submit busy={busy}>
@@ -236,8 +236,8 @@ export function AuthForm({
           {forgot ? (
             <Notice>
               Votre administrateur peut vous transmettre un lien privé de
-              réinitialisation. Votre code MFA reste nécessaire si vous l’avez
-              activé.
+              réinitialisation. Votre code d’authentification reste nécessaire
+              si vous l’avez activé.
             </Notice>
           ) : null}
           <div className="invitation-note">
@@ -317,8 +317,8 @@ export function Enrollment({
       <span className="eyebrow">PROTÉGEZ VOTRE COMPTE</span>
       <h2>Une sécurité en plus.</h2>
       <p className="intro">
-        Votre accès administrateur nécessite un code Authenticator en plus de
-        votre mot de passe.
+        Votre accès administrateur nécessite un code d’authentification en plus
+        de votre mot de passe.
       </p>
       {error ? <Notice error>{error}</Notice> : null}
       {setup ? (
@@ -329,12 +329,12 @@ export function Enrollment({
                 src={qr}
                 width="220"
                 height="220"
-                alt="QR code à scanner dans votre application Authenticator"
+                alt="Code QR à scanner dans votre application d’authentification"
               />
             ) : null}
             <p>
               Scannez le QR code, ou saisissez cette clé dans votre application
-              Authenticator :
+              d’authentification :
             </p>
             <code className="secret-key">{setup.secret}</code>
           </div>
@@ -355,7 +355,7 @@ export function Enrollment({
       ) : (
         <>
           <ol className="setup-steps">
-            <li>Ouvrez votre application Authenticator.</li>
+            <li>Ouvrez votre application d’authentification.</li>
             <li>Ajoutez votre compte Unlimited Talks.</li>
             <li>Confirmez le code affiché sur votre téléphone.</li>
           </ol>
@@ -365,7 +365,7 @@ export function Enrollment({
             disabled={busy}
             onClick={start}
           >
-            {busy ? "Préparation…" : "Configurer Authenticator"}
+            {busy ? "Préparation…" : "Configurer la double authentification"}
             <Icon name="arrow" />
           </button>
         </>

@@ -88,3 +88,9 @@ See [IDENTITY.md](IDENTITY.md) for the individual account API, admin MFA,
 invitation/session contract, operational bootstrap and activation boundaries.
 See [WEB.md](WEB.md) for the React screens, browser verification and first login.
 Automatic invitation email delivery is not implemented; admins share private links.
+
+## Contacts preparation
+
+The [contacts import contract](CONTACTS.md) records the implemented pure CSV
+validator, the required private object storage/background processing, and the
+activation boundary. No contacts/import endpoint is active yet.

@@ -13,6 +13,8 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from cryptography.fernet import Fernet
 import pyotp
 
+from app.validation import email_address
+
 PASSWORDS = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=1)
 PASSWORD_WORKERS = BoundedSemaphore(2)
 DUMMY_PASSWORD = PASSWORDS.hash(secrets.token_urlsafe(32))
@@ -40,11 +42,6 @@ def new_token():
     return secrets.token_urlsafe(32)
 
 
-def email_address(value):
-    value = value.strip().lower()
-    if len(value) > 254 or '..' in value or not re.fullmatch(r'[a-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}', value):
-        raise ValueError('Adresse email invalide')
-    return value
 
 
 def validate_password(value):

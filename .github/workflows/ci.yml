@@ -70,6 +70,8 @@ jobs:
         run: python3 tests/verify_identity.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
+      - name: Verify compatibility before the contacts migration
+        run: python3 tests/verify_contacts_compatibility.py
       - name: Verify rollback preserves the identity schema and data
         run: python3 tests/verify_identity_rollback.py
       - name: Verify database outage and recovery

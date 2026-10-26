@@ -22,7 +22,8 @@ logger = logging.getLogger('uvicorn.error')
 
 # Identity endpoints require the identity schema. The preceding compatibility
 # release accepts both revisions and is the supported rollback target.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0002_identity'})
+# The next contacts migration is additive. Keep this release as its rollback target.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0002_identity','0003_contacts'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "

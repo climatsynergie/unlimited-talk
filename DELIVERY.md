@@ -157,3 +157,12 @@ Provisioning preserves an existing encryption key and never displays it. These
 are host preparation steps; they do not migrate PostgreSQL, switch the running
 application or create a real account. Follow [IDENTITY.md](IDENTITY.md) for the
 browser API, first-admin setup, encryption-key recovery and remaining UI scope.
+
+## Contacts compatibility preparation
+
+Before applying `0003_contacts`, deploy the explicitly compatible French web
+release described in [CONTACTS.md](CONTACTS.md). This release adds no contacts
+tables or import service. Its disposable compatibility probe verifies that
+identity remains available across the planned additive revision and that unknown
+revisions fail closed. Actual contacts migration, object storage and background
+import acceptance remain separate activation checks.

@@ -82,7 +82,7 @@ def authenticate(db, request, *, enrollment=False, recent=False):
         if not csrf or len(csrf)>64 or not hmac.compare_digest(csrf,cookie) or not hmac.compare_digest(digest(csrf),row['csrf_hash']):
             raise HTTPException(403, 'Jeton CSRF invalide')
     if not enrollment and (not row['mfa_verified'] or (row['role']=='admin' and not row['mfa_secret'])):
-        raise HTTPException(403, 'Configuration MFA requise')
+        raise HTTPException(403, 'Configuration de la double authentification requise')
     if recent and row['authenticated_at'] < utcnow()-timedelta(minutes=15):
         raise HTTPException(403, 'Reconnectez-vous avant cette action sensible')
     alive = query(db, 'UPDATE staging.identity_sessions SET last_seen_at=now() WHERE token_hash=:token RETURNING token_hash', token=row['session_hash']).first()
@@ -153,23 +153,23 @@ def recovery_codes(db, user_id):
 
 def enroll_start(db, user, cipher):
     if user['role']!='admin' or user['mfa_secret']:
-        raise HTTPException(409, 'Configuration MFA indisponible')
+        raise HTTPException(409, 'Configuration de la double authentification indisponible')
     secret = pyotp.random_base32()
     query(db, '''UPDATE staging.identity_users SET mfa_pending=:secret,
         mfa_pending_until=now()+interval '10 minutes' WHERE id=:id''',
           secret=cipher.encrypt(secret.encode()).decode(), id=user['id'])
     audit(db,user['id'],'mfa.enrollment_started',user['id'])
     return {'secret': secret, 'provisioning_uri': pyotp.TOTP(secret).provisioning_uri(
-        name=user['email'],issuer_name='Unlimited Talks Staging')}
+        name=user['email'],issuer_name='Unlimited Talks Préproduction')}
 
 
 def enroll_finish(db, user, code, cipher):
     if user['mfa_secret'] or not user['mfa_pending'] or user['mfa_pending_until']<=utcnow():
-        raise HTTPException(400, 'Configuration MFA expirée ou indisponible')
+        raise HTTPException(400, 'Configuration de la double authentification expirée ou indisponible')
     secret = cipher.decrypt(user['mfa_pending'].encode()).decode()
     counter = otp_counter(secret,code,-1)
     if counter is None:
-        raise HTTPException(400, 'Code MFA invalide')
+        raise HTTPException(400, 'Code d’authentification invalide')
     query(db, '''UPDATE staging.identity_users SET mfa_secret=mfa_pending,mfa_pending=NULL,
         mfa_pending_until=NULL,mfa_last_counter=:counter WHERE id=:id''', counter=counter,id=user['id'])
     query(db, 'DELETE FROM staging.identity_sessions WHERE user_id=:id', id=user['id'])

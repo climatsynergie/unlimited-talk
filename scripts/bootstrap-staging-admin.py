@@ -10,6 +10,7 @@ import sys
 CONSOLE = '''from app.identity.bootstrap import main
 messages = {
     'Adresse email invalide',
+    'Adresse courriel invalide',
     'Le mot de passe doit contenir entre 12 et 128 caractères',
     'Le mot de passe doit contenir entre 15 et 128 caractères',
     'Choisissez un mot de passe moins prévisible',

@@ -1557,3 +1557,7 @@ th {
 .badge-purple {
   color: #62516f;
 }
+
+.auth-top {
+  flex-wrap: wrap;
+}

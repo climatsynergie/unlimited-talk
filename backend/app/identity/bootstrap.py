@@ -34,16 +34,16 @@ def main():
         with engine.connect() as db:
             if query(db,'SELECT EXISTS(SELECT 1 FROM staging.identity_users)').scalar_one():
                 raise SystemExit('Initialisation déjà effectuée. Utilisez les invitations administrateur.')
-        email = email_address(input('Email du premier administrateur : '))
+        email = email_address(input('Courriel du premier administrateur : '))
         name = input('Nom affiché : ').strip()
         if not 1<=len(name)<=200:
             raise SystemExit('Nom invalide')
         encoded = hash_password(read_password())
         secret = pyotp.random_base32()
-        print('Ajoutez ce secret dans votre application Authenticator (ne le partagez pas) :')
+        print('Ajoutez ce secret dans votre application d’authentification (ne le partagez pas) :')
         print(secret)
-        print('Compte :',email,'— émetteur : Unlimited Talks Staging')
-        counter = otp_counter(secret,getpass.getpass('Code à 6 chiffres de votre Authenticator : '),-1)
+        print('Compte :',email,'— émetteur : Unlimited Talks Préproduction')
+        counter = otp_counter(secret,getpass.getpass('Code à 6 chiffres de votre application d’authentification : '),-1)
         if counter is None:
             raise SystemExit('Code invalide. Aucun compte créé.')
         cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
@@ -57,7 +57,7 @@ def main():
                 name=name,hash=encoded,secret=cipher.encrypt(secret.encode()).decode(),counter=counter)
             codes = recovery_codes(db,identifier)
             audit(db,identifier,'user.bootstrap_admin',identifier)
-        print('Administrateur créé avec MFA. Conservez ces codes de récupération à usage unique :')
+        print('Administrateur créé avec la double authentification. Conservez ces codes de récupération à usage unique :')
         for code in codes:
             print(code)
         print('Enregistrez ces codes dans votre gestionnaire de mots de passe. Ne les collez pas dans le chat.')

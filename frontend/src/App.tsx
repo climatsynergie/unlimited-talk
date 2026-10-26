@@ -157,11 +157,11 @@ function Account({
               maxLength={128}
             />
             <Field
-              label="Code Authenticator ou de récupération"
+              label="Code d’authentification ou de récupération"
               name="factor"
               maxLength={64}
               autoComplete="one-time-code"
-              hint="Nécessaire si votre compte est protégé par MFA."
+              hint="Nécessaire si votre compte est protégé par la double authentification."
             />
             <Submit busy={busy}>Enregistrer le mot de passe</Submit>
           </form>
@@ -309,7 +309,7 @@ function Workspace({
           <div>
             <span className="environment">
               <span />
-              STAGING
+              PRÉPRODUCTION
             </span>
             <span
               className="avatar avatar-small avatar-purple"

@@ -22,10 +22,10 @@ type Seed = {
 };
 async function login(page: Page, email: string, password: string, factor = "") {
   await page.goto("/connexion");
-  await page.getByLabel("Adresse email", { exact: true }).fill(email);
+  await page.getByLabel("Adresse courriel", { exact: true }).fill(email);
   await page.getByLabel("Mot de passe", { exact: true }).fill(password);
   await page
-    .getByLabel("Code Authenticator ou de récupération", { exact: true })
+    .getByLabel("Code d’authentification ou de récupération", { exact: true })
     .fill(factor);
   await page.getByRole("button", { name: "Se connecter", exact: true }).click();
 }
@@ -54,7 +54,7 @@ async function invite(page: Page, email: string, name: string, role = "agent") {
     .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Nom complet", { exact: true }).fill(name);
-  await dialog.getByLabel("Adresse email", { exact: true }).fill(email);
+  await dialog.getByLabel("Adresse courriel", { exact: true }).fill(email);
   await dialog.getByLabel("Rôle", { exact: true }).selectOption(role);
   await dialog
     .getByRole("button", { name: "Créer l’invitation", exact: true })
@@ -96,6 +96,12 @@ test("connexion, accessibilité, sécurité des routes et écran mobile", async 
   await expect(
     page.getByRole("heading", { name: "Heureux de vous retrouver." }),
   ).toBeVisible();
+  await expect(page.getByText("PRÉPRODUCTION", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Se connecter", exact: true }).click();
+  const validation = await page
+    .getByLabel("Adresse courriel", { exact: true })
+    .evaluate((input: HTMLInputElement) => input.validationMessage);
+  expect(validation).toBe("Veuillez renseigner ce champ.");
   await accessible(page);
   await screenshot(page, "connexion-desktop.png");
   const unknown = await page.request.get("/api/not-a-real-route");
@@ -308,11 +314,14 @@ test("invitation admin, QR code MFA, codes de récupération et expiration de se
     ).toBeVisible();
     expect((await context.request.get("/api/admin/users")).status()).toBe(403);
     await newcomer
-      .getByRole("button", { name: "Configurer Authenticator", exact: true })
+      .getByRole("button", {
+        name: "Configurer la double authentification",
+        exact: true,
+      })
       .click();
     await expect(
       newcomer.getByAltText(
-        "QR code à scanner dans votre application Authenticator",
+        "Code QR à scanner dans votre application d’authentification",
       ),
     ).toBeVisible();
     const secret = (await newcomer.locator(".secret-key").textContent())!;

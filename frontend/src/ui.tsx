@@ -58,6 +58,22 @@ export function Icon({
     </svg>
   );
 }
+function localizeValidity(input: HTMLInputElement) {
+  const state = input.validity;
+  const text = state.valueMissing
+    ? "Veuillez renseigner ce champ."
+    : state.typeMismatch && input.type === "email"
+      ? "Saisissez une adresse courriel valide."
+      : state.tooShort
+        ? `Saisissez au moins ${input.minLength} caractères.`
+        : state.tooLong
+          ? `Saisissez au maximum ${input.maxLength} caractères.`
+          : state.patternMismatch
+            ? "Respectez le format indiqué pour ce champ."
+            : "Vérifiez la valeur saisie.";
+  input.setCustomValidity(text);
+}
+
 export function Field({
   label,
   hint,
@@ -70,6 +86,14 @@ export function Field({
       <input
         {...props}
         id={id}
+        onInvalid={(event) => {
+          localizeValidity(event.currentTarget);
+          props.onInvalid?.(event);
+        }}
+        onInput={(event) => {
+          event.currentTarget.setCustomValidity("");
+          props.onInput?.(event);
+        }}
         aria-describedby={hint ? `${id}-hint` : undefined}
       />
       {hint ? <small id={`${id}-hint`}>{hint}</small> : null}
@@ -86,7 +110,20 @@ export function Password({
     <div className="field">
       <label htmlFor={id}>{label}</label>
       <div className="password-wrap">
-        <input {...props} id={id} type={visible ? "text" : "password"} />
+        <input
+          {...props}
+          id={id}
+          type={visible ? "text" : "password"}
+          onInvalid={(event) => {
+            localizeValidity(event.currentTarget);
+            props.onInvalid?.(event);
+          }}
+          onInput={(event) => {
+            event.currentTarget.setCustomValidity("");
+            props.onInput?.(event);
+          }}
+        />
+
         <button
           type="button"
           className="password-toggle"
