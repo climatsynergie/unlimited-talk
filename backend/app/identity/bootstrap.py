@@ -14,7 +14,7 @@ from app.identity.service import ADMIN_LOCK, audit, query, recovery_codes
 
 def read_password():
     while True:
-        password = getpass.getpass('Mot de passe individuel (15 à 128 caractères, saisie invisible) : ')
+        password = getpass.getpass('Mot de passe individuel (12 à 128 caractères, saisie invisible) : ')
         try:
             validate_password(password)
         except ValueError as error:

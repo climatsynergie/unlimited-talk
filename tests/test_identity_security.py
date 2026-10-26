@@ -12,6 +12,21 @@ from app.identity.security import (digest, email_address, encryption_key, hash_p
 
 
 class IdentitySecurityTests(unittest.TestCase):
+    def test_twelve_character_boundary_for_all_password_entrypoints(self):
+        from pydantic import ValidationError
+        from app.identity.routes import Acceptance, PasswordChange, ResetPassword
+        valid='AbCdEf1234!?'
+        self.assertEqual(len(valid),12)
+        self.assertEqual(validate_password(valid),valid)
+        for invalid in [valid[:-1],valid+'x'*117]:
+            with self.assertRaises(ValueError): validate_password(invalid)
+        for model,extra in [(Acceptance,{'token':'x'*43}),
+                            (ResetPassword,{'token':'x'*43})]:
+            model(password=valid,**extra)
+            with self.assertRaises(ValidationError): model(password=valid[:-1],**extra)
+        PasswordChange(current_password='old',new_password=valid)
+        with self.assertRaises(ValidationError): PasswordChange(current_password='old',new_password=valid[:-1])
+
     def test_password_salts_and_wrong_password(self):
         password = 'A unique passphrase for testing 2026!'
         a,b = hash_password(password),hash_password(password)

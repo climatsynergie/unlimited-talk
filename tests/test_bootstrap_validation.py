@@ -16,7 +16,7 @@ class BootstrapValidationTests(unittest.TestCase):
         output=io.StringIO()
         with patch.object(bootstrap.getpass,'getpass',side_effect=[short,valid,wrong,valid,valid]),contextlib.redirect_stdout(output):
             self.assertEqual(bootstrap.read_password(),valid)
-        self.assertIn('15 et 128',output.getvalue())
+        self.assertIn('12 et 128',output.getvalue())
         self.assertIn('différents',output.getvalue())
         for secret in [short,valid,wrong]: self.assertNotIn(secret,output.getvalue())
 
@@ -25,7 +25,7 @@ class BootstrapValidationTests(unittest.TestCase):
         spec=importlib.util.spec_from_file_location('bootstrap_launcher',path)
         launcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(launcher)
         output=io.StringIO()
-        with patch.object(bootstrap,'main',side_effect=[ValueError('Le mot de passe doit contenir entre 15 et 128 caractères'),None]) as run,contextlib.redirect_stdout(output):
+        with patch.object(bootstrap,'main',side_effect=[ValueError('Le mot de passe doit contenir entre 12 et 128 caractères'),None]) as run,contextlib.redirect_stdout(output):
             exec(launcher.CONSOLE,{})
         self.assertEqual(run.call_count,2)
         self.assertIn('Recommencez',output.getvalue())

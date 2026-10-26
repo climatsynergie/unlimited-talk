@@ -120,7 +120,7 @@ function Account({
         <section className="panel account-form">
           <h2>Modifier mon mot de passe</h2>
           <p className="muted">
-            Choisissez une phrase d’au moins 15 caractères.
+            Choisissez une phrase d’au moins 12 caractères.
           </p>
           {error ? <Notice error>{error}</Notice> : null}
           {notice ? <Notice>{notice}</Notice> : null}
@@ -145,7 +145,7 @@ function Account({
               name="new_password"
               required
               autoComplete="new-password"
-              minLength={15}
+              minLength={12}
               maxLength={128}
             />
             <Password
@@ -153,7 +153,7 @@ function Account({
               name="confirmation"
               required
               autoComplete="new-password"
-              minLength={15}
+              minLength={12}
               maxLength={128}
             />
             <Field

@@ -42,7 +42,7 @@ operations until confirmation. Login, password changes and MFA confirmation
 rotate cookies. Logout/revocation is durable across application restarts.
 
 Passwords use Argon2id (64 MiB, three iterations, one lane), random salts and
-constant-time library verification. Passwords support 15–128 characters without
+constant-time library verification. Passwords support 12–128 characters without
 composition rules; a small local weak-password check is not a comprehensive
 breached-password corpus. Two concurrent hash workers bound memory usage.
 Database counters throttle login, enrollment, invitation acceptance, password

@@ -48,8 +48,8 @@ def email_address(value):
 
 
 def validate_password(value):
-    if not 15 <= len(value) <= 128:
-        raise ValueError('Le mot de passe doit contenir entre 15 et 128 caractères')
+    if not 12 <= len(value) <= 128:
+        raise ValueError('Le mot de passe doit contenir entre 12 et 128 caractères')
     if value.lower() in {'passwordpassword', 'password123456789', '123456789012345',
                          'qwertyuiopasdfgh', 'letmeinletmeinletmein'} or len(set(value)) < 5:
         raise ValueError('Choisissez un mot de passe moins prévisible')

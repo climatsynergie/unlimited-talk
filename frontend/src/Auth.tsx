@@ -175,7 +175,7 @@ export function AuthForm({
           <Password
             name="password"
             autoComplete={entry ? "new-password" : "current-password"}
-            minLength={entry ? 15 : 1}
+            minLength={entry ? 12 : 1}
             maxLength={128}
             required
             label={entry ? "Nouveau mot de passe" : "Mot de passe"}
@@ -183,13 +183,13 @@ export function AuthForm({
           {entry ? (
             <>
               <small className="password-hint">
-                Au moins 15 caractères. Une phrase longue convient très bien.
+                Au moins 12 caractères. Une phrase longue convient très bien.
               </small>
               <Password
                 name="confirmation"
                 label="Confirmer le mot de passe"
                 autoComplete="new-password"
-                minLength={15}
+                minLength={12}
                 maxLength={128}
                 required
               />

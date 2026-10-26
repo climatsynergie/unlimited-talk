@@ -141,7 +141,7 @@ test("admin invite un agent, réinitialise son mot de passe et révoque son acc�
     Boolean(cookie?.secure && cookie.httpOnly && cookie.sameSite === "Strict"),
   ).toBe(true);
   const email = `agent-ui-${Date.now()}@example.invalid`;
-  const password = "Une phrase agent personnelle 2026!";
+  const password = "Agent2026!ab";
   const link = await invite(page, email, "Agent navigateur");
   const context = await browser.newContext({
     baseURL: process.env.UI_TEST_URL,
@@ -186,7 +186,7 @@ test("admin invite un agent, réinitialise son mot de passe et révoque son acc�
     await agent
       .getByLabel("Mot de passe actuel", { exact: true })
       .fill("Un mot de passe incorrect");
-    const changed = "Une nouvelle phrase agent personnelle 2026!";
+    const changed = "Autre2026!ab";
     await agent
       .getByLabel("Nouveau mot de passe", { exact: true })
       .fill(changed);
@@ -236,7 +236,7 @@ test("admin invite un agent, réinitialise son mot de passe et révoque son acc�
       agent.getByRole("button", { name: "Se connecter", exact: true }),
     ).toBeVisible();
     await agent.goto(resetLink);
-    const recovered = "Ma phrase agent après récupération 2026!";
+    const recovered = "Retour26!abc";
     await agent
       .getByLabel("Nouveau mot de passe", { exact: true })
       .fill(recovered);
@@ -294,7 +294,7 @@ test("invitation admin, QR code MFA, codes de récupération et expiration de se
     page.getByRole("heading", { name: /Les bonnes personnes/ }),
   ).toBeVisible();
   const email = `admin-ui-${Date.now()}@example.invalid`;
-  const password = "Une phrase admin personnelle 2026!";
+  const password = "Admin2026!ab";
   const link = await invite(page, email, "Admin invité", "admin");
   const context = await browser.newContext({
     baseURL: process.env.UI_TEST_URL,

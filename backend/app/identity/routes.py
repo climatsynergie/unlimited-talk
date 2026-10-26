@@ -53,7 +53,7 @@ class Invitation(Body):
 
 class Acceptance(Body):
     token: SecretStr = Field(min_length=40,max_length=64)
-    password: SecretStr = Field(min_length=15,max_length=128)
+    password: SecretStr = Field(min_length=12,max_length=128)
 
 
 class Factor(Body):
@@ -67,7 +67,7 @@ class UserUpdate(Body):
 
 class PasswordChange(Body):
     current_password: SecretStr = Field(min_length=1,max_length=128)
-    new_password: SecretStr = Field(min_length=15,max_length=128)
+    new_password: SecretStr = Field(min_length=12,max_length=128)
     factor: SecretStr = Field(default=SecretStr(''),max_length=64)
 
 
