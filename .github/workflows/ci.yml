@@ -45,12 +45,19 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22.23.4'
-      - name: Install browser verification dependencies
+      - name: Install web verification dependencies
+        timeout-minutes: 3
         run: |
           npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
           npm run --prefix frontend format:check
-          cd frontend
-          npx playwright install --with-deps chromium
+      - name: Install Chromium system dependencies
+        timeout-minutes: 5
+        working-directory: frontend
+        run: npx playwright install-deps chromium
+      - name: Install the tested Chromium headless shell
+        timeout-minutes: 5
+        working-directory: frontend
+        run: npx playwright install --only-shell chromium
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
