@@ -116,7 +116,9 @@ screenshots, video and persisted auth state are disabled to avoid secret capture
 Optional local screenshots are limited to synthetic login/admin views. Synthetic
 fixture helpers explicitly refuse managed database configuration.
 
-CI runs these tests before rollback/outage checks and publishes only the tested
+CI verifies that Chromium actually starts before attempting to install missing
+system libraries, avoiding unnecessary package-manager updates on prepared
+runners. CI runs the full tests before rollback/outage checks and publishes only the tested
 image. The preceding identity backend image is used to verify rollback preserves
 accounts and migration state. A successful build is not proof of managed staging
 activation; verify the deployed revision and real HTTPS screens after dispatching

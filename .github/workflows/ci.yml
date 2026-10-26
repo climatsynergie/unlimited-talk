@@ -50,14 +50,18 @@ jobs:
         run: |
           npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
           npm run --prefix frontend format:check
-      - name: Install Chromium system dependencies
-        timeout-minutes: 5
-        working-directory: frontend
-        run: npx playwright install-deps chromium
       - name: Install the tested Chromium headless shell
         timeout-minutes: 5
         working-directory: frontend
         run: npx playwright install --only-shell chromium
+      - name: Verify Chromium runtime and install missing libraries if required
+        timeout-minutes: 6
+        working-directory: frontend
+        run: |
+          if ! node scripts/check-browser.mjs; then
+            npx playwright install-deps chromium
+            node scripts/check-browser.mjs
+          fi
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation

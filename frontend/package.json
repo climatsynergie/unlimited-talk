@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "test:browser": "playwright test",
-    "format": "prettier --write src tests *.ts *.json index.html",
-    "format:check": "prettier --check src tests *.ts *.json index.html"
+    "format": "prettier --write src tests scripts *.ts *.json index.html",
+    "format:check": "prettier --check src tests scripts *.ts *.json index.html"
   },
   "dependencies": {
     "qrcode": "1.5.4",
