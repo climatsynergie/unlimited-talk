@@ -27,7 +27,7 @@ def get(path):
         return json.load(response)
 
 
-assert get('/')['business_features'] == 'not_implemented'
+assert get('/api/system')['business_features'] == 'not_implemented'
 assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
                               'database': 'connected', 'migration': '0002_identity',

@@ -1,0 +1,181 @@
+import { useId, useRef, useState } from "react";
+import type { ReactNode, InputHTMLAttributes } from "react";
+
+export function Brand({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="brand">
+      <span className="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path
+            d="M5 5h14v10H9l-4 4V5Z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M9 9h6M9 12h4"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+      </span>
+      {compact ? null : (
+        <span>
+          Unlimited<span className="brand-light"> Talks</span>
+        </span>
+      )}
+    </div>
+  );
+}
+export function Icon({
+  name,
+}: {
+  name: "users" | "mail" | "shield" | "logout" | "arrow" | "check" | "home";
+}) {
+  const paths = {
+    users:
+      "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
+    mail: "M4 5h16v14H4zM4 6l8 7 8-7",
+    shield: "M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3zM8 12l3 3 5-6",
+    logout: "M9 21H4V3h5M14 7l5 5-5 5M8 12h11",
+    arrow: "M5 12h14M13 6l6 6-6 6",
+    check: "M5 12l4 4L19 6",
+    home: "M3 10l9-7 9 7M5 9v12h14V9M9 21v-7h6v7",
+  };
+  return (
+    <svg
+      className="icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={paths[name]} />
+    </svg>
+  );
+}
+export function Field({
+  label,
+  hint,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }) {
+  const id = useId();
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        {...props}
+        id={id}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+      />
+      {hint ? <small id={`${id}-hint`}>{hint}</small> : null}
+    </div>
+  );
+}
+export function Password({
+  label = "Mot de passe",
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label?: string }) {
+  const [visible, setVisible] = useState(false);
+  const id = useId();
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div className="password-wrap">
+        <input {...props} id={id} type={visible ? "text" : "password"} />
+        <button
+          type="button"
+          className="password-toggle"
+          onClick={() => setVisible(!visible)}
+          aria-label={
+            visible ? "Masquer le mot de passe" : "Afficher le mot de passe"
+          }
+          aria-pressed={visible}
+        >
+          {visible ? "Masquer" : "Afficher"}
+        </button>
+      </div>
+    </div>
+  );
+}
+export function Notice({
+  children,
+  error = false,
+}: {
+  children: ReactNode;
+  error?: boolean;
+}) {
+  return (
+    <div
+      className={`notice ${error ? "notice-error" : ""}`}
+      role={error ? "alert" : "status"}
+    >
+      {children}
+    </div>
+  );
+}
+export function Submit({
+  busy,
+  children,
+}: {
+  busy: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      className="button primary"
+      type="submit"
+      disabled={busy}
+      aria-busy={busy}
+    >
+      {busy ? "Veuillez patienter…" : children}
+      <Icon name="arrow" />
+    </button>
+  );
+}
+export function Modal({
+  title,
+  children,
+  onClose,
+  busy = false,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  busy?: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const id = useId();
+  return (
+    <dialog
+      ref={(node) => {
+        ref.current = node;
+        if (node && !node.open) node.showModal();
+      }}
+      aria-labelledby={id}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+      onClose={onClose}
+    >
+      <div className="modal-heading">
+        <h2 id={id}>{title}</h2>
+        <button
+          type="button"
+          className="close"
+          aria-label="Fermer la fenêtre"
+          onClick={onClose}
+          disabled={busy}
+        >
+          ×
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
+}

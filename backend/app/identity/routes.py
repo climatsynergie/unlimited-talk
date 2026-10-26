@@ -160,12 +160,15 @@ def change_password(body: PasswordChange, request: Request):
 
 
 @router.get('/admin/users')
-def users(request: Request, limit: int = Query(50,ge=1,le=100), offset: int = Query(0,ge=0)):
+def users(request: Request, limit: int = Query(50,ge=1,le=100), offset: int = Query(0,ge=0), q: str = Query('',max_length=100)):
     with request.app.state.engine.begin() as db:
         service.admin(db,request)
         rows = service.query(db,'''SELECT id,email,display_name,role,is_active FROM staging.identity_users
-            ORDER BY created_at,id LIMIT :limit OFFSET :offset''',limit=limit,offset=offset).mappings()
-        return {'users':[service.public_user(row) for row in rows]}
+            WHERE strpos(lower(display_name),lower(:q))>0 OR strpos(email,lower(:q))>0
+            ORDER BY created_at,id LIMIT :limit OFFSET :offset''',limit=limit,offset=offset,q=q.strip()).mappings().all()
+        total = service.query(db,'''SELECT count(*) FROM staging.identity_users
+            WHERE strpos(lower(display_name),lower(:q))>0 OR strpos(email,lower(:q))>0''',q=q.strip()).scalar_one()
+        return {'users':[service.public_user(row) for row in rows],'total':total}
 
 
 @router.patch('/admin/users/{identifier}')
@@ -201,7 +204,8 @@ def invitations(request: Request,limit: int = Query(50,ge=1,le=100),offset: int 
         rows = service.query(db,'''SELECT id,email,display_name,role,created_at,expires_at,used_at,revoked_at
             FROM staging.identity_invitations ORDER BY created_at DESC,id LIMIT :limit OFFSET :offset''',
             limit=limit,offset=offset).mappings()
-        return {'invitations':[{k:str(v) if v is not None else None for k,v in row.items()} for row in rows]}
+        return {'invitations':[{k:str(v) if v is not None else None for k,v in row.items()} for row in rows],
+                'total':service.query(db,'SELECT count(*) FROM staging.identity_invitations').scalar_one()}
 
 
 @router.delete('/admin/invitations/{identifier}')
@@ -220,8 +224,12 @@ def revoke_invitation(identifier: uuid.UUID, request: Request):
 def audit_events(request: Request,limit: int = Query(50,ge=1,le=100),before: int | None = Query(None,ge=1)):
     with request.app.state.engine.begin() as db:
         service.admin(db,request)
-        rows = service.query(db,'''SELECT id,actor_id,action,subject_id,created_at FROM staging.identity_audit
-            WHERE (CAST(:before AS bigint) IS NULL OR id<:before) ORDER BY id DESC LIMIT :limit''',before=before,limit=limit).mappings()
+        rows = service.query(db,'''SELECT e.id,e.actor_id,e.action,e.subject_id,e.created_at,a.email AS actor_email,
+            coalesce(u.email,i.email) AS subject_label FROM staging.identity_audit e
+            LEFT JOIN staging.identity_users a ON a.id=e.actor_id
+            LEFT JOIN staging.identity_users u ON u.id=e.subject_id
+            LEFT JOIN staging.identity_invitations i ON i.id=e.subject_id
+            WHERE (CAST(:before AS bigint) IS NULL OR e.id<:before) ORDER BY e.id DESC LIMIT :limit''',before=before,limit=limit).mappings()
         return {'events':[{k:str(v) if v is not None else None for k,v in row.items()} for row in rows]}
 
 

@@ -3,9 +3,11 @@ import logging
 import os
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from cryptography.fernet import InvalidToken
 
@@ -21,10 +23,16 @@ logger = logging.getLogger('uvicorn.error')
 # Identity endpoints require the identity schema. The preceding compatibility
 # release accepts both revisions and is the supported rollback target.
 COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0002_identity'})
+WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
+WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+           "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
+           "form-action 'self'; frame-ancestors 'none'")
 
 
 @asynccontextmanager
 async def lifespan(app):
+    if not (WEB_ROOT / 'index.html').is_file():
+        raise RuntimeError('Built frontend is missing')
     app.state.identity_origin = validate_origin(os.environ['APP_ORIGIN'],os.environ.get('DB_DEPLOYMENT','local'))
     app.state.identity_cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
     app.state.engine = make_engine()
@@ -32,8 +40,9 @@ async def lifespan(app):
     app.state.engine.dispose()
 
 
-app = FastAPI(title='Unlimited Talks — Staging', version='0.2.0', lifespan=lifespan)
+app = FastAPI(title='Unlimited Talks — Staging', version='0.3.0', lifespan=lifespan)
 app.include_router(identity_router)
+app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
 @app.exception_handler(RequestValidationError)
@@ -50,7 +59,8 @@ async def request_metadata(request: Request, call_next):
     started = time.monotonic()
     response = await call_next(request)
     response.headers['X-Request-ID'] = request_id
-    response.headers['Cache-Control'] = 'no-store'
+    response.headers['Cache-Control'] = 'public, max-age=31536000, immutable' if request.url.path.startswith('/assets/') and response.status_code == 200 else 'no-store'
+    response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     logger.info('request_id=%s method=%s path=%s status=%s duration_ms=%.1f',
                 request_id, request.method, request.url.path, response.status_code,
@@ -58,12 +68,28 @@ async def request_metadata(request: Request, call_next):
     return response
 
 
-@app.get('/')
+@app.get('/api/system')
 def root():
     return {'application': 'Unlimited Talks', 'environment': 'staging',
-            'milestone': 'identity_backend', 'communications': 'disabled',
+            'milestone': 'identity_web', 'communications': 'disabled',
             'business_features': 'not_implemented', 'readiness': '/health/ready',
             'revision': os.environ.get('APP_REVISION', 'development')}
+
+
+@app.get('/', include_in_schema=False)
+@app.get('/connexion', include_in_schema=False)
+@app.get('/invitation', include_in_schema=False)
+@app.get('/reinitialisation', include_in_schema=False)
+@app.get('/accueil', include_in_schema=False)
+@app.get('/compte', include_in_schema=False)
+@app.get('/admin/utilisateurs', include_in_schema=False)
+@app.get('/admin/invitations', include_in_schema=False)
+@app.get('/admin/journal', include_in_schema=False)
+def web_app():
+    return FileResponse(WEB_ROOT / 'index.html', headers={
+        'Content-Security-Policy': WEB_CSP, 'X-Frame-Options': 'DENY',
+        'Cross-Origin-Opener-Policy': 'same-origin',
+    })
 
 
 @app.get('/health/live')

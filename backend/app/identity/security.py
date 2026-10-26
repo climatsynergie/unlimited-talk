@@ -75,7 +75,7 @@ def validate_origin(origin, deployment):
     if deployment == 'managed':
         if parsed.scheme != 'https' or not parsed.hostname:
             raise ValueError('Managed identity requires an HTTPS origin')
-    elif origin != 'http://127.0.0.1:8110':
+    elif origin not in {'http://127.0.0.1:8110', 'https://localhost:18443'}:
         raise ValueError('Unexpected local identity origin')
     return origin
 

@@ -1,7 +1,7 @@
 # Identity backend
 
-This milestone implements the server API, not the React login/admin screens or
-email delivery. Public access still passes through the independent staging
+The server API is used by the React login/admin screens described in WEB.md.
+Automatic email delivery is not implemented. Public access still passes through the independent staging
 HTTPS password perimeter. Business endpoints must use the shared `authenticate`
 or `admin` guard and enforce their own campaign/contact/appointment permissions.
 Having an agent role alone does not grant access to future business records.
@@ -66,8 +66,8 @@ Admins can issue a 30-minute, one-use password-reset token for an active user.
 Issuance and completion revoke that user's sessions. The user chooses the new
 password; admins never set or retrieve it. A replacement token revokes previous
 ones. Send the token privately; do not embed secrets in URL paths/query strings
-or paste them into chat/logs. A future invitation/reset screen must use a fragment
-or another mechanism that prevents server/referrer logging. No automated email
+or paste them into chat/logs. The invitation/reset screens use a URL fragment removed immediately on load
+and keep the token only in transient page memory. No automated email
 or self-service email recovery is implemented.
 
 If both the authenticator and all recovery codes are lost, controlled operator

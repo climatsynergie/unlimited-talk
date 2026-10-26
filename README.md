@@ -12,8 +12,8 @@ separate PostgreSQL database. The business application is under development.
 - Non-root API, bounded connection pools and read-only container filesystems.
 - Communications disabled. No provider credentials or customer data included.
 
-Authentication, the business frontend, contacts, campaigns, the calendar and
-telephony integrations are not implemented yet.
+Individual authentication and the React account/admin interface are implemented.
+Contacts, campaigns, the calendar and telephony integrations are not implemented yet.
 
 ## Local development
 
@@ -58,7 +58,7 @@ business invariants, and [DELIVERY.md](DELIVERY.md) for deployment and recovery.
 `compose.managed.yaml` is an independent deployment file. Do not combine it with
 `compose.yaml`, which starts a local database.
 
-Set `STAGING_IMAGE`, `STAGING_DB_HOST` and `STAGING_DB_CIDR` in the deployment environment, using
+Set `STAGING_IMAGE`, `STAGING_DB_HOST`, `STAGING_DB_CIDR` and `STAGING_APP_ORIGIN` in the deployment environment, using
 `.env.example` as a format reference. Replace example values with the private
 database endpoint and network. Managed connections require TLS `verify-full`
 and the provider's CA certificate. No environment-specific endpoints are stored
@@ -86,4 +86,5 @@ reports and legacy application data are not part of this repository.
 
 See [IDENTITY.md](IDENTITY.md) for the individual account API, admin MFA,
 invitation/session contract, operational bootstrap and activation boundaries.
-The React login screens and automatic invitation email delivery are not built yet.
+See [WEB.md](WEB.md) for the React screens, browser verification and first login.
+Automatic invitation email delivery is not implemented; admins share private links.

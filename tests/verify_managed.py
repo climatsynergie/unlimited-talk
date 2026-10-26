@@ -16,7 +16,7 @@ def run(*args, data=None):
     return result.stdout
 
 
-for path in ('/', '/health/live', '/health/ready', '/openapi.json'):
+for path in ('/api/system', '/health/live', '/health/ready', '/openapi.json'):
     with urllib.request.urlopen('http://127.0.0.1:8110' + path, timeout=10) as response:
         assert response.status == 200
         assert response.headers['X-Request-ID']

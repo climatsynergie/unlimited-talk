@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -41,12 +41,24 @@ jobs:
           -v "$PWD/scripts:/scripts:ro"
           unlimited-talk-staging-api:foundation
           python -m unittest discover -s /tests -p 'test_*.py' -v
+      - name: Set up the browser verification runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.23.4'
+      - name: Install browser verification dependencies
+        run: |
+          npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
+          npm run --prefix frontend format:check
+          cd frontend
+          npx playwright install --with-deps chromium
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
         run: python3 tests/verify_foundation.py
       - name: Verify identities, permissions and session revocation
         run: python3 tests/verify_identity.py
+      - name: Verify browser flows through local HTTPS
+        run: python3 tests/verify_browser.py
       - name: Verify rollback preserves the identity schema and data
         run: python3 tests/verify_identity_rollback.py
       - name: Verify database outage and recovery
