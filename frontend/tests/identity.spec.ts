@@ -106,6 +106,7 @@ test("connexion, accessibilité, sécurité des routes et écran mobile", async 
   await screenshot(page, "connexion-desktop.png");
   const unknown = await page.request.get("/api/not-a-real-route");
   expect(unknown.status()).toBe(404);
+  expect((await unknown.json()).detail).toBe("Ressource introuvable.");
   expect(unknown.headers()["content-type"]).toContain("application/json");
   const asset = await page.locator("script[src]").getAttribute("src");
   expect(asset?.startsWith("/assets/")).toBe(true);

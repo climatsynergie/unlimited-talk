@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from cryptography.fernet import InvalidToken
 
 from app.identity.routes import router as identity_router
@@ -44,6 +45,16 @@ async def lifespan(app):
 app = FastAPI(title='Unlimited Talks — Staging', version='0.3.0', lifespan=lifespan)
 app.include_router(identity_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request, error):
+    translations = {'Not Found': 'Ressource introuvable.',
+                    'Method Not Allowed': 'Méthode non autorisée.',
+                    'Unauthorized': 'Connexion requise',
+                    'Forbidden': 'Accès refusé.'}
+    detail = translations.get(error.detail, error.detail) if isinstance(error.detail, str) else error.detail
+    return JSONResponse(status_code=error.status_code, content={'detail': detail}, headers=error.headers)
 
 
 @app.exception_handler(RequestValidationError)
