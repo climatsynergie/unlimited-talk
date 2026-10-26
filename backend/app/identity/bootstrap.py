@@ -11,6 +11,21 @@ from app.identity.security import email_address, encryption_key, hash_password, 
 from app.identity.service import ADMIN_LOCK, audit, query, recovery_codes
 
 
+
+def read_password():
+    while True:
+        password = getpass.getpass('Mot de passe individuel (15 à 128 caractères, saisie invisible) : ')
+        try:
+            validate_password(password)
+        except ValueError as error:
+            print(str(error) + '. Réessayez, aucun compte créé.')
+            continue
+        if password != getpass.getpass('Confirmez le mot de passe : '):
+            print('Les mots de passe sont différents. Réessayez, aucun compte créé.')
+            continue
+        return password
+
+
 def main():
     if not sys.stdin.isatty():
         raise SystemExit('Utilisez une console interactive; ne transmettez pas les secrets en arguments.')
@@ -23,10 +38,7 @@ def main():
         name = input('Nom affiché : ').strip()
         if not 1<=len(name)<=200:
             raise SystemExit('Nom invalide')
-        password = getpass.getpass('Mot de passe individuel (15 caractères minimum) : ')
-        if password != getpass.getpass('Confirmez le mot de passe : '):
-            raise SystemExit('Les mots de passe sont différents. Aucun compte créé.')
-        encoded = hash_password(validate_password(password))
+        encoded = hash_password(read_password())
         secret = pyotp.random_base32()
         print('Ajoutez ce secret dans votre application Authenticator (ne le partagez pas) :')
         print(secret)
@@ -54,4 +66,9 @@ def main():
 
 
 if __name__=='__main__':
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        raise SystemExit('Saisie annulée. Aucun compte créé.') from None
+    except ValueError:
+        raise SystemExit('Saisie invalide. Aucun compte créé. Relancez la commande.') from None
