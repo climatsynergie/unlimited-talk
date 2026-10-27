@@ -250,33 +250,12 @@ strong {
 .auth-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 20px;
   font-size: 11px;
 }
 .subtle {
   color: #74687f;
-}
-.environment {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid #e5e1f7;
-  background: #f6f4fe;
-  color: #6d62b5;
-  font-size: 9px;
-  letter-spacing: 1.4px;
-  font-weight: 750;
-  line-height: 1;
-  padding: 8px 10px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-.environment > span {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #8b7fde;
 }
 .auth-card {
   width: 100%;
@@ -766,10 +745,6 @@ form > .primary,
   display: flex;
   gap: 20px;
   align-items: center;
-}
-.topbar .environment {
-  font-size: 8px;
-  padding: 7px 10px;
 }
 .workspace-main {
   padding: 24px 40px 45px;

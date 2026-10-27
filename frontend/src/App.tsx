@@ -322,10 +322,6 @@ function Workspace({
                 : "Mon espace"}
           </span>
           <div>
-            <span className="environment">
-              <span />
-              PRÉPRODUCTION
-            </span>
             <span
               className="avatar avatar-small avatar-purple"
               aria-hidden="true"

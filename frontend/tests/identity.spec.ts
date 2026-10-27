@@ -96,7 +96,6 @@ test("connexion, accessibilité, sécurité des routes et écran mobile", async 
   await expect(
     page.getByRole("heading", { name: "Heureux de vous retrouver." }),
   ).toBeVisible();
-  await expect(page.getByText("PRÉPRODUCTION", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Se connecter", exact: true }).click();
   const validation = await page
     .getByLabel("Adresse courriel", { exact: true })

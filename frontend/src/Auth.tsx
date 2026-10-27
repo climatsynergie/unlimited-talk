@@ -44,7 +44,6 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="story-footer">
           <span>Unlimited Talks</span>
-          <span>Environnement de préproduction</span>
         </div>
       </aside>
       <main className="auth-main" id="main">
@@ -52,10 +51,6 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <Brand />
         </div>
         <div className="auth-top">
-          <span className="environment">
-            <span />
-            PRÉPRODUCTION
-          </span>
           <span className="subtle">Accès réservé à votre équipe</span>
         </div>
         <div className="auth-card">{children}</div>
