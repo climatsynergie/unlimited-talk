@@ -1,24 +1,12 @@
 import { useId, useRef, useState } from "react";
+import brandLogo from "./assets/unlimited-talks.svg";
 import type { ReactNode, InputHTMLAttributes } from "react";
 
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className="brand">
       <span className="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path
-            d="M5 5h14v10H9l-4 4V5Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M9 9h6M9 12h4"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
+        <img src={brandLogo} alt="" width="80" height="80" />
       </span>
       {compact ? null : (
         <span>
