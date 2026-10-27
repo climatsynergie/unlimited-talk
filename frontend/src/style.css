@@ -1632,3 +1632,212 @@ th {
     padding: 16px;
   }
 }
+
+.campaign-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 18px;
+  margin-block: 20px;
+}
+.campaign-tile {
+  padding: 22px;
+  text-align: left;
+  display: grid;
+  gap: 12px;
+  cursor: pointer;
+  color: #30263e;
+}
+.campaign-tile strong {
+  font-size: 17px;
+}
+.campaign-tile span {
+  font-size: 12px;
+  color: #665b75;
+  overflow-wrap: anywhere;
+}
+.pipeline-board {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 8px 2px 24px;
+  max-width: 100%;
+  align-items: flex-start;
+}
+.pipeline-column {
+  flex: 0 0 270px;
+  background: #efedf4;
+  border-radius: 12px;
+  padding: 14px;
+  border-top: 4px solid var(--stage-color);
+}
+.stage-violet {
+  --stage-color: #6955c8;
+}
+.stage-blue {
+  --stage-color: #3865b3;
+}
+.stage-amber {
+  --stage-color: #a57018;
+}
+.stage-green {
+  --stage-color: #35835d;
+}
+.stage-rose {
+  --stage-color: #b34b6f;
+}
+.stage-slate {
+  --stage-color: #697183;
+}
+.pipeline-column > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.pipeline-column h2 {
+  margin: 0;
+  font-size: 13px;
+  color: #30263e;
+}
+.pipeline-column > header > span {
+  color: #64576e;
+  font-size: 12px;
+}
+.pipeline-cards {
+  display: grid;
+  gap: 12px;
+}
+.pipeline-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #ddd7e7;
+  border-radius: 9px;
+  color: #30263e;
+  cursor: pointer;
+}
+.pipeline-card[draggable="true"] {
+  cursor: grab;
+}
+.pipeline-card strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.pipeline-card span {
+  font-size: 12px;
+  color: #655974;
+}
+.pipeline-card .restriction-label {
+  color: #9c3152;
+  font-weight: 650;
+}
+.campaign-form {
+  display: grid;
+  gap: 18px;
+  margin-block: 20px;
+}
+.campaign-form label,
+.campaign-stage-picker {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #51465f;
+}
+.campaign-form label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+}
+.campaign-form textarea,
+.campaign-form select,
+.campaign-stage-picker select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d9d2e3;
+  border-radius: 8px;
+  background: #fff;
+  color: #30263e;
+  font: inherit;
+}
+.campaign-form textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.campaign-stage-picker {
+  margin-block: 18px;
+}
+.campaign-agent-list {
+  display: grid;
+  gap: 12px;
+}
+.campaign-agent-list label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.campaign-agent-list small {
+  display: block;
+  margin-top: 4px;
+  color: #6b6079;
+  overflow-wrap: anywhere;
+}
+.stage-settings {
+  list-style: none;
+  padding: 0;
+}
+.stage-settings li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #ebe6f0;
+  font-size: 13px;
+}
+.stage-settings li > div {
+  display: flex;
+  gap: 12px;
+}
+.contact-notes {
+  list-style: none;
+  padding: 0;
+}
+.contact-notes li {
+  padding: 14px 0;
+  border-bottom: 1px solid #ebe6f0;
+  font-size: 13px;
+}
+.contact-notes p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.contact-notes small {
+  color: #6b6079;
+}
+.contact-profile {
+  font-size: 13px;
+}
+.contact-profile dt {
+  color: #6b6079;
+  margin-top: 12px;
+}
+.contact-profile dd {
+  margin: 4px 0 12px;
+  overflow-wrap: anywhere;
+}
+.confirmation-panel {
+  padding: 16px;
+  background: #fff4f6;
+  border: 1px solid #edcdd6;
+  border-radius: 8px;
+}
+.pipeline-cards > .subtle {
+  color: #665b75;
+}

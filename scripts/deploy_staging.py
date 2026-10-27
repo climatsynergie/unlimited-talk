@@ -86,6 +86,13 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0004_campaigns':
+        running=check_health()
+        if running.get('migration') == '0004_campaigns':
+            return
+        if running.get('migration') == '0003_contacts' and running.get('revision') == '911177b3181d849115fa5cedd00dd4a21cfcda60':
+            return
+        raise ValueError('Deploy the campaign compatibility release first')
     if labels.get('io.unlimitedtalk.schema') == '0003_contacts':
         running=check_health()
         if running.get('migration') == '0003_contacts':
@@ -130,8 +137,8 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') != '0003_contacts':
-            raise ValueError('This deployment template requires the contacts worker image')
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns'}:
+            raise ValueError('This deployment template requires a compatible worker image')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}

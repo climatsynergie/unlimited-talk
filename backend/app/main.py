@@ -14,6 +14,7 @@ from cryptography.fernet import InvalidToken
 
 from app.identity.routes import router as identity_router
 from app.contacts.routes import router as contacts_router
+from app.campaigns.routes import router as campaigns_router
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,9 +23,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# This contacts release also accepts the planned additive campaign schema.
-# Deploy it before campaigns so application rollback preserves existing contacts.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0003_contacts','0004_campaigns'})
+# Campaigns require the additive schema 4. The preceding contacts compatibility
+# release accepts schemas 3 and 4 and remains the safe application rollback target.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0004_campaigns'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
@@ -42,9 +43,10 @@ async def lifespan(app):
     app.state.engine.dispose()
 
 
-app = FastAPI(title='Unlimited Talks — Staging', version='0.4.0', lifespan=lifespan)
+app = FastAPI(title='Unlimited Talks — Staging', version='0.5.0', lifespan=lifespan)
 app.include_router(identity_router)
 app.include_router(contacts_router)
+app.include_router(campaigns_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -84,8 +86,8 @@ async def request_metadata(request: Request, call_next):
 @app.get('/api/system')
 def root():
     return {'application': 'Unlimited Talks', 'environment': 'staging',
-            'milestone': 'contacts_imports', 'communications': 'disabled',
-            'business_features': 'contacts_imports', 'readiness': '/health/ready',
+            'milestone': 'campaigns', 'communications': 'disabled',
+            'business_features': 'campaigns', 'readiness': '/health/ready',
             'revision': os.environ.get('APP_REVISION', 'development')}
 
 
@@ -98,6 +100,7 @@ def root():
 @app.get('/admin/utilisateurs', include_in_schema=False)
 @app.get('/admin/invitations', include_in_schema=False)
 @app.get('/admin/journal', include_in_schema=False)
+@app.get('/campagnes', include_in_schema=False)
 @app.get('/admin/contacts', include_in_schema=False)
 @app.get('/admin/imports', include_in_schema=False)
 def web_app():
@@ -119,7 +122,8 @@ def ready(request: Request):
             version = connection.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one()
             for table in ('identity_users','identity_sessions','identity_invitations',
                           'identity_password_resets','identity_recovery_codes','identity_audit','identity_rate_limits',
-                          'contacts','contact_imports','contact_import_rows','contact_history'):
+                          'contacts','contact_imports','contact_import_rows','contact_history',
+                          'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:

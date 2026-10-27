@@ -33,23 +33,23 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0003_contacts')
+ready(200,'0004_campaigns')
 try:
     sql("CREATE TABLE staging.contacts_compatibility_probe(id integer PRIMARY KEY); "
         "INSERT INTO staging.contacts_compatibility_probe VALUES (1); "
-        "UPDATE staging.alembic_version SET version_num='0003_contacts'")
-    ready(200,'0003_contacts')
+        "UPDATE staging.alembic_version SET version_num='0004_campaigns'")
+    ready(200,'0004_campaigns')
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
     ready(200,'0004_campaigns')
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
-    sql("UPDATE staging.alembic_version SET version_num='0003_contacts'")
-    ready(200,'0003_contacts')
+    sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
+    ready(200,'0004_campaigns')
     count=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d',
         'unlimited_talk_staging','-tAc','SELECT count(*) FROM staging.contacts_compatibility_probe'],text=True)
     assert count.strip()=='1'
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0003_contacts'; "
+    sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'; "
         "DROP TABLE IF EXISTS staging.contacts_compatibility_probe")
-ready(200,'0003_contacts')
+ready(200,'0004_campaigns')
 print('Contacts compatibility prerequisite: additive revision accepted, unknown rejected, data preserved: PASS')

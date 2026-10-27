@@ -19,3 +19,10 @@ class ContactsDeploymentTests(unittest.TestCase):
             with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):
                 module.require_identity_rollback_target(labels)
 
+
+    def test_campaign_schema_requires_the_compatible_predecessor(self):
+        labels={'io.unlimitedtalk.schema':'0004_campaigns'}
+        for running in [dict(migration='0004_campaigns',revision='a'*40),dict(migration='0003_contacts',revision='911177b3181d849115fa5cedd00dd4a21cfcda60')]:
+            with patch.object(module,'check_health',return_value=running):module.require_identity_rollback_target(labels)
+        for running in [{},dict(migration='0003_contacts',revision='d548e6e048f0265fdb327e906bf80f0b4745af93')]:
+            with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):module.require_identity_rollback_target(labels)

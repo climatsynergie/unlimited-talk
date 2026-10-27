@@ -2,7 +2,7 @@ name: Foundation CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**"]
   pull_request:
   workflow_dispatch:
 
@@ -64,6 +64,8 @@ jobs:
           fi
       - name: Verify additive migration preserves populated identity data
         run: python3 tests/verify_contacts_upgrade.py
+      - name: Verify campaign migration preserves existing contacts
+        run: python3 tests/verify_campaign_upgrade.py
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
@@ -72,6 +74,8 @@ jobs:
         run: python3 tests/verify_identity.py
       - name: Verify imports, transactional recovery and broker execution
         run: python3 tests/verify_imports.py
+      - name: Verify campaigns, permissions and concurrent pipeline moves
+        run: python3 tests/verify_campaigns.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
       - name: Verify compatibility before the contacts migration

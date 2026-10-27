@@ -179,3 +179,14 @@ The existing compatible staging revision must be healthy before migration.
 User-managed deployment remains through Deploy staging with successful Foundation
 CI and the complete current main SHA. Do not deploy an untested local image or
 run migrations manually to bypass that pipeline.
+
+## Campaign activation (schema 4)
+
+Deploy compatibility commit `911177b3181d849115fa5cedd00dd4a21cfcda60` first while
+main still points to that commit. The campaign feature can be reviewed/tested on
+its feature branch in parallel. Only after the compatibility predecessor is
+actually healthy on managed staging should the feature be promoted to main.
+Install the reviewed root deployer with the schema-4 compatibility gate; the
+six-service Compose template, credentials and egress rules stay the same.
+Publish the exact tested image with provenance, then use Deploy staging with its
+complete current-main SHA. An application rollback keeps schema 4 and all data.

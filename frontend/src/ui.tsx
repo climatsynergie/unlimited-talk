@@ -19,9 +19,18 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 export function Icon({
   name,
 }: {
-  name: "users" | "mail" | "shield" | "logout" | "arrow" | "check" | "home";
+  name:
+    | "users"
+    | "mail"
+    | "shield"
+    | "logout"
+    | "arrow"
+    | "check"
+    | "home"
+    | "campaign";
 }) {
   const paths = {
+    campaign: "M3 4h18v16H3zM9 4v16M15 4v16M5 8h2M11 8h2M17 8h2M5 12h2M11 12h2",
     users:
       "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
     mail: "M4 5h16v14H4zM4 6l8 7 8-7",
@@ -145,16 +154,18 @@ export function Notice({
 }
 export function Submit({
   busy,
+  disabled = false,
   children,
 }: {
   busy: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       className="button primary"
       type="submit"
-      disabled={busy}
+      disabled={busy || disabled}
       aria-busy={busy}
     >
       {busy ? "Veuillez patienter…" : children}

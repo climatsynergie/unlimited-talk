@@ -21,7 +21,7 @@ assert sql('SELECT version_num FROM staging.alembic_version')=='0002_identity'
 sql("INSERT INTO staging.identity_users(id,email,display_name,role,password_hash,is_active) VALUES ('00000000-0000-0000-0000-000000000003','migration-sentinel@example.invalid','Migration sentinel','agent','inactive-sentinel',false)")
 statement="SELECT md5(string_agg(row_to_json(u)::text,'' ORDER BY id)) FROM staging.identity_users u"
 before=sql(statement)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0003_contacts'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0003_contacts'
 assert sql(statement)==before
 print('Populated identity schema upgraded additively; existing identities preserved: PASS')

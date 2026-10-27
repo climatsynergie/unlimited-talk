@@ -102,11 +102,11 @@ Public access additionally requires HTTPS and access control. Valuable data
 requires backup restoration testing. Telephony requires real controlled audio
 and provider tests; a mocked test cannot establish voice quality or capacity.
 
-Currently delivered: staging foundation, private managed PostgreSQL, migrations,
-isolated CI, attested image publication and verified restricted GitHub delivery.
-Staging HTTPS uses a host Caddy service with a separate perimeter password.
-The individual identity backend is implemented and tested as described in
-IDENTITY.md and is verified on managed staging. The React identity/admin
-interface is implemented with browser verification as described in WEB.md;
-its activation remains a separate deployment check. Business modules are not
-implemented yet.
+Currently verified on managed staging: isolated infrastructure, private managed
+PostgreSQL, HTTPS perimeter, individual accounts/MFA, French React interface,
+private CSV imports, canonical contacts and append-only import history.
+See IDENTITY.md, WEB.md and CONTACTS.md for their contracts.
+Campaigns/pipelines and shared contact notes are implemented in the next module
+as described in CAMPAIGNS.md; activation requires its compatibility predecessor,
+successful verification and the separate managed staging deployment check.
+Calls/SMS/recordings, callbacks and calendar bookings are not implemented yet.

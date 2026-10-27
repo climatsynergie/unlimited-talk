@@ -28,6 +28,10 @@ with engine.begin() as db:
         query(db,"INSERT INTO staging.identity_users(id,email,display_name,role,password_hash,mfa_secret) VALUES (:id,:email,'Admin navigateur','admin',:hash,:secret)",id=identifier,email=email,hash=hash_password(password),secret=cipher.encrypt(secret.encode()).decode())
         codes=recovery_codes(db,identifier);audit(db,identifier,'test.browser_fixture',identifier)
         result={'email':email,'password':password,'factor':pyotp.TOTP(secret).now(),'codes':codes,'id':str(identifier)}
+    elif payload['op']=='agent':
+        identifier=uuid.uuid4();password=new_token();email='pipeline-agent-'+uuid.uuid4().hex+'@example.invalid'
+        query(db,"INSERT INTO staging.identity_users(id,email,display_name,role,password_hash) VALUES (:id,:email,'Agent pipeline','agent',:hash)",id=identifier,email=email,hash=hash_password(password))
+        result={'email':email,'password':password,'id':str(identifier)}
     elif payload['op']=='otp':
         result={'code':pyotp.TOTP(payload['secret']).now()}
     elif payload['op']=='expire':

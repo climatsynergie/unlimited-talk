@@ -7,6 +7,7 @@ from pathlib import Path
 import shlex
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -39,6 +40,8 @@ class Proxy(BaseHTTPRequestHandler):
                 if key.lower() not in {'connection','transfer-encoding','content-length','server','date'}: self.send_header(key,value)
             self.send_header('Content-Length',str(len(data)));self.end_headers()
             if self.command!='HEAD': self.wfile.write(data)
+        except (BrokenPipeError,ConnectionResetError,ssl.SSLEOFError):
+            pass  # Browser navigation may cancel an in-flight response.
         finally: client.close()
     do_GET=forward
     do_POST=forward
@@ -73,7 +76,7 @@ with tempfile.TemporaryDirectory(prefix='ut-browser-https-') as tmp:
         server.socket=context.wrap_socket(server.socket,server_side=True)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         env={**os.environ,'UI_TEST_URL':'https://localhost:18443'}
-        subprocess.run(['npm','run','test:browser'],cwd=root/'frontend',env=env,check=True)
+        subprocess.run(['npm','run','test:browser',*(['--',*sys.argv[1:]] if len(sys.argv)>1 else [])],cwd=root/'frontend',env=env,check=True)
     finally:
         if server: server.shutdown();server.server_close()
         subprocess.run([*compose,'up','-d','--no-deps','--no-build','--wait','--wait-timeout','120','api'],check=True)

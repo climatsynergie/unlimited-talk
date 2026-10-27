@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
+import { EnrollContacts } from "./Campaigns";
 import { Notice, Submit, Field, Modal } from "./ui";
 
 type Contact = {
@@ -56,6 +57,8 @@ const statuses: Record<string, string> = {
 
 export function Contacts() {
   const [items, setItems] = useState<Contact[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [enroll, setEnroll] = useState(false);
   const [historyContact, setHistoryContact] = useState<Contact | null>(null);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -109,6 +112,45 @@ export function Contacts() {
         </label>
         <button className="button primary">Rechercher</button>
       </form>
+      <div className="actions">
+        <button
+          className="button secondary"
+          disabled={!items.length || loading}
+          onClick={() => {
+            const ids = [
+              ...new Set([...selectedIds, ...items.map((c) => c.id)]),
+            ];
+            if (ids.length > 500) {
+              setError("Sélectionnez au maximum 500 contacts par action.");
+              return;
+            }
+            setSelectedIds(ids);
+          }}
+        >
+          Sélectionner cette page
+        </button>
+        <button
+          className="button primary"
+          disabled={!selectedIds.length}
+          onClick={() => setEnroll(true)}
+        >
+          Ajouter à une campagne ({selectedIds.length})
+        </button>
+        <button
+          className="text-button"
+          disabled={!selectedIds.length}
+          onClick={() => setSelectedIds([])}
+        >
+          Vider la sélection
+        </button>
+      </div>
+      {enroll ? (
+        <EnrollContacts
+          contactIds={selectedIds}
+          onClose={() => setEnroll(false)}
+          onSaved={() => setSelectedIds([])}
+        />
+      ) : null}
       {error ? <Notice error>{error}</Notice> : null}
       {loading ? (
         <p role="status">Chargement des contacts…</p>
@@ -117,6 +159,7 @@ export function Contacts() {
           <table>
             <thead>
               <tr>
+                <th>Sélection</th>
                 <th>Nom</th>
                 <th>Téléphone</th>
                 <th>Courriel</th>
@@ -127,6 +170,23 @@ export function Contacts() {
             <tbody>
               {items.map((c) => (
                 <tr key={c.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Sélectionner ${c.phone}`}
+                      checked={selectedIds.includes(c.id)}
+                      disabled={
+                        !selectedIds.includes(c.id) && selectedIds.length >= 500
+                      }
+                      onChange={(e) =>
+                        setSelectedIds((ids) =>
+                          e.target.checked
+                            ? [...ids, c.id]
+                            : ids.filter((id) => id !== c.id),
+                        )
+                      }
+                    />
+                  </td>
                   <td>
                     {c.profile.display_name ||
                       [c.profile.first_name, c.profile.last_name]
@@ -187,6 +247,7 @@ export function Contacts() {
 }
 
 export function Imports() {
+  const [attach, setAttach] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -204,6 +265,7 @@ export function Imports() {
   useEffect(() => {
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let polling = Boolean(selected);
     async function refresh() {
       try {
         const [list, current] = await Promise.all([
@@ -219,12 +281,16 @@ export function Imports() {
         setMore(list.has_more);
         setJob(current);
         setError("");
-        if (current && ["queued", "running"].includes(current.status))
-          timer = setTimeout(refresh, 3000);
+        polling = Boolean(
+          current && ["queued", "running"].includes(current.status),
+        );
       } catch (e) {
         if (!abort.signal.aborted) setError(message(e));
       } finally {
-        if (!abort.signal.aborted) setLoading(false);
+        if (!abort.signal.aborted) {
+          setLoading(false);
+          if (polling) timer = setTimeout(refresh, 3000);
+        }
       }
     }
     setLoading(true);
@@ -321,6 +387,9 @@ export function Imports() {
   }
   return (
     <>
+      {attach && job ? (
+        <EnrollContacts importId={job.id} onClose={() => setAttach(false)} />
+      ) : null}
       <div className="page-heading">
         <div>
           <h1>Imports CSV</h1>
@@ -419,6 +488,11 @@ export function Imports() {
         <section className="panel import-panel">
           <h2>{job.filename}</h2>
           <p role="status">{statuses[job.status]}</p>
+          {job.status === "completed" ? (
+            <button className="button primary" onClick={() => setAttach(true)}>
+              Ajouter ces contacts à une campagne
+            </button>
+          ) : null}
           {job.status === "upload" ? (
             <p>
               Le dépôt n’a pas abouti. Ajoutez à nouveau le fichier depuis le

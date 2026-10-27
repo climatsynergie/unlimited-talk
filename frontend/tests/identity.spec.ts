@@ -422,6 +422,24 @@ test("import CSV privé, aperçu, confirmation et contacts en français", async 
   );
   expect((await before.json()).items).toHaveLength(0);
   await accessible(page);
+  let interruptedPoll = false;
+  await page.route("**/api/imports/*", (route) => {
+    if (
+      !interruptedPoll &&
+      route.request().method() === "GET" &&
+      /\/api\/imports\/[a-f0-9-]{36}$/.test(
+        new URL(route.request().url()).pathname,
+      )
+    ) {
+      interruptedPoll = true;
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Interruption réseau temporaire." }),
+      });
+    }
+    return route.continue();
+  });
   await page
     .getByRole("button", {
       name: "Confirmer l’import de ces lignes",
@@ -430,7 +448,7 @@ test("import CSV privé, aperçu, confirmation et contacts en français", async 
     .click();
   await expect(
     page.getByText("3 / 3 lignes traitées", { exact: true }),
-  ).toBeVisible({ timeout: 45000 });
+  ).toBeVisible({ timeout: 90000 });
   await expect(
     page.getByText(
       "1 contacts créés · 0 enrichis · 1 inchangés · 1 lignes invalides",
@@ -451,6 +469,7 @@ test("import CSV privé, aperçu, confirmation et contacts en français", async 
     .getByLabel("Rechercher un contact", { exact: true })
     .fill(`+1${localPhone}`);
   await page.getByRole("button", { name: "Rechercher", exact: true }).click();
+  expect(interruptedPoll).toBe(true);
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await expect(page.getByRole("cell", { name: /^Émilie/ })).toBeVisible();
   await expect(
@@ -473,4 +492,161 @@ test("import CSV privé, aperçu, confirmation et contacts en français", async 
     ),
   ).toBe(true);
   await screenshot(page, "contacts-mobile.png");
+});
+
+test("campagne, pipeline, agent attribué et notes partagées", async ({
+  page,
+  browser,
+}) => {
+  const seed = fixture<Seed>({ op: "seed" });
+  const assigned = fixture<{ email: string; password: string; id: string }>({
+    op: "agent",
+  });
+  await login(page, seed.email, seed.password, seed.factor);
+  await page.getByRole("link", { name: "Campagnes", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Créer une campagne", exact: true })
+    .click();
+  const campaignName = `Campagne navigateur ${Date.now()}`;
+  await page
+    .getByLabel("Nom de la campagne", { exact: true })
+    .fill(campaignName);
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Créer la campagne", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: campaignName, exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Ajouter des contacts", exact: true })
+    .click();
+  const source = page.getByRole("combobox", {
+    name: "Import terminé",
+    exact: true,
+  });
+  await expect(
+    source
+      .locator("option")
+      .filter({ hasText: "contacts-navigateur.csv" })
+      .first(),
+  ).toBeAttached();
+  const importId = await source
+    .locator("option")
+    .filter({ hasText: "contacts-navigateur.csv" })
+    .first()
+    .getAttribute("value");
+  await source.selectOption(importId!);
+  await page
+    .getByRole("button", { name: "Ajouter à la campagne", exact: true })
+    .click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "1 contacts ajoutés" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Terminer", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Réglages de la campagne", exact: true })
+    .click();
+  // The label contains the unique synthetic email, independent of other agents.
+  await page
+    .getByRole("dialog")
+    .locator("label")
+    .filter({ hasText: assigned.email })
+    .getByRole("checkbox")
+    .check();
+  await expect(
+    page
+      .getByRole("dialog")
+      .locator("label")
+      .filter({ hasText: assigned.email })
+      .getByRole("checkbox"),
+  ).toBeChecked();
+  await page
+    .getByRole("button", { name: "Ajouter une étape", exact: true })
+    .click();
+  await page
+    .getByLabel("Nom de l’étape", { exact: true })
+    .fill("Qualification");
+  await page
+    .getByRole("combobox", { name: "Couleur", exact: true })
+    .selectOption("blue");
+  await page
+    .getByRole("button", { name: "Enregistrer l’étape", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog").getByText("Qualification", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+    .click();
+  const initialColumn = page.getByRole("region", {
+    name: "Étape À appeler",
+    exact: true,
+  });
+  await initialColumn.getByRole("button").filter({ hasText: "Émilie" }).click();
+  await page
+    .getByRole("combobox", { name: "Étape du pipeline", exact: true })
+    .selectOption({ label: "Qualification" });
+  await page
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  const qualified = page.getByRole("region", {
+    name: "Étape Qualification",
+    exact: true,
+  });
+  await expect(
+    qualified.getByRole("button").filter({ hasText: "Émilie" }),
+  ).toBeVisible();
+  await accessible(page);
+  await screenshot(page, "campagne-desktop.png");
+  const context = await browser.newContext({
+    baseURL: process.env.UI_TEST_URL,
+    ignoreHTTPSErrors: true,
+  });
+  try {
+    const agent = await context.newPage();
+    await login(agent, assigned.email, assigned.password);
+    await agent
+      .getByRole("link", { name: "Mes campagnes", exact: true })
+      .click();
+    await agent.getByRole("button").filter({ hasText: campaignName }).click();
+    await expect(
+      agent.getByRole("button", {
+        name: "Réglages de la campagne",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await agent
+      .getByRole("region", { name: "Étape Qualification", exact: true })
+      .getByRole("button")
+      .filter({ hasText: "Émilie" })
+      .click();
+    await agent
+      .getByLabel("Ajouter une note", { exact: true })
+      .fill("Rappel demandé, informations vérifiées.");
+    await agent
+      .getByRole("button", { name: "Enregistrer la note", exact: true })
+      .click();
+    await expect(agent.getByRole("dialog")).toContainText(
+      "Rappel demandé, informations vérifiées.",
+    );
+    await accessible(agent);
+    await agent
+      .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+      .click();
+    await agent.setViewportSize({ width: 390, height: 844 });
+    await accessible(agent);
+    expect(
+      await agent.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await screenshot(agent, "campagne-agent-mobile.png");
+  } finally {
+    await context.close();
+  }
+  await qualified.getByRole("button").filter({ hasText: "Émilie" }).click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Rappel demandé, informations vérifiées.",
+  );
 });

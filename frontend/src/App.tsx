@@ -5,6 +5,7 @@ import type { Identity } from "./api";
 import { AuthForm, AuthLayout, Enrollment, Recovery } from "./Auth";
 import type { PrivateEntry } from "./Auth";
 import { Audit, Invitations, InviteForm, ShareLink, Users } from "./Admin";
+import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
@@ -15,7 +16,8 @@ type Page =
   | "audit"
   | "account"
   | "contacts"
-  | "imports";
+  | "imports"
+  | "campaigns";
 const PATHS: Record<Page, string> = {
   home: "/accueil",
   users: "/admin/utilisateurs",
@@ -24,6 +26,7 @@ const PATHS: Record<Page, string> = {
   account: "/compte",
   contacts: "/admin/contacts",
   imports: "/admin/imports",
+  campaigns: "/campagnes",
 };
 function currentPage(): Page | null {
   return (
@@ -220,16 +223,20 @@ function Workspace({
   const items: {
     page: Page;
     title: string;
-    icon: "home" | "users" | "mail" | "shield";
+    icon: "home" | "users" | "mail" | "shield" | "campaign";
   }[] = admin
     ? [
+        { page: "campaigns", title: "Campagnes", icon: "campaign" },
         { page: "contacts", title: "Contacts", icon: "users" },
         { page: "imports", title: "Imports CSV", icon: "mail" },
         { page: "users", title: "Utilisateurs", icon: "users" },
         { page: "invitations", title: "Invitations", icon: "mail" },
         { page: "audit", title: "Journal d’audit", icon: "shield" },
       ]
-    : [{ page: "home", title: "Mon espace", icon: "home" }];
+    : [
+        { page: "campaigns", title: "Mes campagnes", icon: "campaign" },
+        { page: "home", title: "Mon espace", icon: "home" },
+      ];
   return (
     <div className="workspace">
       <a className="skip-link" href="#main">
@@ -344,7 +351,9 @@ function Workspace({
               Se reconnecter
             </button>
           </div>
-          {selected === "contacts" ? (
+          {selected === "campaigns" ? (
+            <Campaigns admin={admin} />
+          ) : selected === "contacts" ? (
             <Contacts />
           ) : selected === "imports" ? (
             <Imports />

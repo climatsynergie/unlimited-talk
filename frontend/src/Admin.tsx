@@ -720,6 +720,16 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "campaign.updated": "Réglages de campagne modifiés",
+  "campaign.agent_assigned": "Agent attribué à une campagne",
+  "campaign.agent_unassigned": "Agent retiré d’une campagne",
+  "campaign.stage_created": "Étape de pipeline créée",
+  "campaign.stage_updated": "Étape de pipeline modifiée",
+  "campaign.stages_reordered": "Ordre du pipeline modifié",
+  "campaign.stage_archived": "Étape de pipeline archivée",
+  "campaign.contact_restored": "Restrictions d’un contact révisées",
+  "campaign.created": "Campagne créée",
+  "campaign.contacts_enrolled": "Contacts ajoutés à une campagne",
   "contacts.source_uploaded": "Fichier CSV déposé",
   "contacts.import_confirmed": "Import CSV confirmé",
   "contacts.import_completed": "Import CSV terminé",
