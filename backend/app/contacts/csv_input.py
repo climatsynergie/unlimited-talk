@@ -195,3 +195,16 @@ def validate_csv(source: bytes, mapping: dict[str, str], *, region: str = 'CA',
         raise CsvInputError('Le fichier ne contient aucune ligne de données.')
     return ValidatedCsv(headers, tuple(rows), delimiter, skipped_blank, valid_count,
                         invalid_count, len(seen), duplicate_count)
+
+
+def inspect_headers(source: bytes, *, delimiter=None, encoding='utf-8-sig'):
+    reader, delimiter = _reader(source, delimiter, encoding, Limits())
+    try:
+        headers = tuple(value.strip() for value in next(reader))
+    except (StopIteration, csv.Error):
+        raise CsvInputError('La ligne d’en-têtes CSV est absente ou invalide.') from None
+    if not headers or len(headers)>100 or any(not h or len(h)>200 for h in headers):
+        raise CsvInputError('Les en-têtes sont vides, trop longs ou trop nombreux.')
+    if len({_header_key(h) for h in headers}) != len(headers):
+        raise CsvInputError('Plusieurs colonnes portent le même nom. Renommez-les avant l’import.')
+    return headers, delimiter

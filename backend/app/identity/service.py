@@ -64,7 +64,7 @@ def new_session(db, user, verified, previous=None):
             'session_token': token, 'csrf_token': csrf, 'max_age': duration}
 
 
-def authenticate(db, request, *, enrollment=False, recent=False):
+def authenticate(db, request, *, enrollment=False, recent=False, touch=True):
     token = request.cookies.get(COOKIE, '')
     if not 40 <= len(token) <= 64:
         raise HTTPException(401, 'Connexion requise')
@@ -85,8 +85,9 @@ def authenticate(db, request, *, enrollment=False, recent=False):
         raise HTTPException(403, 'Configuration de la double authentification requise')
     if recent and row['authenticated_at'] < utcnow()-timedelta(minutes=15):
         raise HTTPException(403, 'Reconnectez-vous avant cette action sensible')
-    alive = query(db, 'UPDATE staging.identity_sessions SET last_seen_at=now() WHERE token_hash=:token RETURNING token_hash', token=row['session_hash']).first()
-    if alive is None:
+    statement = ('UPDATE staging.identity_sessions SET last_seen_at=now() WHERE token_hash=:token RETURNING token_hash'
+                 if touch else 'SELECT token_hash FROM staging.identity_sessions WHERE token_hash=:token')
+    if query(db,statement,token=row['session_hash']).first() is None:
         raise HTTPException(401, 'Connexion requise')
     return row
 

@@ -44,6 +44,7 @@ export async function api<T>(
   options: {
     method?: string;
     body?: unknown;
+    raw?: Blob;
     signal?: AbortSignal;
     authenticated?: boolean;
   } = {},
@@ -53,6 +54,7 @@ export async function api<T>(
     .find((value) => value.startsWith("__Host-ut_csrf="))
     ?.split("=")[1];
   const headers: Record<string, string> = {};
+  if (options.raw) headers["Content-Type"] = "text/csv";
   if (options.body !== undefined) headers["Content-Type"] = "application/json";
   if (csrf && options.method && options.method !== "GET")
     headers["X-CSRF-Token"] = csrf;
@@ -65,7 +67,8 @@ export async function api<T>(
       cache: "no-store",
       signal: options.signal,
       body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
+        options.raw ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError")

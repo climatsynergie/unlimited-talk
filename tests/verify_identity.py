@@ -90,6 +90,10 @@ agent_id=body['user']['id'];assert body['mfa_enrollment_required'] is False
 anonymous.request('POST','/api/auth/invitations/accept',{'token':invitation['token'],'password':'Agent integration passphrase 2026!'},expected=400)
 agent.request('GET','/api/admin/users',expected=403)
 agent.request('GET','/api/admin/audit',expected=403)
+for path in ['/api/contacts','/api/imports','/api/contacts/00000000-0000-0000-0000-000000000001/history','/api/imports/00000000-0000-0000-0000-000000000001/rows']:
+    agent.request('GET',path,expected=403)
+agent.request('POST','/api/imports',{'id':'00000000-0000-0000-0000-000000000001','filename':'forbidden.csv'},expected=403)
+agent.request('POST','/api/imports/00000000-0000-0000-0000-000000000001/confirm',{},expected=403)
 agent.request('POST','/api/admin/invitations',{'email':'forbidden@example.invalid','display_name':'X','role':'admin'},expected=403)
 old=agent.cookies.copy()
 agent.request('POST','/api/auth/password',{'current_password':'Agent integration passphrase 2026!','new_password':'Changed agent passphrase 2026!'})

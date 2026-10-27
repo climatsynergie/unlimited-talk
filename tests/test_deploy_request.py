@@ -69,24 +69,25 @@ class DeploymentRequestTests(unittest.TestCase):
             (config / 'identity-config.json').write_text(json.dumps({'origin':'https://staging.example.com'}))
             (template / 'compose.managed.yaml').write_text('fixture')
             (template / 'nginx.conf').write_text('fixture')
+            (template / 'broker-start.sh').write_text('fixture')
             def api(path, token):
                 if path == 'commits/main':
                     return {'sha': self.request['revision']}
                 return {'workflow_runs': [{'head_sha': self.request['revision'], 'head_repository': {'full_name': deployer.REPOSITORY}, 'conclusion': 'success', 'event': 'push'}]}
             def command(args, **kwargs):
                 if args[:3] == ['docker', 'image', 'inspect']:
-                    return json.dumps({'org.opencontainers.image.revision': self.request['revision'], 'org.opencontainers.image.source': 'https://github.com/' + deployer.REPOSITORY})
+                    return json.dumps({'io.unlimitedtalk.schema':'0003_contacts','org.opencontainers.image.revision': self.request['revision'], 'org.opencontainers.image.source': 'https://github.com/' + deployer.REPOSITORY})
                 return ''
             calls = []
             def compose(release, *args, **kwargs):
                 calls.append((release, args))
                 if args[:1] == ('config',):
-                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {}}})
+                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {},'broker': {},'worker': {'image':self.request['image']},'dispatcher': {'image':self.request['image']}}})
                 return ''
             real_tempdir = tempfile.TemporaryDirectory
             def temporary_credentials(**kwargs):
                 return real_tempdir(dir=root)
-            with patch.object(deployer, 'ROOT', config), patch.object(deployer, 'BASE', base), patch.object(deployer, 'TEMPLATE', template), patch.object(deployer, 'github', side_effect=api), patch.object(deployer, 'run', side_effect=command), patch.object(deployer, 'compose', side_effect=compose), patch.object(deployer, 'check_health', side_effect=[RuntimeError('unhealthy'), {'status': 'ready'}]), patch.object(deployer.tempfile, 'TemporaryDirectory', side_effect=temporary_credentials):
+            with patch.object(deployer, 'ROOT', config), patch.object(deployer, 'BASE', base), patch.object(deployer, 'TEMPLATE', template), patch.object(deployer, 'github', side_effect=api), patch.object(deployer, 'run', side_effect=command), patch.object(deployer, 'compose', side_effect=compose), patch.object(deployer, 'check_health', side_effect=[{'migration':'0002_identity','revision':'423e16b69b5ffbb2f2d7fd4846e0f50f90eaef3e'},RuntimeError('unhealthy'), {'status': 'ready'}]), patch.object(deployer.tempfile, 'TemporaryDirectory', side_effect=temporary_credentials):
                 with self.assertRaisesRegex(RuntimeError, 'previous application restored'):
                     deployer.deploy(self.request)
             self.assertEqual((base / 'current').resolve(), previous)

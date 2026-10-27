@@ -62,18 +62,24 @@ jobs:
             npx playwright install-deps chromium
             node scripts/check-browser.mjs
           fi
+      - name: Verify additive migration preserves populated identity data
+        run: python3 tests/verify_contacts_upgrade.py
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
         run: python3 tests/verify_foundation.py
       - name: Verify identities, permissions and session revocation
         run: python3 tests/verify_identity.py
+      - name: Verify imports, transactional recovery and broker execution
+        run: python3 tests/verify_imports.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
       - name: Verify compatibility before the contacts migration
         run: python3 tests/verify_contacts_compatibility.py
       - name: Verify rollback preserves the identity schema and data
         run: python3 tests/verify_identity_rollback.py
+      - name: Verify synthetic contact backup and restore
+        run: python3 tests/verify_contacts_restore.py
       - name: Verify database outage and recovery
         run: python3 tests/verify_recovery.py
       - name: Export the tested image

@@ -42,6 +42,7 @@ class Proxy(BaseHTTPRequestHandler):
         finally: client.close()
     do_GET=forward
     do_POST=forward
+    do_PUT=forward
     do_PATCH=forward
     do_DELETE=forward
     do_HEAD=forward

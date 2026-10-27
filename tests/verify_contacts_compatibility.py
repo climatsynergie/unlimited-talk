@@ -33,7 +33,7 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0002_identity')
+ready(200,'0003_contacts')
 try:
     sql("CREATE TABLE staging.contacts_compatibility_probe(id integer PRIMARY KEY); "
         "INSERT INTO staging.contacts_compatibility_probe VALUES (1); "
@@ -47,7 +47,7 @@ try:
         'unlimited_talk_staging','-tAc','SELECT count(*) FROM staging.contacts_compatibility_probe'],text=True)
     assert count.strip()=='1'
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0002_identity'; "
+    sql("UPDATE staging.alembic_version SET version_num='0003_contacts'; "
         "DROP TABLE IF EXISTS staging.contacts_compatibility_probe")
-ready(200,'0002_identity')
+ready(200,'0003_contacts')
 print('Contacts compatibility prerequisite: additive revision accepted, unknown rejected, data preserved: PASS')

@@ -5,7 +5,7 @@ import tarfile
 import tempfile
 import io
 
-revision = 'd9cec5aa0943c9357f08a97b3e72e3922d500aad'
+revision = '423e16b69b5ffbb2f2d7fd4846e0f50f90eaef3e'
 root = Path(__file__).resolve().parents[1]
 if subprocess.run(['git','cat-file','-e',revision+'^{commit}'],cwd=root,capture_output=True).returncode:
     subprocess.run(['git','fetch','--depth=1','origin',revision],cwd=root,check=True)

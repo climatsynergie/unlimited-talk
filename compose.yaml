@@ -1,6 +1,5 @@
 name: unlimited-talk-staging
-
-x-app: &app
+x-app:
   image: unlimited-talk-staging-api:foundation
   build: .
   environment:
@@ -8,16 +7,21 @@ x-app: &app
     COMMUNICATIONS_MODE: disabled
     DB_HOST: db
     DB_NAME: unlimited_talk_staging
-  networks: [staging]
+  networks: &id001
+  - staging
   read_only: true
-  tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
-  cap_drop: [ALL]
-  security_opt: [no-new-privileges:true]
+  tmpfs: &id002
+  - /tmp:rw,noexec,nosuid,size=32m
+  cap_drop: &id003
+  - ALL
+  security_opt: &id004
+  - no-new-privileges:true
   pids_limit: 100
-  logging:
+  logging: &id005
     driver: json-file
-    options: {max-size: 5m, max-file: "2"}
-
+    options:
+      max-size: 5m
+      max-file: '2'
 services:
   db:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
@@ -25,26 +29,36 @@ services:
       POSTGRES_DB: unlimited_talk_staging
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
-    secrets: [postgres_password, migrator_password, runtime_password]
+    secrets:
+    - postgres_password
+    - migrator_password
+    - runtime_password
     volumes:
-      - staging_pgdata:/var/lib/postgresql
-      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
-    networks: [staging]
+    - staging_pgdata:/var/lib/postgresql
+    - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    networks:
+    - staging
     mem_limit: 768m
     cpus: 0.5
     pids_limit: 150
     restart: unless-stopped
-    security_opt: [no-new-privileges:true]
+    security_opt:
+    - no-new-privileges:true
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U postgres -d unlimited_talk_staging"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U postgres -d unlimited_talk_staging
       interval: 5s
       timeout: 3s
       retries: 20
     logging:
       driver: json-file
-      options: {max-size: 5m, max-file: "2"}
+      options:
+        max-size: 5m
+        max-file: '2'
   migrate:
-    <<: *app
+    image: unlimited-talk-staging-api:foundation
+    build: .
     environment:
       APP_ENV: staging
       COMMUNICATIONS_MODE: disabled
@@ -52,15 +66,28 @@ services:
       DB_NAME: unlimited_talk_staging
       DB_USER: ut_staging_migrator
       DB_PASSWORD_FILE: /run/secrets/migrator_password
-    secrets: [migrator_password]
-    command: [alembic, upgrade, head]
+    networks: *id001
+    read_only: true
+    tmpfs: *id002
+    cap_drop: *id003
+    security_opt: *id004
+    pids_limit: 100
+    logging: *id005
+    secrets:
+    - migrator_password
+    command:
+    - alembic
+    - upgrade
+    - head
     depends_on:
-      db: {condition: service_healthy}
+      db:
+        condition: service_healthy
     mem_limit: 256m
     cpus: 0.25
-    restart: "no"
+    restart: 'no'
   api:
-    <<: *app
+    image: unlimited-talk-staging-api:foundation
+    build: .
     environment:
       APP_ENV: staging
       COMMUNICATIONS_MODE: disabled
@@ -70,45 +97,226 @@ services:
       IDENTITY_KEY_FILE: /run/secrets/identity_key
       DB_USER: ut_staging_runtime
       DB_PASSWORD_FILE: /run/secrets/runtime_password
-    secrets: [runtime_password, identity_key]
+      SPACES_CONFIG_FILE: /run/secrets/spaces_config
+    networks: *id001
+    read_only: true
+    tmpfs: *id002
+    cap_drop: *id003
+    security_opt: *id004
+    pids_limit: 100
+    logging: *id005
+    secrets:
+    - runtime_password
+    - identity_key
+    - spaces_config
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      migrate:
+        condition: service_completed_successfully
     mem_limit: 512m
     cpus: 0.5
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready',
+        timeout=3)
       interval: 15s
       timeout: 5s
       retries: 3
   gateway:
     image: nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
-    ports: ["127.0.0.1:8110:8080"]
+    ports:
+    - 127.0.0.1:8110:8080
     volumes:
-      - ./scripts/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    networks: [staging, ingress]
+    - ./scripts/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+    - staging
+    - ingress
     depends_on:
-      api: {condition: service_healthy}
+      api:
+        condition: service_healthy
     read_only: true
-    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
     mem_limit: 64m
     cpus: 0.1
     pids_limit: 30
     restart: unless-stopped
     logging:
       driver: json-file
-      options: {max-size: 5m, max-file: "2"}
-
+      options:
+        max-size: 5m
+        max-file: '2'
+  worker:
+    image: unlimited-talk-staging-api:foundation
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: disabled
+      DB_HOST: db
+      DB_NAME: unlimited_talk_staging
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+      BROKER_PASSWORD_FILE: /run/secrets/broker_password
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+    secrets:
+    - runtime_password
+    - broker_password
+    depends_on:
+      broker:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 1
+    restart: unless-stopped
+    command:
+    - celery
+    - -A
+    - app.contacts.tasks
+    - worker
+    - --loglevel=WARNING
+    - --concurrency=1
+    - --without-gossip
+    - --without-mingle
+    - --without-heartbeat
+  dispatcher:
+    image: unlimited-talk-staging-api:foundation
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: disabled
+      DB_HOST: db
+      DB_NAME: unlimited_talk_staging
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+      BROKER_PASSWORD_FILE: /run/secrets/broker_password
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+    secrets:
+    - runtime_password
+    - broker_password
+    depends_on:
+      broker:
+        condition: service_healthy
+    mem_limit: 192m
+    cpus: 0.25
+    restart: unless-stopped
+    command:
+    - python
+    - -m
+    - app.contacts.dispatch
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import pathlib,time; assert time.time()-pathlib.Path('/tmp/dispatcher-heartbeat').stat().st_mtime<45
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  broker:
+    image: redis:8.2-alpine@sha256:35bf3d49a07b693d8defb4e4fc9ef8c663f71c2993f181eba99c7b72966c1f9b
+    user: 999:999
+    command:
+    - sh
+    - /opt/broker-start.sh
+    volumes:
+    - broker_data:/data
+    - ./scripts/broker-start.sh:/opt/broker-start.sh:ro
+    secrets:
+    - broker_password
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 30
+    mem_limit: 192m
+    cpus: 0.25
+    restart: on-failure:5
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - REDISCLI_AUTH=$$(cat /run/secrets/broker_password) redis-cli ping | grep -q
+        PONG
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '2'
+  objectstore:
+    image: motoserver/moto:5.1.15@sha256:8860b18917e1ee4d067df19a406ae95dc26037e6965d5b499e1cffd33755b914
+    environment:
+      MOTO_PORT: '9000'
+    networks:
+    - staging
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 100
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '2'
 networks:
   staging:
     internal: true
-  ingress:
+  ingress: null
 volumes:
-  staging_pgdata:
+  staging_pgdata: null
+  broker_data: {}
 secrets:
-  postgres_password: {file: ./secrets/postgres_password}
-  migrator_password: {file: ./secrets/migrator_password}
-  runtime_password: {file: ./secrets/runtime_password}
-  identity_key: {file: ./secrets/identity_key}
+  postgres_password:
+    file: ./secrets/postgres_password
+  migrator_password:
+    file: ./secrets/migrator_password
+  runtime_password:
+    file: ./secrets/runtime_password
+  identity_key:
+    file: ./secrets/identity_key
+  spaces_config:
+    file: ./secrets/spaces_config
+  broker_password:
+    file: ./secrets/broker_password

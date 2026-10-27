@@ -166,3 +166,16 @@ tables or import service. Its disposable compatibility probe verifies that
 identity remains available across the planned additive revision and that unknown
 revisions fail closed. Actual contacts migration, object storage and background
 import acceptance remain separate activation checks.
+
+## Contacts activation (schema 3)
+
+Use `CONTACTS.md` for the import durability and isolation contract. The managed
+root template now contains api/migrate/gateway plus broker/worker/dispatcher and
+requires a schema-3 image. Install the reviewed deployer/template, nginx limits,
+broker startup script and private Spaces egress rule together. The host helper
+copies credentials into explicitly mounted file secrets; credentials stay out
+of source, releases, GitHub Actions and container environment variables.
+The existing compatible staging revision must be healthy before migration.
+User-managed deployment remains through Deploy staging with successful Foundation
+CI and the complete current main SHA. Do not deploy an untested local image or
+run migrations manually to bypass that pipeline.

@@ -5,15 +5,25 @@ import type { Identity } from "./api";
 import { AuthForm, AuthLayout, Enrollment, Recovery } from "./Auth";
 import type { PrivateEntry } from "./Auth";
 import { Audit, Invitations, InviteForm, ShareLink, Users } from "./Admin";
+import { Contacts, Imports } from "./Contacts";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
-type Page = "home" | "users" | "invitations" | "audit" | "account";
+type Page =
+  | "home"
+  | "users"
+  | "invitations"
+  | "audit"
+  | "account"
+  | "contacts"
+  | "imports";
 const PATHS: Record<Page, string> = {
   home: "/accueil",
   users: "/admin/utilisateurs",
   invitations: "/admin/invitations",
   audit: "/admin/journal",
   account: "/compte",
+  contacts: "/admin/contacts",
+  imports: "/admin/imports",
 };
 function currentPage(): Page | null {
   return (
@@ -191,7 +201,10 @@ function Workspace({
   const [error, setError] = useState("");
   const admin = identity.user.role === "admin";
   const selected =
-    !admin && ["users", "invitations", "audit"].includes(page) ? "home" : page;
+    !admin &&
+    ["users", "invitations", "audit", "contacts", "imports"].includes(page)
+      ? "home"
+      : page;
   useEffect(() => {
     function pop() {
       setPage(currentPage() ?? "home");
@@ -210,6 +223,8 @@ function Workspace({
     icon: "home" | "users" | "mail" | "shield";
   }[] = admin
     ? [
+        { page: "contacts", title: "Contacts", icon: "users" },
+        { page: "imports", title: "Imports CSV", icon: "mail" },
         { page: "users", title: "Utilisateurs", icon: "users" },
         { page: "invitations", title: "Invitations", icon: "mail" },
         { page: "audit", title: "Journal d’audit", icon: "shield" },
@@ -333,7 +348,11 @@ function Workspace({
               Se reconnecter
             </button>
           </div>
-          {selected === "users" ? (
+          {selected === "contacts" ? (
+            <Contacts />
+          ) : selected === "imports" ? (
+            <Imports />
+          ) : selected === "users" ? (
             <Users
               me={identity.user}
               invite={() => setInvite(true)}

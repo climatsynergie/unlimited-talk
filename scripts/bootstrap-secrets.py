@@ -18,3 +18,14 @@ for name in ('postgres_password', 'migrator_password', 'runtime_password', 'iden
     # read permission; the containing host directory remains private (0700).
     path.chmod(0o444)
 print('Staging secret files ready; no values displayed.')
+
+import json
+for name, value in {
+    'broker_password': secrets.token_hex(32),
+    'spaces_config': json.dumps(dict(endpoint='http://objectstore:9000',region='us-east-1',bucket='disposable-imports',access_key_id='testing',secret_access_key='testing')),
+}.items():
+    path=root/name
+    if not path.exists():
+        fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o444)
+        with os.fdopen(fd,'w') as stream: stream.write(value+'\n')
+        path.chmod(0o444)

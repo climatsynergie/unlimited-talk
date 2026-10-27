@@ -27,10 +27,10 @@ def get(path):
         return json.load(response)
 
 
-assert get('/api/system')['business_features'] == 'not_implemented'
+assert get('/api/system')['business_features'] == 'contacts_imports'
 assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
-                              'database': 'connected', 'migration': '0002_identity',
+                              'database': 'connected', 'migration': '0003_contacts',
                               'communications': 'disabled',
                               'revision': os.environ.get('GITHUB_SHA', 'development')}
 config = json.loads(run('config', '--format', 'json'))
@@ -40,7 +40,7 @@ assert 'ports' not in config['services']['db']
 assert 'ports' not in config['services']['api']
 assert config['services']['gateway']['ports'][0]['host_ip'] == '127.0.0.1'
 assert config['services']['api']['read_only'] is True
-assert [s['source'] for s in config['services']['api']['secrets']] == ['runtime_password', 'identity_key']
+assert [s['source'] for s in config['services']['api']['secrets']] == ['runtime_password', 'identity_key','spaces_config']
 assert config['services']['api']['environment']['COMMUNICATIONS_MODE'] == 'disabled'
 for service in config['services'].values():
     for mount in service.get('volumes', []):

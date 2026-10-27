@@ -720,6 +720,9 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "contacts.source_uploaded": "Fichier CSV déposé",
+  "contacts.import_confirmed": "Import CSV confirmé",
+  "contacts.import_completed": "Import CSV terminé",
   "session.login": "Connexion",
   "session.login_failed": "Connexion refusée",
   "session.logout": "Déconnexion",

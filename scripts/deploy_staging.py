@@ -86,6 +86,13 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0003_contacts':
+        running=check_health()
+        if running.get('migration') == '0003_contacts':
+            return
+        if running.get('migration') == '0002_identity' and running.get('revision') == '423e16b69b5ffbb2f2d7fd4846e0f50f90eaef3e':
+            return
+        raise ValueError('Deploy the contacts compatibility release first')
     if labels.get('io.unlimitedtalk.schema') != '0002_identity':
         return
     running = check_health()
@@ -123,6 +130,8 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
+        if labels.get('io.unlimitedtalk.schema') != '0003_contacts':
+            raise ValueError('This deployment template requires the contacts worker image')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}
@@ -132,6 +141,7 @@ def deploy(request):
             shutil.copy2(TEMPLATE / 'compose.managed.yaml', release / 'compose.managed.yaml')
             (release / 'scripts').mkdir(mode=0o755)
             shutil.copy2(TEMPLATE / 'nginx.conf', release / 'scripts/nginx.conf')
+            shutil.copy2(TEMPLATE / 'broker-start.sh', release / 'scripts/broker-start.sh')
             identity_config = json.loads((ROOT / 'identity-config.json').read_text())
             from urllib.parse import urlsplit
             origin = identity_config['origin']
@@ -144,24 +154,28 @@ def deploy(request):
             (release / '.env').chmod(0o600)
             manifest.write_text(json.dumps(metadata, indent=2) + '\n')
         config = json.loads(compose(release, 'config', '--format', 'json', env=env))
-        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway'}:
+        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway','broker','worker','dispatcher'}:
             raise ValueError('Unexpected root-owned deployment template')
-        if config['services']['api']['image'] != image or config['services']['migrate']['image'] != image:
+        if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher')):
             raise ValueError('Migration and API must use the same tested image')
         require_identity_rollback_target(labels)
         # Migrations must follow expand/contract compatibility. Never downgrade
         # data automatically, including when application health checks fail.
+        compose(release, 'up', '-d', '--no-deps', '--wait', 'broker', env=env)
         compose(release, 'run', '--rm', '--no-deps', 'migrate', env=env)
         switch_current(release)
         try:
             compose(release, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                    '--wait', '--wait-timeout', '120', 'api', 'gateway', env=env)
+                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher', env=env)
             check_health(revision)
         except Exception:
+            compose(release,'stop','worker','dispatcher',env=env)
             switch_current(previous)
             try:
+                previous_config=json.loads(compose(previous,'config','--format','json',env=env))
+                previous_workers=[name for name in ('worker','dispatcher') if name in previous_config['services']]
                 compose(previous, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                        '--wait', '--wait-timeout', '120', 'api', 'gateway', env=env)
+                        '--wait', '--wait-timeout', '120', 'api', 'gateway', *previous_workers, env=env)
                 check_health()
             except Exception:
                 raise RuntimeError('Deployment failed; previous application could not be restored. Database was not downgraded.') from None

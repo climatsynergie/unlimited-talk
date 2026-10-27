@@ -225,10 +225,11 @@ def audit_events(request: Request,limit: int = Query(50,ge=1,le=100),before: int
     with request.app.state.engine.begin() as db:
         service.admin(db,request)
         rows = service.query(db,'''SELECT e.id,e.actor_id,e.action,e.subject_id,e.created_at,a.email AS actor_email,
-            coalesce(u.email,i.email) AS subject_label FROM staging.identity_audit e
+            coalesce(u.email,i.email,ci.filename) AS subject_label FROM staging.identity_audit e
             LEFT JOIN staging.identity_users a ON a.id=e.actor_id
             LEFT JOIN staging.identity_users u ON u.id=e.subject_id
             LEFT JOIN staging.identity_invitations i ON i.id=e.subject_id
+            LEFT JOIN staging.contact_imports ci ON ci.id=e.subject_id
             WHERE (CAST(:before AS bigint) IS NULL OR e.id<:before) ORDER BY e.id DESC LIMIT :limit''',before=before,limit=limit).mappings()
         return {'events':[{k:str(v) if v is not None else None for k,v in row.items()} for row in rows]}
 

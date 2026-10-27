@@ -380,3 +380,98 @@ test("invitation admin, QR code MFA, codes de récupération et expiration de se
     await context.close().catch(() => {});
   }
 });
+
+test("import CSV privé, aperçu, confirmation et contacts en français", async ({
+  page,
+}) => {
+  const seed = fixture<Seed>({ op: "seed" });
+  await login(page, seed.email, seed.password, seed.factor);
+  await page.getByRole("link", { name: "Imports CSV", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Imports CSV", exact: true }),
+  ).toBeVisible();
+  await accessible(page);
+  let localPhone = 5145550100;
+  for (; localPhone < 5145550200; localPhone++) {
+    const existing = await page.request.get(
+      `/api/contacts?search=%2B1${localPhone}`,
+    );
+    if ((await existing.json()).items.length === 0) break;
+  }
+  expect(localPhone).toBeLessThan(5145550200);
+  await page.getByLabel("Fichier CSV", { exact: true }).setInputFiles({
+    name: "contacts-navigateur.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      `telephone,prenom,courriel\n${localPhone},Émilie,emilie@example.test\n${localPhone},,\ninvalide,Erreur,\n`,
+    ),
+  });
+  await page
+    .getByRole("button", { name: "Déposer le fichier", exact: true })
+    .click();
+  await expect(
+    page.getByRole("group", { name: "Associer les colonnes" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Valider et afficher l’aperçu", exact: true })
+    .click();
+  await expect(
+    page.getByText("2 lignes valides", { exact: false }),
+  ).toBeVisible();
+  const before = await page.request.get(
+    `/api/contacts?search=%2B1${localPhone}`,
+  );
+  expect((await before.json()).items).toHaveLength(0);
+  await accessible(page);
+  await page
+    .getByRole("button", {
+      name: "Confirmer l’import de ces lignes",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText("3 / 3 lignes traitées", { exact: true }),
+  ).toBeVisible({ timeout: 45000 });
+  await expect(
+    page.getByText(
+      "1 contacts créés · 0 enrichis · 1 inchangés · 1 lignes invalides",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page
+    .getByLabel("Afficher uniquement les erreurs et avertissements")
+    .check();
+  await expect(
+    page.getByRole("cell", {
+      name: "Le numéro de téléphone n’est pas reconnu.",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Contacts", exact: true }).click();
+  await page
+    .getByLabel("Rechercher un contact", { exact: true })
+    .fill(`+1${localPhone}`);
+  await page.getByRole("button", { name: "Rechercher", exact: true }).click();
+  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await expect(page.getByRole("cell", { name: /^Émilie/ })).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "emilie@example.test", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: `Historique de +1${localPhone}`, exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("Contact créé");
+  await accessible(page);
+  await page
+    .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+    .click();
+  await accessible(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await accessible(page);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await screenshot(page, "contacts-mobile.png");
+});
