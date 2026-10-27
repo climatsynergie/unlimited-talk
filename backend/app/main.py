@@ -22,9 +22,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# This image requires the additive contacts schema. The deployed preceding
-# compatibility release accepts schemas 2 and 3 and remains its rollback target.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0003_contacts'})
+# This contacts release also accepts the planned additive campaign schema.
+# Deploy it before campaigns so application rollback preserves existing contacts.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0003_contacts','0004_campaigns'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "

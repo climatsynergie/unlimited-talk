@@ -39,6 +39,8 @@ try:
         "INSERT INTO staging.contacts_compatibility_probe VALUES (1); "
         "UPDATE staging.alembic_version SET version_num='0003_contacts'")
     ready(200,'0003_contacts')
+    sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
+    ready(200,'0004_campaigns')
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0003_contacts'")
