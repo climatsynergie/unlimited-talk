@@ -190,3 +190,12 @@ Install the reviewed root deployer with the schema-4 compatibility gate; the
 six-service Compose template, credentials and egress rules stay the same.
 Publish the exact tested image with provenance, then use Deploy staging with its
 complete current-main SHA. An application rollback keeps schema 4 and all data.
+
+## Calendar compatibility preparation
+
+Before introducing `0005_calendar`, deploy the schema-4 compatibility release
+specified in [CALENDAR.md](CALENDAR.md). It adds no calendar tables or visible
+calendar controls. Readiness admits schemas 4 and 5 while continuing to check all
+existing campaign tables, the staging marker and identity encryption. CI verifies
+the explicit planned revision and rejects unknown revisions in a disposable local
+database. Verify its exact deployed SHA before promoting the calendar feature.

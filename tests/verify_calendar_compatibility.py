@@ -1,7 +1,7 @@
-"""Verify the preceding app can serve an additive contacts schema revision.
+"""Verify the campaign app can serve the planned additive calendar revision.
 
 Only a disposable local database is supported. This does not apply the actual
-contacts migration or claim its business logic is delivered.
+calendar migration or claim its business logic is delivered.
 """
 import json
 import os
@@ -35,10 +35,10 @@ def ready(expected,version=None):
 
 ready(200,'0004_campaigns')
 try:
-    sql("CREATE TABLE staging.contacts_compatibility_probe(id integer PRIMARY KEY); "
-        "INSERT INTO staging.contacts_compatibility_probe VALUES (1); "
-        "UPDATE staging.alembic_version SET version_num='0004_campaigns'")
-    ready(200,'0004_campaigns')
+    sql("CREATE TABLE staging.calendar_compatibility_probe(id integer PRIMARY KEY); "
+        "INSERT INTO staging.calendar_compatibility_probe VALUES (1); "
+        "UPDATE staging.alembic_version SET version_num='0005_calendar'")
+    ready(200,'0005_calendar')
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
     ready(200,'0004_campaigns')
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
@@ -46,10 +46,10 @@ try:
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
     ready(200,'0004_campaigns')
     count=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d',
-        'unlimited_talk_staging','-tAc','SELECT count(*) FROM staging.contacts_compatibility_probe'],text=True)
+        'unlimited_talk_staging','-tAc','SELECT count(*) FROM staging.calendar_compatibility_probe'],text=True)
     assert count.strip()=='1'
 finally:
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'; "
-        "DROP TABLE IF EXISTS staging.contacts_compatibility_probe")
+        "DROP TABLE IF EXISTS staging.calendar_compatibility_probe")
 ready(200,'0004_campaigns')
-print('Contacts compatibility prerequisite: additive revision accepted, unknown rejected, data preserved: PASS')
+print('Calendar compatibility prerequisite: additive revision accepted, unknown rejected, data preserved: PASS')

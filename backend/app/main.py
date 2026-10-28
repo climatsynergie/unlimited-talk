@@ -23,9 +23,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Campaigns require the additive schema 4. The preceding contacts compatibility
-# release accepts schemas 3 and 4 and remains the safe application rollback target.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0004_campaigns'})
+# Calendar rollout prerequisite: continue serving campaigns after the planned
+# additive schema 5 migration. Calendar tables and routes are not activated here.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0004_campaigns', '0005_calendar'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
