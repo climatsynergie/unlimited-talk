@@ -26,3 +26,11 @@ class ContactsDeploymentTests(unittest.TestCase):
             with patch.object(module,'check_health',return_value=running):module.require_identity_rollback_target(labels)
         for running in [{},dict(migration='0003_contacts',revision='d548e6e048f0265fdb327e906bf80f0b4745af93')]:
             with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):module.require_identity_rollback_target(labels)
+
+
+    def test_calendar_schema_requires_deployed_compatible_predecessor(self):
+        labels={'io.unlimitedtalk.schema':'0005_calendar'}
+        for running in [dict(migration='0005_calendar',revision='a'*40),dict(migration='0004_campaigns',revision='0601ff555cc27e07057a499ac37ba349e399650e')]:
+            with patch.object(module,'check_health',return_value=running):module.require_identity_rollback_target(labels)
+        for running in [{},dict(migration='0004_campaigns',revision='368006b50900695b7f06264bff7eeee417765f71'),dict(migration='0003_contacts')]:
+            with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):module.require_identity_rollback_target(labels)

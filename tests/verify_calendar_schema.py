@@ -1,7 +1,6 @@
-"""Verify the campaign app can serve the planned additive calendar revision.
+"""Verify calendar readiness fails closed on unknown schema revisions.
 
-Only a disposable local database is supported. This does not apply the actual
-calendar migration or claim its business logic is delivered.
+Only a disposable local database is supported. The real preceding image is exercised separately by verify_identity_rollback.py.
 """
 import json
 import os
@@ -33,23 +32,13 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0004_campaigns')
+ready(200,'0005_calendar')
 try:
-    sql("CREATE TABLE staging.calendar_compatibility_probe(id integer PRIMARY KEY); "
-        "INSERT INTO staging.calendar_compatibility_probe VALUES (1); "
-        "UPDATE staging.alembic_version SET version_num='0005_calendar'")
-    ready(200,'0005_calendar')
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
-    ready(200,'0004_campaigns')
+    ready(503)
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
-    sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
-    ready(200,'0004_campaigns')
-    count=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d',
-        'unlimited_talk_staging','-tAc','SELECT count(*) FROM staging.calendar_compatibility_probe'],text=True)
-    assert count.strip()=='1'
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'; "
-        "DROP TABLE IF EXISTS staging.calendar_compatibility_probe")
-ready(200,'0004_campaigns')
-print('Calendar compatibility prerequisite: additive revision accepted, unknown rejected, data preserved: PASS')
+    sql("UPDATE staging.alembic_version SET version_num='0005_calendar'")
+ready(200,'0005_calendar')
+print('Calendar schema guard: older and unknown revisions rejected, current revision restored: PASS')

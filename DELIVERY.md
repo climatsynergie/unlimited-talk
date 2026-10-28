@@ -199,3 +199,13 @@ calendar controls. Readiness admits schemas 4 and 5 while continuing to check al
 existing campaign tables, the staging marker and identity encryption. CI verifies
 the explicit planned revision and rejects unknown revisions in a disposable local
 database. Verify its exact deployed SHA before promoting the calendar feature.
+
+## Calendar activation (schema 5)
+
+The required compatibility predecessor is
+`0601ff555cc27e07057a499ac37ba349e399650e`, verified healthy on schema 4 before
+calendar promotion. Install the reviewed root deployer with its schema-5 gate;
+the six-service template and credentials remain unchanged. Record a private
+predeployment data fingerprint, deploy the attested successful current main
+image, and verify readiness at schema 5 plus preservation of existing records.
+See [CALENDAR.md](CALENDAR.md) for behavior, permissions, DST handling and tests.

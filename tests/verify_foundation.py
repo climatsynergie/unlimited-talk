@@ -27,10 +27,10 @@ def get(path):
         return json.load(response)
 
 
-assert get('/api/system')['business_features'] == 'campaigns'
+assert get('/api/system')['business_features'] == 'calendar'
 assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
-                              'database': 'connected', 'migration': '0004_campaigns',
+                              'database': 'connected', 'migration': '0005_calendar',
                               'communications': 'disabled',
                               'revision': os.environ.get('GITHUB_SHA', 'development')}
 config = json.loads(run('config', '--format', 'json'))

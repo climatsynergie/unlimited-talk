@@ -25,7 +25,7 @@ sql("""INSERT INTO staging.contacts(id,phone,profile,do_not_contact,non_interest
 tables=['contacts','contact_imports','contact_import_rows','contact_history','identity_users']
 fingerprint='SELECT '+" || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+' t)' for table in tables)
 before=sql(fingerprint)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0004_campaigns'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0004_campaigns'
 assert sql(fingerprint)==before
 print('Campaign schema added; identities, contacts, restrictions and import history preserved: PASS')

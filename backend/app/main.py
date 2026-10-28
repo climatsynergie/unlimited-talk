@@ -15,6 +15,7 @@ from cryptography.fernet import InvalidToken
 from app.identity.routes import router as identity_router
 from app.contacts.routes import router as contacts_router
 from app.campaigns.routes import router as campaigns_router
+from app.calendar.routes import router as calendar_router
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,9 +24,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Calendar rollout prerequisite: continue serving campaigns after the planned
-# additive schema 5 migration. Calendar tables and routes are not activated here.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0004_campaigns', '0005_calendar'})
+# Calendar tables are required; the deployed schema-4 compatibility release
+# remains the application rollback target after this additive migration.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0005_calendar'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
@@ -43,10 +44,11 @@ async def lifespan(app):
     app.state.engine.dispose()
 
 
-app = FastAPI(title='Unlimited Talks — Staging', version='0.5.0', lifespan=lifespan)
+app = FastAPI(title='Unlimited Talks — Staging', version='0.6.0', lifespan=lifespan)
 app.include_router(identity_router)
 app.include_router(contacts_router)
 app.include_router(campaigns_router)
+app.include_router(calendar_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -86,8 +88,8 @@ async def request_metadata(request: Request, call_next):
 @app.get('/api/system')
 def root():
     return {'application': 'Unlimited Talks', 'environment': 'staging',
-            'milestone': 'campaigns', 'communications': 'disabled',
-            'business_features': 'campaigns', 'readiness': '/health/ready',
+            'milestone': 'calendar', 'communications': 'disabled',
+            'business_features': 'calendar', 'readiness': '/health/ready',
             'revision': os.environ.get('APP_REVISION', 'development')}
 
 
@@ -100,6 +102,7 @@ def root():
 @app.get('/admin/utilisateurs', include_in_schema=False)
 @app.get('/admin/invitations', include_in_schema=False)
 @app.get('/admin/journal', include_in_schema=False)
+@app.get('/calendrier', include_in_schema=False)
 @app.get('/campagnes', include_in_schema=False)
 @app.get('/admin/contacts', include_in_schema=False)
 @app.get('/admin/imports', include_in_schema=False)
@@ -123,7 +126,7 @@ def ready(request: Request):
             for table in ('identity_users','identity_sessions','identity_invitations',
                           'identity_password_resets','identity_recovery_codes','identity_audit','identity_rate_limits',
                           'contacts','contact_imports','contact_import_rows','contact_history',
-                          'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events'):
+                          'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:

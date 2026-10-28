@@ -86,6 +86,13 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0005_calendar':
+        running=check_health()
+        if running.get('migration') == '0005_calendar':
+            return
+        if running.get('migration') == '0004_campaigns' and running.get('revision') == '0601ff555cc27e07057a499ac37ba349e399650e':
+            return
+        raise ValueError('Deploy the calendar compatibility release first')
     if labels.get('io.unlimitedtalk.schema') == '0004_campaigns':
         running=check_health()
         if running.get('migration') == '0004_campaigns':
@@ -137,7 +144,7 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns'}:
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar'}:
             raise ValueError('This deployment template requires a compatible worker image')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'

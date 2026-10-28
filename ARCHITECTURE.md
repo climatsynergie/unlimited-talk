@@ -110,3 +110,12 @@ Campaigns/pipelines and shared contact notes are implemented in the next module
 as described in CAMPAIGNS.md; activation requires its compatibility predecessor,
 successful verification and the separate managed staging deployment check.
 Calls/SMS/recordings, callbacks and calendar bookings are not implemented yet.
+
+## Shared calendar implementation
+
+Appointments owns a shared Unlimited Talks calendar with UTC instants plus IANA
+timezones, creator/admin editing and immutable change history. Booking calls the
+campaign domain inside the same database transaction to classify the contact as
+RDV booké. It does not couple appointment state to a telecom or external calendar
+provider. Multiple meetings may overlap; cancellation preserves both histories.
+See [CALENDAR.md](CALENDAR.md) for the contract and rollout prerequisite.

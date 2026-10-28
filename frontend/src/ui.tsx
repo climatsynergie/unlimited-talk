@@ -27,9 +27,11 @@ export function Icon({
     | "arrow"
     | "check"
     | "home"
-    | "campaign";
+    | "campaign"
+    | "calendar";
 }) {
   const paths = {
+    calendar: "M3 5h18v16H3zM7 3v4M17 3v4M3 10h18M7 14h2M12 14h2M7 18h2",
     campaign: "M3 4h18v16H3zM9 4v16M15 4v16M5 8h2M11 8h2M17 8h2M5 12h2M11 12h2",
     users:
       "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",

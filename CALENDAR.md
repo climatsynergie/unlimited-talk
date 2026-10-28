@@ -1,81 +1,94 @@
-# Shared calendar contract
+# Shared calendar
 
-## Confirmed behavior
+The application owns the **Unlimited Talks** calendar. No GoHighLevel or external
+calendar service is involved. All authenticated active agents and administrators
+can view its appointments, including appointments originating in other campaigns.
+Agents create appointments for contacts in their assigned active campaigns and
+edit or cancel their own appointments. Administrators edit or cancel any meeting.
+Seller accounts and seller assignment are not part of this release.
 
-The application owns its calendar, contacts and appointment history; it has no
-GoHighLevel dependency. The shared calendar is named **Unlimited Talks**.
-All active agents and administrators can view its appointments, including those
-created in other campaigns. Agents create appointments for contacts in their
-assigned active campaigns and may edit or cancel appointments they created.
-Administrators may edit or cancel every appointment. Seller accounts and seller
-assignment are outside the first calendar release.
+## Booking and history
 
-An appointment records its contact, campaign of origin, creator, start date and
-time, duration, IANA timezone, notes and status. Multiple appointments may overlap
-because several sellers can handle them. Cancellation preserves the appointment
-and its history. Creating a calendar appointment must not contact Twilio, send an
-SMS, or create a meeting in an external provider.
+Appointments preserve contact, campaign of origin and creator references, UTC
+start/end instants, IANA timezone, notes, status, version and timestamps. Multiple
+appointments may overlap. Durations are 5–1440 minutes; date entry supports years
+2000–2100 at minute precision. Browser entry explicitly names its timezone,
+defaulting to the campaign timezone. Viewing in another timezone changes only the
+display. Display includes the UTC offset for ambiguous fall-back hours.
 
-## Proposed implementation contract
+The browser asks `/api/calendar/resolve` for valid instants for a local wall-clock
+time. The server round-trips both DST folds through UTC. Nonexistent spring times
+are rejected; repeated autumn times require the user's explicit offset selection.
+The creation/update endpoint independently performs the same validation and rejects
+an invalid or missing ambiguous offset. The selected offset is reflected in the
+stored UTC instant; the timezone is stored separately. Duration is elapsed time.
 
-These are implementation choices for the upcoming module, not delivered features:
+Creation and movement to the campaign's semantic `appointment` stage occur in one
+PostgreSQL transaction, with a campaign event and appointment event. Failed writes
+roll back the entire booking. Current membership version is required to prevent a
+stale form from overwriting a concurrent pipeline action. New bookings refuse
+archived/unassigned campaigns, inactive memberships and globally restricted
+contacts. An administrator must explicitly reactivate a restricted contact first.
 
-- Store start and end as PostgreSQL `timestamptz` in UTC, alongside the original
-  IANA timezone. Browser entry explicitly names the appointment timezone;
-  viewing in another timezone never changes the stored instant. Reject missing
-  timezone, nonexistent daylight-saving times, and ambiguous times until the
-  user explicitly chooses the UTC offset. Validate end after start on server
-  and in database. Default creation timezone is the campaign timezone.
-- One shared calendar, backed by appointment and append-only event tables.
-  Preserve contact/campaign/creator foreign keys and record every create,
-  reschedule, note change and status transition with actor and timestamp.
-  No hard-delete endpoint or runtime permission to alter appointment history.
-- Initial statuses: `booked` (RDV booké), `completed` (Terminé),
-  `cancelled` (Annulé), `no_show` (Absent). Status changes are explicit and
-  audited. A cancelled appointment is excluded from upcoming views by default,
-  with an option to show it. No automatic pipeline reversal on cancellation:
-  another appointment may exist for the same contact.
-- Create the appointment and move its campaign membership to the semantic
-  `appointment` stage in one transaction, recording both histories. Current
-  manual moves into RDV booké remain classifications and must never invent
-  appointments. Block booking from an archived/unassigned campaign or an
-  inactive membership. A new booking does not silently clear a global contact
-  restriction; require administrator reactivation first.
-- Use an idempotency UUID on creation and optimistic version checks on updates.
-  Duplicate retries return the original result, mismatched UUID payloads and
-  stale edits return conflict responses. Agent identity and permissions always
-  come from the server session, never client-supplied creator fields.
-- Shared visibility is specific to appointment data, including contact details
-  needed for the meeting. It must not grant access to other campaigns' boards,
-  imports, private contact directory or unrelated campaign history. Revoking
-  campaign assignment prevents new bookings there; ownership permission for
-  existing appointments follows the agreed creator/admin rule.
-- Provide bounded date-range queries, pagination and indexes on start time,
-  contact and creator. Display a French week view plus an accessible agenda
-  view on small screens, with filters for creator and status. Show overlaps
-  without treating them as resource conflicts. Do not silently truncate results.
+A client-generated UUID identifies creation attempts. The server records an exact
+normalized payload hash and creator. Identical retries return the existing meeting
+without a second stage move or audit event; reusing the UUID with another payload
+or creator is a conflict. Updating requires the current appointment version and a
+row lock. Concurrent editors get a 409 rather than silently losing changes.
 
-## Rollout prerequisite (this release)
+Statuses are `booked` (RDV booké), `completed` (Terminé), `cancelled` (Annulé) and
+`no_show` (Absent). Status changes and date/duration/timezone/note edits are explicit,
+with immutable before/after history and actor/timestamp. Cancellation keeps all
+data and does not reverse a pipeline stage: another meeting may exist. Manual
+movement into RDV booké remains a classification and never invents an appointment.
+No booking operation places a call, sends an SMS or contacts an external provider.
 
-The campaign app now accepts both `0004_campaigns` and the explicitly planned
-`0005_calendar` readiness revision. Its own migration head and image label remain
-`0004_campaigns`. No calendar tables, appointment API or calendar UI are present
-in this preparation release. Unknown revisions still fail readiness.
+Appointments remain visible and their creator retains editing rights after
+campaign unassignment or archival. Those actions prevent new bookings there. The
+shared calendar permission grants only appointment-related contact coordinates;
+it does not grant another campaign's board, imports or unrelated history.
 
-The disposable compatibility probe temporarily adds a synthetic table and changes
-only the local database revision marker to verify readiness across the planned
-schema boundary, then restores the original marker and removes the probe. It
-refuses managed PostgreSQL. This is a compatibility check, not a test of an actual
-calendar migration.
+## API and interface
 
-Deploy this compatibility release through successful main CI and the attested
-Deploy staging workflow, then verify its exact running revision. Record that SHA
-as the required schema-4 predecessor in the reviewed host deployer before allowing
-the schema-5 migration. Develop the actual calendar migration and functionality
-on a feature branch while main remains deployable at the prerequisite SHA.
+All endpoints use the existing session, CSRF and exact-origin protections:
 
-Before calendar promotion, test timezone/DST entry, permission boundaries,
-concurrent edits, duplicate creation retries, atomic appointment/pipeline changes,
-appointment overlaps, history immutability, populated schema-4 upgrade, actual
-application rollback against schema 5, and backup/restore of all calendar data.
-The rollback preserves schema 5 and all appointments; it does not downgrade data.
+- `GET /api/calendar/resolve?local_start=...&timezone=...`: valid UTC candidates.
+- `GET /api/calendar?start=...&end=...`: overlapping appointments in a bounded
+  period (maximum 93 days), ordered by start/id. Optional creator/status filters,
+  `exclude_cancelled`, and offset pagination, 100 items/page with `has_more`.
+- `POST /api/calendar`: `id`, campaign/contact ids, membership version, naive
+  `local_start`, timezone, optional UTC offset minutes, duration minutes and notes.
+- `GET /api/calendar/{id}`: appointment, creator/admin edit permission and paged
+  immutable history; `before` is the history cursor.
+- `PATCH /api/calendar/{id}`: full schedule/notes/status plus expected version.
+  Contact, source campaign and creator cannot be reassigned through this endpoint.
+
+French `/calendrier` navigation is available to agents and admins. It provides an
+agenda and a seven-day view, timezone selector, all/mine creator filter, status
+filter, explicit pagination and refresh. Cancelled entries are hidden by default
+using a server-side filter. The week view becomes an agenda on narrow screens.
+Open a campaign contact and choose **Prendre rendez-vous** to book. The editor
+keeps entered values on error; it closes only after a successful save or explicit
+cancellation of entry. Cancelling entry does not create a meeting.
+
+## Database and delivery
+
+Migration `0005_calendar` adds `appointments` and append-only `appointment_events`.
+Existing tables/data are preserved. Time, creator and contact indexes support
+bounded queries. The runtime role cannot delete meetings or modify/delete/truncate
+appointment events. There is no automatic schema downgrade.
+
+Compatibility predecessor **0601ff555cc27e07057a499ac37ba349e399650e** was verified
+healthy on managed staging before calendar development. It accepts schemas 4 and 5.
+The reviewed root deployer requires that exact healthy schema-4 predecessor or an
+already healthy schema-5 release. The container template, secrets and networks are
+unchanged. Deploy only the exact main commit with successful tests, publication
+and provenance through Deploy staging. Application rollback preserves schema 5
+and every appointment; the old application simply has no calendar screen.
+
+Disposable tests cover DST gaps/overlaps, permission boundaries, duplicate booking
+retries, concurrent updates, pipeline transitions, overlapping meetings, immutable
+history, populated schema-4 migration, browser booking/reschedule/cancel/mobile
+accessibility, real predecessor rollback, backup/restore and database recovery.
+Managed staging verification still requires the actual deployment and user
+acceptance. These checks do not constitute a 20-agent load test.

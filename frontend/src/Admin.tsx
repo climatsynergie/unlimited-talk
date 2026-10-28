@@ -720,6 +720,8 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "appointment.created": "Rendez-vous créé",
+  "appointment.updated": "Rendez-vous modifié",
   "campaign.updated": "Réglages de campagne modifiés",
   "campaign.agent_assigned": "Agent attribué à une campagne",
   "campaign.agent_unassigned": "Agent retiré d’une campagne",

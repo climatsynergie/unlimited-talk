@@ -1,4 +1,4 @@
-"""Readiness must admit the planned additive calendar revision, and no others."""
+"""Calendar readiness requires schema 5; older and unknown schemas fail closed."""
 import unittest
 from types import SimpleNamespace
 from app.main import ready
@@ -34,14 +34,14 @@ class Connection:
         return Result(None)
 
 
-class CalendarCompatibilityTests(unittest.TestCase):
-    def test_readiness_accepts_current_and_planned_revision_only(self):
+class CalendarSchemaTests(unittest.TestCase):
+    def test_readiness_requires_calendar_schema(self):
         for revision in ['0004_campaigns', '0005_calendar', '9999_unknown']:
             with self.subTest(revision=revision):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision == '9999_unknown':
+                if revision != '0005_calendar':
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

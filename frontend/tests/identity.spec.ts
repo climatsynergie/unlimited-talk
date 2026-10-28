@@ -650,3 +650,104 @@ test("campagne, pipeline, agent attribué et notes partagées", async ({
     "Rappel demandé, informations vérifiées.",
   );
 });
+
+test("calendrier partagé, réservation, modification et annulation", async ({
+  page,
+}) => {
+  const seed = fixture<Seed>({ op: "seed" });
+  await login(page, seed.email, seed.password, seed.factor);
+  // Use one previously imported synthetic contact. Browser fixtures never use managed PostgreSQL.
+  await page.getByRole("link", { name: "Campagnes", exact: true }).click();
+  await page
+    .getByRole("button")
+    .filter({ hasText: "Campagne navigateur" })
+    .first()
+    .click();
+  await page
+    .locator(".pipeline-card")
+    .filter({ hasText: "Émilie" })
+    .first()
+    .click();
+  await page
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await page
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-02T10:00");
+  await page
+    .getByLabel("Notes du rendez-vous", { exact: true })
+    .fill("Préparer la rencontre avec le client.");
+  await page
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Étape RDV booké", exact: true }),
+  ).toContainText("Émilie");
+  await page.getByRole("link", { name: "Calendrier", exact: true }).click();
+  await page
+    .getByLabel("Semaine à partir du", { exact: true })
+    .fill("2026-11-02");
+  const card = page
+    .locator(".appointment-card")
+    .filter({ hasText: "Émilie" })
+    .first();
+  await expect(card).toBeVisible();
+  await accessible(page);
+  await card.click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Préparer la rencontre avec le client.",
+  );
+  await page
+    .getByRole("button", {
+      name: "Modifier ou annuler le rendez-vous",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-03T11:00");
+  await page.getByLabel("Durée en minutes", { exact: true }).fill("45");
+  await page
+    .getByRole("button", { name: "Enregistrer les modifications", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("45 minutes");
+  await accessible(page);
+  await page
+    .getByRole("button", {
+      name: "Modifier ou annuler le rendez-vous",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("combobox", { name: "Statut", exact: true })
+    .last()
+    .selectOption("cancelled");
+  await page
+    .getByRole("button", { name: "Enregistrer les modifications", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog").getByText("Annulé", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+    .click();
+  await expect(
+    page.locator(".appointment-card").filter({ hasText: "Émilie" }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "Statut", exact: true })
+    .selectOption("all");
+  await expect(card).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Affichage", exact: true })
+    .selectOption("week");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await accessible(page);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await screenshot(page, "calendrier-mobile.png");
+});
