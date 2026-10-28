@@ -1218,65 +1218,71 @@ function CardDetail({
                 : "Non intéressé — toutes les campagnes"}
             </Notice>
           ) : null}
-          {callback ? (
-            <section>
-              <h3>Programmer un rappel</h3>
-              <CallbackForm
-                contact={{
-                  campaign_id: campaign.id,
-                  contact_id: identifier,
-                  membership_version: data.contact.version,
-                  timezone: campaign.timezone,
-                }}
-                onCancel={() => setCallback(false)}
-                onSaved={() => {
-                  setCallback(false);
-                  onChanged();
-                }}
-              />
-            </section>
-          ) : !booking &&
-            campaign.is_active &&
-            !data.contact.do_not_contact &&
-            !data.contact.non_interested ? (
-            <button
-              className="button secondary"
-              disabled={busy}
-              onClick={() => setCallback(true)}
-            >
-              Programmer un rappel
-            </button>
-          ) : null}
-          {booking ? (
-            <section>
-              <h3>Prendre rendez-vous — Unlimited Talks</h3>
-              <AppointmentForm
-                contact={{
-                  campaign_id: campaign.id,
-                  contact_id: identifier,
-                  membership_version: data.contact.version,
-                  timezone: campaign.timezone,
-                }}
-                onCancel={() => setBooking(false)}
-                onSaved={() => {
-                  setBooking(false);
-                  setRevision((n) => n + 1);
-                  onChanged();
-                }}
-              />
-            </section>
-          ) : !callback &&
-            campaign.is_active &&
-            !data.contact.do_not_contact &&
-            !data.contact.non_interested ? (
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={() => setBooking(true)}
-            >
-              Prendre rendez-vous
-            </button>
-          ) : null}
+          <div
+            className="actions contact-actions"
+            role="group"
+            aria-label="Actions du contact"
+          >
+            {callback ? (
+              <section>
+                <h3>Programmer un rappel</h3>
+                <CallbackForm
+                  contact={{
+                    campaign_id: campaign.id,
+                    contact_id: identifier,
+                    membership_version: data.contact.version,
+                    timezone: campaign.timezone,
+                  }}
+                  onCancel={() => setCallback(false)}
+                  onSaved={() => {
+                    setCallback(false);
+                    onChanged();
+                  }}
+                />
+              </section>
+            ) : !booking &&
+              campaign.is_active &&
+              !data.contact.do_not_contact &&
+              !data.contact.non_interested ? (
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setCallback(true)}
+              >
+                Programmer un rappel
+              </button>
+            ) : null}
+            {booking ? (
+              <section>
+                <h3>Prendre rendez-vous — Unlimited Talks</h3>
+                <AppointmentForm
+                  contact={{
+                    campaign_id: campaign.id,
+                    contact_id: identifier,
+                    membership_version: data.contact.version,
+                    timezone: campaign.timezone,
+                  }}
+                  onCancel={() => setBooking(false)}
+                  onSaved={() => {
+                    setBooking(false);
+                    setRevision((n) => n + 1);
+                    onChanged();
+                  }}
+                />
+              </section>
+            ) : !callback &&
+              campaign.is_active &&
+              !data.contact.do_not_contact &&
+              !data.contact.non_interested ? (
+              <button
+                className="button primary"
+                disabled={busy}
+                onClick={() => setBooking(true)}
+              >
+                Prendre rendez-vous
+              </button>
+            ) : null}
+          </div>
           <label className="campaign-stage-picker">
             Étape du pipeline
             <select

@@ -228,3 +228,12 @@ six-service template, secrets and networking. Record a private old-table snapsho
 deploy the successful attested main image, then verify exact readiness and source
 data preservation. [CALLBACKS.md](CALLBACKS.md) defines ownership, reservations,
 priority boundaries and the remaining authoritative phone-integration contract.
+
+## Telephony proof preparation
+
+`TELEPHONY.md` records the separate engine and controlled-call proof. The root-only
+Twilio preflight tool checks one selected number using a restricted read key; it
+cannot originate calls, modify routes or provision resources. It is installed
+outside application containers and requires no app rollout. The queued contact
+button spacing fix stays with the next substantive application delivery; do not
+request a deployment for this layout correction alone.

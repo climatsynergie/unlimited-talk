@@ -104,12 +104,11 @@ and provider tests; a mocked test cannot establish voice quality or capacity.
 
 Currently verified on managed staging: isolated infrastructure, private managed
 PostgreSQL, HTTPS perimeter, individual accounts/MFA, French React interface,
-private CSV imports, canonical contacts and append-only import history.
-See IDENTITY.md, WEB.md and CONTACTS.md for their contracts.
-Campaigns/pipelines and shared contact notes are implemented in the next module
-as described in CAMPAIGNS.md; activation requires its compatibility predecessor,
-successful verification and the separate managed staging deployment check.
-Calls/SMS/recordings, callbacks and calendar bookings are not implemented yet.
+private CSV imports, canonical contacts, configurable campaigns/pipelines, shared
+notes, the shared calendar and durable agent-owned callbacks. See IDENTITY.md,
+WEB.md, CONTACTS.md, CAMPAIGNS.md, CALENDAR.md and CALLBACKS.md for their contracts.
+Calls, SMS and recordings are not activated. TELEPHONY.md defines the controlled
+integration proof and the responsibilities that must precede live origination.
 
 ## Shared calendar implementation
 
