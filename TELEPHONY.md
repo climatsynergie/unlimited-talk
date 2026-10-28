@@ -17,7 +17,9 @@ boundaries; they do not validate SIP, real audio, answer detection or capacity.
 
 The installation assessment, proposed host sizing, image-build procedure and
 unverified deployment gates are in [the installation dossier](deployment/telephony/INSTALLATION.md).
-No deployable image has been produced by that assessment.
+A laboratory image and two local cloud-init clone proofs are documented there.
+DigitalOcean boot, engine security maintenance and production approval remain
+unverified. No customer call has been placed.
 
 ## Ownership and topology
 

@@ -1,8 +1,13 @@
 # Installation téléphonique Unlimited Talks
 
-Évaluation du 28 octobre 2026. Statut : architecture et procédure préparées,
-image installable et démarrage DigitalOcean non validés. Aucun achat, nouvel
+Évaluation du 28 octobre 2026. Statut : image de laboratoire préparée, démarrage
+BIOS et initialisation cloud sur deux clones locaux validés. Démarrage réel
+DigitalOcean et choix du moteur pour la production non validés. Aucun achat, nouvel
 hôte, appel ou changement du CRM effectué par cette évaluation.
+
+Les résultats réels et la réserve de maintenance Asterisk 18 figurent dans le
+[rapport de validation locale](LAB-VALIDATION.md). La création des serveurs
+définitifs reste suspendue à ce choix de version et à la preuve cloud.
 
 ## Décision proposée
 
@@ -119,20 +124,26 @@ Twilio désactivé ; Asterisk produit une seule archive vérifiée dans Spaces p
   Fixer les seuils d'acceptation avant le test, puis retenir les ressources sur
   les résultats. Le nombre d'agents créés ne constitue pas une preuve de capacité.
 
-## Limites constatées de cette session
+## Construction locale et limites restantes
 
-L'environnement local dispose d'environ 11 Gio libres, sans QEMU, qemu-img,
-virt-install ou Packer installés. /dev/kvm existe mais n'est pas directement
-accessible au compte courant. Aucun environnement cloud managé ni accès API
-DigitalOcean n'est attaché à cette session. L'accès SSH au CRM ne fournit pas une
-machine de construction isolée. Ne pas remplir son disque ou y exécuter une
-installation ViciBox pour contourner cette limite.
+Le premier inventaire constatait 11 Gio libres et l'absence des outils QEMU.
+Les outils ont depuis été installés dans l'environnement de travail, KVM a été
+activé pour les processus de laboratoire et le système officiel a réellement
+démarré. L'ISO a temporairement occupé un système de fichiers en mémoire ; le
+disque brut creux et les overlays préservent une marge sur le disque de travail.
+Aucun serveur payant ni machine de construction dans le CRM n'a été nécessaire.
 
-Aucune image n'a été construite, importée ou démarrée. Le prochain besoin concret
-est une machine de construction isolée avec virtualisation et espace suffisants,
-ou une image maintenue et une installation fournies par l'éditeur avec preuves
-équivalentes. Ne pas confondre cette procédure préparée avec une compatibilité
-DigitalOcean démontrée.
+La procédure d'installation depuis l'ISO ci-dessus reste une voie générale.
+L'essai exécuté a utilisé directement le disque officiel contenu dans l'ISO,
+après vérification de ses empreintes, puis un overlay pour la préparation. Deux
+clones ConfigDrive ont vérifié l'accès par clé et le renouvellement des identités.
+
+Aucun accès API DigitalOcean n'est attaché à cette session. Aucun import ou
+redémarrage sur un Droplet issu de cette image n'a été testé. Le support du
+réseau VPC réel, de la signalisation et des médias reste à prouver. Le rapport
+local ne doit pas être présenté comme une compatibilité DigitalOcean démontrée.
+Le paquet Asterisk 18 inclus exige une confirmation de maintenance ou une
+combinaison plus récente prise en charge avant de retenir la base de production.
 
 ## Références officielles consultées
 

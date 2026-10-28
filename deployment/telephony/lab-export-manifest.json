@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-10-28T23:18:11.336140+00:00",
+  "filename": "unlimited-talk-vicibox13-beta4-cloud-lab.qcow2",
+  "file_bytes": 2771845120,
+  "virtual_bytes": 21474836480,
+  "format": "qcow2",
+  "compression": "zlib",
+  "sha256": "8f11f7f63588d1d27ac9af000ffcadd93179107a64aadfa2a9564ee348265bf6",
+  "standalone": true,
+  "image_check_passed": true,
+  "content_matches_sealed_template": true,
+  "configdrive_clone_boots_verified": 2,
+  "private_build_key_included": false,
+  "twilio_credentials_included": false,
+  "digitalocean_boot_verified": false,
+  "sip_or_audio_verified": false,
+  "production_approved": false,
+  "production_blockers": [
+    "ViciBox 13 candidate release",
+    "Asterisk 18 vendor security-maintenance coverage unverified"
+  ],
+  "source_iso_sha256": "b39edd9958f6c1a47772c53b008a9b4e67b2ac1bd58ff41761c2098b44d5239f"
+}
