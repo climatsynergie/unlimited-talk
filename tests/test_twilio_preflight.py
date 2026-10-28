@@ -16,7 +16,7 @@ spec=importlib.util.spec_from_file_location('twilio_preflight',path)
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
-class TwilioPreflightTests(unittest.TestCase):
+class TwilioFixture:
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)/'twilio.json'
         self.config=dict(version=1,mode='read_only',region='us1',account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32,phone_number_sid='PN'+'d'*32,caller_number='+14165550100')
@@ -24,6 +24,8 @@ class TwilioPreflightTests(unittest.TestCase):
 
     def tearDown(self):self.tmp.cleanup()
 
+
+class TwilioPreflightTests(TwilioFixture,unittest.TestCase):
     def test_only_selected_number_get_is_constructed_and_no_secret_is_reported(self):
         calls=[]
         def send(request):calls.append(request);return self.number
@@ -93,3 +95,31 @@ class TwilioPreflightTests(unittest.TestCase):
         with patch.object(module.os,'geteuid',return_value=10001),patch.object(module,'collect') as prompt,contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(module.main(['store']),1)
             prompt.assert_not_called()
+
+
+class SipProfileTests(TwilioFixture,unittest.TestCase):
+    def plan(self):
+        return dict(version=1,mode='credentials_only',account_sid=self.config['account_sid'],phone_number_sid=self.config['phone_number_sid'],caller_number=self.config['caller_number'],trunk_sid='TK'+'e'*32,termination_domain='unlimitedtalk.pstn.twilio.com',require_secure_trunk=True,recording_source='asterisk')
+
+    def profile(self):return {**self.plan(),'sip_username':'ut-pbx','sip_password':'ExampleOnlyCredential1234'}
+
+    def test_sip_profile_is_private_bound_and_does_not_report_password(self):
+        module.store_sip(self.profile(),self.config,self.path)
+        profile=module.read_private(self.path)
+        self.assertEqual(profile,self.profile())
+        report=module.sip_report(profile,self.config)
+        self.assertFalse(report['live_call_verified']);self.assertFalse(report['engine_configuration_verified']);self.assertFalse(report['sip_authentication_verified'])
+        for value in [profile['sip_password'],profile['sip_username'],profile['caller_number'],profile['account_sid']]:self.assertNotIn(value,json.dumps(report))
+        with self.assertRaises(FileExistsError):module.store_sip(self.profile(),self.config,self.path)
+
+    def test_unsafe_sip_targets_and_live_destinations_are_rejected(self):
+        for change in [dict(termination_domain='attacker.invalid'),dict(termination_domain='unlimitedtalk.pstn.twilio.com/Calls'),dict(require_secure_trunk=False),dict(mode='live'),dict(approved_destinations=['+14165550101']),dict(account_sid='AC'+'f'*32),dict(phone_number_sid='PN'+'f'*32),dict(caller_number='+14165550101')]:
+            with self.subTest(change=change),self.assertRaises(module.PreflightError):module.validate_sip_plan({**self.plan(),**change},self.config)
+
+    def test_sip_credentials_validate_before_persisting(self):
+        for change in [dict(sip_username='bad\nuser'),dict(sip_password='weak'),dict(sip_password='x'*24),dict(sip_password='Example Secret1234')]:
+            with self.subTest(change=change),self.assertRaises(module.PreflightError):module.store_sip({**self.profile(),**change},self.config,self.path)
+            self.assertFalse(self.path.exists())
+        values=iter(['ut-pbx','ExampleOnlyCredential1234','mismatch'])
+        with self.assertRaises(module.PreflightError):module.collect_sip(self.plan(),self.config,lambda label:next(values))
+        self.assertFalse(self.path.exists())

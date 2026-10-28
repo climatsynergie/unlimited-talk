@@ -180,6 +180,23 @@ in private requests and kept out of URL/access logs.
 reference. Pin versions and review the installed distribution's supported SIP
 stack rather than copying configuration for a different release.
 
+## Private SIP credential preparation
+
+The root operator helper also supports `store-sip` and `check-sip`. Before entry,
+an operator prepares `/etc/unlimited-talk-staging/twilio-sip-plan.json`, bound to
+the account and test number already verified by the read-only preflight. The plan
+requires encrypted trunking and Asterisk-owned recordings. It authorizes credential
+storage only, with no call destination or origination capability.
+
+`store-sip` prompts privately for the existing Credential List username and SIP
+password, with confirmation. It creates `twilio-sip-profile.json` in the same
+private directory, mode 0600, refusing overwrite. These credentials are separate
+from the read-only API key. `check-sip` validates the stored profile and reports
+redacted metadata only; it does not prove SIP authentication, engine configuration
+or audio. No credentials belong in GitHub, chat or application logs. The maintained
+engine installation and an explicitly approved test destination remain prerequisites
+for a live proof.
+
 ## Delivery boundary
 
 This preparation adds a read-only operator tool, its tests, this proof contract

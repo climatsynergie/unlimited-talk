@@ -18,6 +18,8 @@ import urllib.request
 import warnings
 
 CONFIG=Path('/etc/unlimited-talk-staging/twilio-preflight.json')
+SIP_PLAN=CONFIG.with_name('twilio-sip-plan.json')
+SIP_CONFIG=CONFIG.with_name('twilio-sip-profile.json')
 FIELDS={'version','mode','region','account_sid','api_key_sid','api_key_secret','phone_number_sid','caller_number'}
 
 
@@ -48,8 +50,8 @@ def private_parent(path):
         raise PreflightError('Le dossier de configuration doit être privé et appartenir à l’utilisateur courant.')
 
 
-def store(config,path=CONFIG):
-    validate(config);private_parent(path)
+def write_private(config,path):
+    private_parent(path)
     # O_EXCL refuses an existing file, including symbolic links. Never overwrite.
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     try:
@@ -60,7 +62,7 @@ def store(config,path=CONFIG):
         raise
 
 
-def load(path=CONFIG):
+def read_private(path):
     private_parent(path)
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
     with os.fdopen(fd,'rb') as stream:
@@ -71,7 +73,15 @@ def load(path=CONFIG):
         if len(raw)>8192:raise PreflightError('Le fichier de configuration est trop volumineux.')
     try:config=json.loads(raw)
     except (ValueError,UnicodeError):raise PreflightError('Le fichier de configuration est invalide.') from None
-    return validate(config)
+    return config
+
+
+def store(config,path=CONFIG):
+    write_private(validate(config),path)
+
+
+def load(path=CONFIG):
+    return validate(read_private(path))
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -121,12 +131,76 @@ def collect(prompt=getpass.getpass):
         return validate(config)
 
 
+SIP_PLAN_FIELDS={'version','mode','account_sid','phone_number_sid','caller_number','trunk_sid','termination_domain','require_secure_trunk','recording_source'}
+
+
+def validate_sip_plan(plan,base):
+    if not isinstance(plan,dict) or set(plan)!=SIP_PLAN_FIELDS or type(plan['version']) is not int or plan['version']!=1:
+        raise PreflightError('Plan de connexion SIP invalide.')
+    if plan['mode']!='credentials_only' or plan['require_secure_trunk'] is not True or plan['recording_source']!='asterisk':
+        raise PreflightError('Le profil SIP doit conserver les appels désactivés et le chiffrement requis.')
+    if not isinstance(plan['trunk_sid'],str) or not re.fullmatch(r'TK[0-9a-fA-F]{32}',plan['trunk_sid']):
+        raise PreflightError('SID du trunk invalide dans le plan SIP.')
+    if not isinstance(plan['termination_domain'],str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.pstn\.twilio\.com',plan['termination_domain']):
+        raise PreflightError('Domaine Twilio invalide dans le plan SIP.')
+    for field in ['account_sid','phone_number_sid','caller_number']:
+        if plan[field]!=base[field]:raise PreflightError('Le plan SIP ne correspond pas au numéro Twilio vérifié.')
+    return plan
+
+
+def validate_sip_profile(profile,base):
+    if not isinstance(profile,dict) or set(profile)!=SIP_PLAN_FIELDS|{'sip_username','sip_password'}:
+        raise PreflightError('Profil SIP invalide.')
+    validate_sip_plan({k:v for k,v in profile.items() if k in SIP_PLAN_FIELDS},base)
+    username=profile['sip_username'];password=profile['sip_password']
+    if not isinstance(username,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}',username):
+        raise PreflightError('Utilisateur SIP invalide : utilisez celui de votre Credential List.')
+    if not isinstance(password,str) or not 12<=len(password)<=128 or not password.isascii() or not password.isprintable() or any(c.isspace() for c in password) or not any(c.islower() for c in password) or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):
+        raise PreflightError('Le mot de passe SIP doit contenir 12 à 128 caractères, avec majuscules, minuscules et chiffres, sans espace.')
+    return profile
+
+
+def collect_sip(plan,base,prompt=getpass.getpass):
+    validate_sip_plan(plan,base)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error',getpass.GetPassWarning)
+        username=prompt('Utilisateur SIP de la Credential List (invisible) : ').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_.-]{1,32}',username):
+            raise PreflightError('Utilisateur SIP invalide. Aucun enregistrement.')
+        password=prompt('Mot de passe SIP de cette Credential List (invisible) : ')
+        confirmation=prompt('Confirmez le mot de passe SIP : ')
+        if password!=confirmation:raise PreflightError('Les mots de passe SIP sont différents. Aucun enregistrement.')
+        return validate_sip_profile({**plan,'sip_username':username,'sip_password':password},base)
+
+
+def store_sip(profile,base,path=SIP_CONFIG):
+    write_private(validate_sip_profile(profile,base),path)
+
+
+def sip_report(profile,base):
+    validate_sip_profile(profile,base)
+    return {'status':'sip_profile_saved','termination_domain':profile['termination_domain'],
+            'caller_last_four':profile['caller_number'][-4:],'secure_trunk_required':True,
+            'recording_source':'asterisk','engine_configuration_verified':False,
+            'sip_authentication_verified':False,'live_call_verified':False}
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Préparation Twilio en lecture seule, sans appel ni modification du compte.')
-    parser.add_argument('action',choices=['store','check'])
+    parser.add_argument('action',choices=['store','check','store-sip','check-sip'])
     args=parser.parse_args(argv)
     try:
         if os.geteuid()!=0:raise PreflightError('Exécutez cet outil dans le terminal root du serveur staging.')
+        if args.action in {'store-sip','check-sip'}:
+            base=load()
+            if args.action=='store-sip':
+                if SIP_CONFIG.exists() or SIP_CONFIG.is_symlink():raise PreflightError('Un profil SIP existe déjà. Il reste inchangé.')
+                if not SIP_PLAN.exists():raise PreflightError('Plan SIP absent. La configuration du trunk doit être préparée avant la saisie.')
+                plan=validate_sip_plan(read_private(SIP_PLAN),base)
+                store_sip(collect_sip(plan,base),base)
+                print('Identifiants SIP enregistrés dans un fichier privé. Le test d’appel reste à préparer.');return 0
+            if not SIP_CONFIG.exists():raise PreflightError('Profil SIP absent. Exécutez la commande store-sip.')
+            print(json.dumps(sip_report(read_private(SIP_CONFIG),base),ensure_ascii=False));return 0
         if args.action=='store':
             if CONFIG.exists() or CONFIG.is_symlink():raise PreflightError('Une configuration existe déjà. Elle reste inchangée.')
             private_parent(CONFIG)
