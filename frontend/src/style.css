@@ -1814,22 +1814,39 @@ th {
   border-bottom: 1px solid #ebe6f0;
   font-size: 13px;
 }
+.contact-notes li > strong {
+  display: block;
+  color: #302647;
+  line-height: 1.5;
+}
 .contact-notes p {
+  margin: 6px 0;
+  color: #302647;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .contact-notes small {
+  display: block;
+  margin-top: 6px;
   color: #6b6079;
+  line-height: 1.5;
 }
 .contact-profile {
   font-size: 13px;
 }
 .contact-profile dt {
   color: #6b6079;
-  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 16px;
 }
 .contact-profile dd {
-  margin: 4px 0 12px;
+  color: #302647;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 5px 0 16px;
   overflow-wrap: anywhere;
 }
 .confirmation-panel {
@@ -1840,4 +1857,25 @@ th {
 }
 .pipeline-cards > .subtle {
   color: #665b75;
+}
+
+.session-loading {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+}
+.session-loading p {
+  color: #6b6079;
+  margin: 0;
+}
+.campaign-stage-picker {
+  color: #6b6079;
+}
+.campaign-stage-picker select {
+  color: #302647;
+  font-weight: 600;
 }

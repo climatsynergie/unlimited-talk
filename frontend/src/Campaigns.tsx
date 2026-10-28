@@ -1185,8 +1185,10 @@ function CardDetail({
       ) : (
         <>
           <dl className="contact-profile">
-            <dt>Téléphone</dt>
-            <dd>{data.contact.phone}</dd>
+            <div>
+              <dt>Téléphone</dt>
+              <dd>{data.contact.phone}</dd>
+            </div>
             {Object.entries(data.contact.profile).map(([key, value]) => (
               <div key={key}>
                 <dt>

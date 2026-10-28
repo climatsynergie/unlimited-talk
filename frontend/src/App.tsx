@@ -532,11 +532,10 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
   }
   if (loading)
     return (
-      <AuthLayout>
-        <p className="loading" role="status">
-          Ouverture de votre espace…
-        </p>
-      </AuthLayout>
+      <main className="session-loading" aria-busy="true">
+        <Brand />
+        <p role="status">Ouverture de votre espace…</p>
+      </main>
     );
   if (error)
     return (
