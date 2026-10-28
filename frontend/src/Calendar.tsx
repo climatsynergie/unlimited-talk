@@ -99,6 +99,14 @@ function when(value: string, zone: string) {
   return `${text} (${offset})`;
 }
 
+function occursOn(appointment: Appointment, value: string, zone: string) {
+  const lastInstant = new Date(
+    Date.parse(appointment.ends_at) - 1,
+  ).toISOString();
+  return (
+    day(appointment.starts_at, zone) <= value && day(lastInstant, zone) >= value
+  );
+}
 function Timezone({
   value,
   onChange,
@@ -717,11 +725,7 @@ export function Calendar({ userId }: { userId: string }) {
                   }).format(new Date(d + "T12:00:00Z"))}
                 </h2>
                 {visible
-                  .filter(
-                    (a) =>
-                      day(a.starts_at, zone) === d ||
-                      (day(a.starts_at, zone) < d && day(a.ends_at, zone) >= d),
-                  )
+                  .filter((a) => occursOn(a, d, zone))
                   .map((a) => (
                     <button
                       className={`appointment-card status-${a.status}`}
@@ -748,11 +752,7 @@ export function Calendar({ userId }: { userId: string }) {
                       <small>{statuses[a.status]}</small>
                     </button>
                   ))}
-                {!visible.some(
-                  (a) =>
-                    day(a.starts_at, zone) === d ||
-                    (day(a.starts_at, zone) < d && day(a.ends_at, zone) >= d),
-                ) ? (
+                {!visible.some((a) => occursOn(a, d, zone)) ? (
                   <p className="subtle">Aucun rendez-vous.</p>
                 ) : null}
               </section>
