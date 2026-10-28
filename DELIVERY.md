@@ -218,3 +218,13 @@ creating callbacks tables or activating reminders. Unknown/older revisions still
 fail readiness. Record the exact verified healthy SHA as the required predecessor
 in the reviewed deployer before permitting schema 6. Actual callback functionality
 and its migration must be tested and promoted separately.
+
+## Callback activation (schema 6)
+
+Require healthy schema-5 compatibility revision
+`5c626b006a3166f6bb308765938cd08bf2fda935` before promoting callbacks to main.
+Install the reviewed deployer with its schema-6 predecessor gate; keep the existing
+six-service template, secrets and networking. Record a private old-table snapshot,
+deploy the successful attested main image, then verify exact readiness and source
+data preservation. [CALLBACKS.md](CALLBACKS.md) defines ownership, reservations,
+priority boundaries and the remaining authoritative phone-integration contract.

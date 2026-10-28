@@ -1,4 +1,4 @@
-"""Calendar readiness requires schema 5; older and unknown schemas fail closed."""
+"""Callback readiness requires schema 6; older and unknown schemas fail closed."""
 import unittest
 from types import SimpleNamespace
 from app.main import ready
@@ -34,14 +34,14 @@ class Connection:
         return Result(None)
 
 
-class CalendarSchemaTests(unittest.TestCase):
-    def test_readiness_requires_calendar_schema(self):
+class CallbackSchemaTests(unittest.TestCase):
+    def test_readiness_requires_callback_schema(self):
         for revision in ['0004_campaigns', '0005_calendar', '0006_callbacks', '9999_unknown']:
             with self.subTest(revision=revision):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision not in {'0005_calendar','0006_callbacks'}:
+                if revision != '0006_callbacks':
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

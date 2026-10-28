@@ -1983,3 +1983,13 @@ th {
   background: #fff;
   color: #302647;
 }
+
+.callback-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  margin-block: 20px;
+}
+.callback-list .appointment-card {
+  margin: 0;
+}

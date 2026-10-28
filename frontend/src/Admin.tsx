@@ -720,6 +720,10 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "callback.created": "Rappel programmé",
+  "callback.updated": "Rappel modifié",
+  "callback.completed": "Rappel marqué comme traité",
+  "callback.cancelled": "Rappel annulé",
   "appointment.created": "Rendez-vous créé",
   "appointment.updated": "Rendez-vous modifié",
   "campaign.updated": "Réglages de campagne modifiés",

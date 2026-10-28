@@ -119,3 +119,12 @@ campaign domain inside the same database transaction to classify the contact as
 RDV booké. It does not couple appointment state to a telecom or external calendar
 provider. Multiple meetings may overlap; cancellation preserves both histories.
 See [CALENDAR.md](CALENDAR.md) for the contract and rollout prerequisite.
+
+## Durable callback scheduling
+
+Callbacks owns dated agent reservations and immutable history in PostgreSQL, not
+broker ETA timers. Campaign suppression, source membership removal and real
+appointment booking cancel matching reservations in the same transaction. A shared
+timezone resolver serves both calendar and callback entry. The phone engine will
+own availability, atomic call claims and attempt limits; callback priority queries
+are readonly candidates and cannot originate calls. See [CALLBACKS.md](CALLBACKS.md).

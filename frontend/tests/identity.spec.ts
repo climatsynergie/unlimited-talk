@@ -751,3 +751,126 @@ test("calendrier partagé, réservation, modification et annulation", async ({
   ).toBe(true);
   await screenshot(page, "calendrier-mobile.png");
 });
+
+test("rappel programmé, sauvegarde interrompue, reprogrammation et historique", async ({
+  page,
+}) => {
+  const seed = fixture<Seed>({ op: "seed" });
+  await login(page, seed.email, seed.password, seed.factor);
+  await page.getByRole("link", { name: "Campagnes", exact: true }).click();
+  await page
+    .getByRole("button")
+    .filter({ hasText: "Campagne navigateur" })
+    .first()
+    .click();
+  await page
+    .locator(".pipeline-card")
+    .filter({ hasText: "Émilie" })
+    .first()
+    .click();
+  await page
+    .getByRole("button", { name: "Programmer un rappel", exact: true })
+    .click();
+  const future =
+    new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10) + "T14:00";
+  await page
+    .getByLabel("Date et heure du rappel", { exact: true })
+    .fill(future);
+  await page
+    .getByRole("textbox", { name: "Notes du rappel", exact: true })
+    .fill("Le client demande un rappel l’après-midi.");
+  let interrupted = false;
+  await page.route("**/api/callbacks", async (route) => {
+    if (route.request().method() === "POST" && !interrupted) {
+      interrupted = true;
+      await route.fulfill({
+        status: 503,
+        json: { detail: "Indisponibilité temporaire" },
+      });
+    } else await route.continue();
+  });
+  await page
+    .getByRole("button", { name: "Confirmer le rappel", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Indisponibilité temporaire",
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Notes du rappel", exact: true }),
+  ).toHaveValue("Le client demande un rappel l’après-midi.");
+  await page
+    .getByRole("button", { name: "Confirmer le rappel", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Étape À rappeler", exact: true }),
+  ).toContainText("Émilie");
+  await page.getByRole("link", { name: "Rappels", exact: true }).click();
+  const card = page
+    .locator(".callback-list .appointment-card")
+    .filter({ hasText: "Émilie" })
+    .first();
+  await expect(card).toBeVisible();
+  await card.click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Le client demande un rappel l’après-midi.",
+  );
+  await page
+    .getByRole("button", {
+      name: "Reprogrammer ou clôturer le rappel",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("textbox", { name: "Notes du rappel", exact: true })
+    .fill("Horaire confirmé par le client.");
+  const rescheduled =
+    new Date(Date.now() + 4 * 86400000).toISOString().slice(0, 10) + "T15:00";
+  await page
+    .getByLabel("Date et heure du rappel", { exact: true })
+    .fill(rescheduled);
+  await page
+    .getByRole("button", { name: "Enregistrer le rappel", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Reprogrammer ou clôturer le rappel",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Horaire confirmé par le client.",
+  );
+  await accessible(page);
+  await page
+    .getByRole("button", {
+      name: "Reprogrammer ou clôturer le rappel",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("combobox", { name: "Statut du rappel", exact: true })
+    .selectOption("completed");
+  await page
+    .getByRole("button", { name: "Enregistrer le rappel", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog").getByText("Traité", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+    .click();
+  await expect(card).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "Afficher les rappels", exact: true })
+    .selectOption("history");
+  await expect(card).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await accessible(page);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await screenshot(page, "rappels-mobile.png");
+});

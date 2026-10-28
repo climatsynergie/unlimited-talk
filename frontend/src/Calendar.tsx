@@ -1,3 +1,4 @@
+import { day, local, shift, when, Timezone } from "./Scheduling";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
@@ -46,59 +47,6 @@ const statuses: Record<Status, string> = {
   cancelled: "Annulé",
   no_show: "Absent",
 };
-const zones = [
-  "America/Toronto",
-  "America/Vancouver",
-  "America/Edmonton",
-  "America/Winnipeg",
-  "America/Halifax",
-  "America/St_Johns",
-  "America/Regina",
-  "America/Moncton",
-  "America/Blanc-Sablon",
-  "America/Whitehorse",
-  "UTC",
-];
-function day(value: string, zone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
-  const part = (kind: string) => parts.find((p) => p.type === kind)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-function local(value: string, zone: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: zone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
-  return `${day(value, zone)}T${parts.find((p) => p.type === "hour")?.value}:${parts.find((p) => p.type === "minute")?.value}`;
-}
-function shift(value: string, days: number) {
-  const d = new Date(value + "T12:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-function when(value: string, zone: string) {
-  const instant = new Date(value);
-  const text = new Intl.DateTimeFormat("fr-CA", {
-    timeZone: zone,
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(instant);
-  const offset = new Intl.DateTimeFormat("fr-CA", {
-    timeZone: zone,
-    timeZoneName: "longOffset",
-  })
-    .formatToParts(instant)
-    .find((p) => p.type === "timeZoneName")?.value;
-  return `${text} (${offset})`;
-}
-
 function occursOn(appointment: Appointment, value: string, zone: string) {
   const lastInstant = new Date(
     Date.parse(appointment.ends_at) - 1,
@@ -107,33 +55,6 @@ function occursOn(appointment: Appointment, value: string, zone: string) {
     day(appointment.starts_at, zone) <= value && day(lastInstant, zone) >= value
   );
 }
-function Timezone({
-  value,
-  onChange,
-  disabled = false,
-}: {
-  value: string;
-  onChange: (s: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label>
-      Fuseau horaire
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-      >
-        {Array.from(new Set([...zones, value])).map((z) => (
-          <option key={z} value={z}>
-            {z}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 export function AppointmentForm({
   contact,
   appointment,

@@ -4,6 +4,7 @@ import json
 import uuid
 from fastapi import HTTPException
 from app.identity.service import query, audit, authenticate
+from app.callbacks.service import cancel_for_contact
 
 DEFAULT_STAGES = [
     ('À appeler','new','violet'),('Pas de réponse','no_answer','amber'),
@@ -89,6 +90,7 @@ def move(db,user,campaign_id,contact_id,stage_id,version,request_id):
         raise HTTPException(409,'Ce contact est non intéressé dans toutes les campagnes. Un administrateur doit le réactiver.')
     if target['kind'] in {'non_interested','do_not_contact'}:
         flag=target['kind']
+        cancel_for_contact(db,user,contact_id,flag)
         # Identifier chosen only from the fixed semantic allowlist above.
         query(db,'UPDATE staging.contacts SET '+flag+'=true,updated_at=now() WHERE id=:id',id=contact_id)
         rows=query(db,'''SELECT m.campaign_id,m.stage_id,m.version,s.id AS destination FROM staging.campaign_contacts m

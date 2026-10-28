@@ -13,7 +13,7 @@ assert 'db' in config['services'] and config['services']['api']['environment']['
 def run(*args,data=None):
     return subprocess.check_output([*compose,'exec','-T','db',*args],input=data)
 
-tables=['contacts','contact_history','contact_import_rows','contact_imports','identity_users','campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events']
+tables=['contacts','contact_history','contact_import_rows','contact_imports','identity_users','campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events']
 fingerprint='SELECT '+" || ':' || ".join(
     "(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+" t)"
     for table in tables)

@@ -68,6 +68,8 @@ jobs:
         run: python3 tests/verify_campaign_upgrade.py
       - name: Verify calendar migration preserves existing campaigns
         run: python3 tests/verify_calendar_upgrade.py
+      - name: Verify callback migration preserves appointments
+        run: python3 tests/verify_callbacks_upgrade.py
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation
@@ -80,10 +82,12 @@ jobs:
         run: python3 tests/verify_campaigns.py
       - name: Verify shared calendar permissions and appointment transactions
         run: python3 tests/verify_calendar.py
+      - name: Verify callback reservations and priority
+        run: python3 tests/verify_callbacks.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
-      - name: Verify calendar schema readiness guards
-        run: python3 tests/verify_calendar_schema.py
+      - name: Verify additive schema readiness guards
+        run: python3 tests/verify_schema_revision.py
       - name: Verify rollback preserves the identity schema and data
         run: python3 tests/verify_identity_rollback.py
       - name: Verify synthetic contact backup and restore

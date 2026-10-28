@@ -28,9 +28,11 @@ export function Icon({
     | "check"
     | "home"
     | "campaign"
-    | "calendar";
+    | "calendar"
+    | "clock";
 }) {
   const paths = {
+    clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 7v5l3 2",
     calendar: "M3 5h18v16H3zM7 3v4M17 3v4M3 10h18M7 14h2M12 14h2M7 18h2",
     campaign: "M3 4h18v16H3zM9 4v16M15 4v16M5 8h2M11 8h2M17 8h2M5 12h2M11 12h2",
     users:

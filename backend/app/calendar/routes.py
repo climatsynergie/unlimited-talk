@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, NaiveDatetime, AwareDatetime,
 from app.identity.routes import same_origin
 from app.identity.service import query, authenticate, audit
 from app.campaigns import service
-from app.calendar.timezones import possibilities, resolve
+from app.scheduling_time import resolve
+from app.scheduling_routes import local_time as resolve_local_time
+from app.callbacks.service import cancel_for_contact
 
 router=APIRouter(prefix='/api/calendar',tags=['Calendar'],dependencies=[Depends(same_origin)])
 Status=Literal['booked','completed','cancelled','no_show']
@@ -59,9 +61,7 @@ def record(db,user,identifier,action,details):
 
 @router.get('/resolve')
 def local_time(request:Request,local_start:NaiveDatetime,timezone:str=Query(max_length=80)):
-    with request.app.state.engine.begin() as db:
-        authenticate(db,request)
-        return {'options':possibilities(local_start,timezone)}
+    return resolve_local_time(request,local_start,timezone)
 
 
 @router.get('')
@@ -118,6 +118,7 @@ def create(body:Booking,request:Request):
         query(db,'''INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,request_hash,starts_at,ends_at,timezone,notes)
             VALUES (:id,:campaign,:contact,:actor,:hash,:start,:end,:zone,:notes)''',id=body.id,campaign=body.campaign_id,contact=body.contact_id,
             actor=user['id'],hash=digest,start=starts,end=starts+timedelta(minutes=body.duration_minutes),zone=body.timezone,notes=body.notes)
+        cancel_for_contact(db,user,body.contact_id,'appointment.booked')
         result=payload(db,body.id)
         record(db,user,body.id,'appointment.created',{'after':dict(starts_at=result['starts_at'],ends_at=result['ends_at'],timezone=result['timezone'],notes=result['notes'],status=result['status'])})
         return result

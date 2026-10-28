@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, date, message } from "./api";
+import { CallbackForm } from "./Callbacks";
 import { AppointmentForm } from "./Calendar";
 import { Field, Modal, Notice, Submit } from "./ui";
 
@@ -1063,6 +1064,7 @@ function CardDetail({
 }) {
   const [data, setData] = useState<Detail | null>(null);
   const [booking, setBooking] = useState(false);
+  const [callback, setCallback] = useState(false);
   const [target, setTarget] = useState("");
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -1167,7 +1169,7 @@ function CardDetail({
     <Modal
       title={data ? name(data.contact) : "Fiche contact"}
       onClose={onClose}
-      busy={busy || booking}
+      busy={busy || booking || callback}
     >
       {error ? <Notice error>{error}</Notice> : null}
       <button
@@ -1216,6 +1218,35 @@ function CardDetail({
                 : "Non intéressé — toutes les campagnes"}
             </Notice>
           ) : null}
+          {callback ? (
+            <section>
+              <h3>Programmer un rappel</h3>
+              <CallbackForm
+                contact={{
+                  campaign_id: campaign.id,
+                  contact_id: identifier,
+                  membership_version: data.contact.version,
+                  timezone: campaign.timezone,
+                }}
+                onCancel={() => setCallback(false)}
+                onSaved={() => {
+                  setCallback(false);
+                  onChanged();
+                }}
+              />
+            </section>
+          ) : !booking &&
+            campaign.is_active &&
+            !data.contact.do_not_contact &&
+            !data.contact.non_interested ? (
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setCallback(true)}
+            >
+              Programmer un rappel
+            </button>
+          ) : null}
           {booking ? (
             <section>
               <h3>Prendre rendez-vous — Unlimited Talks</h3>
@@ -1234,7 +1265,8 @@ function CardDetail({
                 }}
               />
             </section>
-          ) : campaign.is_active &&
+          ) : !callback &&
+            campaign.is_active &&
             !data.contact.do_not_contact &&
             !data.contact.non_interested ? (
             <button
@@ -1249,7 +1281,7 @@ function CardDetail({
             Étape du pipeline
             <select
               value={target}
-              disabled={busy || booking || !campaign.is_active}
+              disabled={busy || booking || callback || !campaign.is_active}
               onChange={(e) => setTarget(e.target.value)}
             >
               {stages.map((s) => (

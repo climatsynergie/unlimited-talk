@@ -346,6 +346,7 @@ def remove(identifier:uuid.UUID,contact_id:uuid.UUID,body:Remove,request:Request
         card=service.contact_access(db,identifier,contact_id)
         if card['version']!=body.version:raise HTTPException(409,'Cette fiche a changé. Actualisez avant de la retirer.')
         query(db,'UPDATE staging.campaign_contacts SET is_active=false,version=version+1,updated_at=now() WHERE campaign_id=:campaign AND contact_id=:contact',campaign=identifier,contact=contact_id)
+        service.cancel_for_contact(db,user,contact_id,'contact.removed',identifier)
         result={'removed':True}
         service.event(db,user,identifier,'contact.removed',result,contact_id,body.request_id,service.fingerprint(payload))
         return result

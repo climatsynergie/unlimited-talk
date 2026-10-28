@@ -26,7 +26,7 @@ sql("""INSERT INTO staging.campaigns(id,name,timezone,created_by) VALUES
 tables=['contacts','contact_imports','contact_import_rows','contact_history','identity_users','campaigns','campaign_stages','campaign_contacts','contact_notes','campaign_events','campaign_agents']
 fingerprint='SELECT '+" || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+t+' t)' for t in tables)
 before=sql(fingerprint)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0005_calendar'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0005_calendar'
 assert sql(fingerprint)==before
 print('Calendar migration preserves populated identities, contacts, campaigns, memberships, notes and history: PASS')

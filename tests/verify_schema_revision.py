@@ -1,4 +1,4 @@
-"""Verify calendar readiness fails closed on unknown schema revisions.
+"""Verify application readiness fails closed on unknown schema revisions.
 
 Only a disposable local database is supported. The real preceding image is exercised separately by verify_identity_rollback.py.
 """
@@ -32,15 +32,15 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0005_calendar')
+ready(200,'0006_callbacks')
 try:
-    sql("UPDATE staging.alembic_version SET version_num='0006_callbacks'")
-    ready(200,'0006_callbacks')
+    sql("UPDATE staging.alembic_version SET version_num='0005_calendar'")
+    ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0005_calendar'")
-ready(200,'0005_calendar')
-print('Calendar schema guard: older and unknown revisions rejected, current revision restored: PASS')
+    sql("UPDATE staging.alembic_version SET version_num='0006_callbacks'")
+ready(200,'0006_callbacks')
+print('Application schema guard: older and unknown revisions rejected, current revision restored: PASS')
