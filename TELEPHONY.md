@@ -111,6 +111,28 @@ Sources checked on 2026-10-28:
 - [DigitalOcean custom-image requirements](https://docs.digitalocean.com/products/custom-images/how-to/upload/).
 - [DigitalOcean image limits](https://docs.digitalocean.com/products/custom-images/details/limits/).
 
+## Recording ownership decision
+
+Use the separate VICIdial/Asterisk engine as the recording producer. Keep the
+Twilio trunk's Call Recording setting at **Do Not Record** for this architecture.
+The application presents and authorizes playback; browser capture is not the
+recording authority. Private Spaces is the archive, with per-call metadata in
+PostgreSQL, agent-own/admin-all access and short-lived authorized playback links.
+
+Configure and prove recording on the actual supported engine build before live
+activation. Verify both speakers, correct start/stop boundaries and the stable
+original call UUID association, including when the agent has moved to a later
+call. Use trusted generated identifiers for file paths, never raw caller/name
+input. Wait for finalized files, upload with retries and verify the private copy
+before removing a local spool file. Expose pending/failed archive state accurately;
+a successful call does not prove its recording was archived.
+
+The controlled audio test must include restart/upload-failure recovery and denied
+playback by another agent. No engine or recording pipeline is installed by this
+decision alone. [Asterisk MixMonitor](https://docs.asterisk.org/Latest_API/API_Documentation/Dialplan_Applications/MixMonitor/)
+is the upstream capability reference; use the installed engine's supported native
+recording controls and options, verified in the proof.
+
 ## Required integration proof
 
 1. Prove HTTPS agent control, browser audio transport and the selected Twilio SIP
