@@ -24,9 +24,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Calendar tables are required; the deployed schema-4 compatibility release
-# remains the application rollback target after this additive migration.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0005_calendar'})
+# Preserve the calendar as a rollback target across the planned additive
+# callbacks migration. Callback tables and routes are not activated here.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0005_calendar', '0006_callbacks'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "

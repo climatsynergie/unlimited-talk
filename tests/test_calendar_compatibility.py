@@ -36,12 +36,12 @@ class Connection:
 
 class CalendarSchemaTests(unittest.TestCase):
     def test_readiness_requires_calendar_schema(self):
-        for revision in ['0004_campaigns', '0005_calendar', '9999_unknown']:
+        for revision in ['0004_campaigns', '0005_calendar', '0006_callbacks', '9999_unknown']:
             with self.subTest(revision=revision):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision != '0005_calendar':
+                if revision not in {'0005_calendar','0006_callbacks'}:
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

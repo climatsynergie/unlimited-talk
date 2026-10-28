@@ -209,3 +209,12 @@ the six-service template and credentials remain unchanged. Record a private
 predeployment data fingerprint, deploy the attested successful current main
 image, and verify readiness at schema 5 plus preservation of existing records.
 See [CALENDAR.md](CALENDAR.md) for behavior, permissions, DST handling and tests.
+
+## Callback compatibility preparation
+
+Before introducing `0006_callbacks`, deploy this schema-5 calendar compatibility
+release. It explicitly accepts schema 5 and the planned additive schema 6, without
+creating callbacks tables or activating reminders. Unknown/older revisions still
+fail readiness. Record the exact verified healthy SHA as the required predecessor
+in the reviewed deployer before permitting schema 6. Actual callback functionality
+and its migration must be tested and promoted separately.
