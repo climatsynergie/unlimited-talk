@@ -14,6 +14,9 @@ Cette livraison ajoute uniquement une frontière fournisseur hors réseau, le SD
 Python officiel et ses tests. Aucun routeur téléphonique, migration, accès public
 aux webhooks, jeton navigateur réel ou numérotation n'est activé. Aucune nouvelle
 clé n'a été collectée, aucun paramètre Twilio ni routage de numéro modifié.
+Un outil de préparation privée des identifiants Voice est disponible séparément
+des conteneurs ; il ne fait qu'une lecture du numéro sélectionné lorsqu'on lui
+demande de vérifier la connexion.
 
 ## Responsabilités cibles
 
@@ -73,11 +76,21 @@ ses transactions ne sont pas livrés.
 
 ## Informations nécessaires avant l'essai réel
 
-1. Confirmer un destinataire de test explicitement autorisé. Aucun numéro de la
+Le 29 octobre 2026, l'utilisatrice a désigné le téléphone d'Omar comme destinataire
+de l'essai et confirmé que le compte sert uniquement à Unlimited Talks. Le numéro
+complet autorisé est conservé dans le plan privé du serveur, pas dans ce dépôt.
+Une lecture fournisseur avec les identifiants déjà configurés pour l'ancienne
+application a confirmé l'existence de son application TwiML et de son numéro.
+Le compte correspond à celui du numéro réservé aux tests ; les deux numéros sont
+distincts. Cette lecture ne prouve pas un appel actuel ni l'état du serveur ancien.
+
+1. Utiliser uniquement le destinataire de test confirmé. Aucun numéro de la
    base importée ne sert au test. Son pays doit être permis dans le compte retenu.
-2. Confirmer si le compte Twilio sert à d'autres services. Une clé Standard peut
+2. Conserver le compte Unlimited Talks confirmé. Une clé Standard peut
    signer les jetons SDK mais possède des droits plus larges qu'une clé Restricted.
-   Préférer un sous-compte dédié si le compte est partagé. Vérifier alors ses
+   Créer une clé distincte et une nouvelle application TwiML pour la nouvelle
+   version ; préserver les identifiants, l'application et les routes de l'ancienne.
+   Si d'autres services sont ajoutés, préférer un sous-compte dédié. Vérifier alors ses
    propres limites, numéros et capacités ; ne pas supposer qu'il hérite des 5 CPS.
 3. Préparer la clé Standard US1 et l'application TwiML dans ce compte, puis une
    SharedKey de webhook et une règle limitée exactement au nouveau préfixe URL.
@@ -89,6 +102,29 @@ besoins. Aucun déplacement de numéro vers un autre compte ne doit être fait s
 vérification préalable de son usage et de son routage. La validation statique du
 profil ne prouve pas l'appartenance de la clé, du numéro ou de l'application : un
 contrôle fournisseur et l'appel réel devront confirmer ces associations.
+
+### Saisie de la clé Voice
+
+`scripts/twilio_voice_preflight.py` réutilise les contrôles de fichiers privés de
+`staging_twilio_preflight.py`. Les deux fichiers doivent être installés côte à côte
+dans un dossier root privé. Les actions sont séparées :
+
+- `plan` reçoit sur l'entrée standard uniquement le destinataire autorisé et
+  l'origine HTTPS ; il lie le plan au compte et au numéro déjà configurés. Il
+  refuse de remplacer un plan existant. L'origine actuelle est bornée au domaine
+  de la nouvelle application ; un changement de domaine demande une revue du code.
+- `store` demande invisiblement le SID SK et le secret de la nouvelle clé Standard
+  US1, avec confirmation. Il refuse la clé Restricted déjà configurée et tout
+  remplacement. Le fichier root 600 reste hors des conteneurs et du dépôt.
+- `check` fait seulement un GET du numéro PN sélectionné avec la nouvelle clé,
+  sans redirection. La réponse vérifie compte, numéro et capacité voix ; le rapport
+  masque les secrets et numéros complets. Il ne prétend pas vérifier le type
+  Standard, l'acceptation d'un jeton SDK ou un appel. Une clé Restricted dotée du
+  droit de lecture pourrait aussi réussir ce GET : choisir Standard en console
+  reste nécessaire, puis prouver l'acceptation SDK lors de l'essai contrôlé.
+
+Ces actions ne créent aucune application TwiML ni SharedKey, ne modifient aucun
+routage et n'activent aucun appel. Ne pas réutiliser les clés de l'ancienne version.
 
 ## Livraison de bout en bout à réaliser
 
