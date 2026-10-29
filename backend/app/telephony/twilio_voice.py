@@ -19,7 +19,9 @@ from twilio.twiml.voice_response import VoiceResponse
 TOKEN_TTL_SECONDS = 300
 MAX_TEST_CALL_SECONDS = 180
 MAX_WEBHOOK_BYTES = 16384
-HOOK_KINDS = frozenset({'voice', 'status', 'recording', 'finish'})
+FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status'})
+INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish'})
+HOOK_KINDS = FIXED_HOOK_KINDS | INTENT_HOOK_KINDS
 CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent'})
 
 
@@ -99,13 +101,17 @@ def browser_token(profile: ControlledVoiceProfile, agent_id: UUID, intent_id: UU
     return token.to_jwt()
 
 
-def webhook_url(profile: ControlledVoiceProfile, kind: str, intent_id: UUID):
-    if kind not in HOOK_KINDS or not isinstance(intent_id, UUID):
+def webhook_url(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | None = None):
+    if (kind not in HOOK_KINDS or (kind in FIXED_HOOK_KINDS and intent_id is not None)
+            or (kind in INTENT_HOOK_KINDS and not isinstance(intent_id, UUID))):
         raise VoiceConfigurationError('Route téléphonique invalide.')
-    return profile.public_origin + '/api/telephony/twilio/' + kind + '/' + str(intent_id)
+    path = '/api/telephony/twilio/' + kind
+    if kind in INTENT_HOOK_KINDS:
+        path += '/' + str(intent_id)
+    return profile.public_origin + path
 
 
-def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: UUID,
+def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | None,
                          body: bytes, content_type: str, signature: str, signing_settings: str):
     """Authenticate all form values against a configured URL, never proxy headers.
 
@@ -142,6 +148,16 @@ def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: 
             raise ValueError
         if params.get('AccountSid') != profile.account_sid or not sid(params.get('CallSid'), 'CA'):
             raise ValueError
+        if kind == 'voice':
+            # A TwiML Application has one fixed VoiceUrl. Authenticate the entire
+            # form first, then validate its intent and SDK identity. The durable
+            # gate must still check user/session/expiry and consume atomically.
+            intent = UUID(params.get('Intent', ''))
+            if str(intent) != params.get('Intent'):
+                raise ValueError
+            identity = params.get('From', '')
+            if not re.fullmatch(r'client:ut_[0-9a-f]{32}_' + intent.hex, identity):
+                raise ValueError
     except (ValueError, UnicodeError, TypeError):
         raise VoiceWebhookError('Notification téléphonique non authentifiée.') from None
     return params

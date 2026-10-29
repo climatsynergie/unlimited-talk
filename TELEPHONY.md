@@ -10,13 +10,15 @@ les deux serveurs proposés dans cette exploration pour le parcours Twilio direc
 
 Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
 le socle. Les communications de l'application déployée sont toujours désactivées.
-Cette livraison ajoute uniquement une frontière fournisseur hors réseau, le SDK
-Python officiel et ses tests. Aucun routeur téléphonique, migration, accès public
-aux webhooks, jeton navigateur réel ou numérotation n'est activé. Aucune nouvelle
-clé n'a été collectée, aucun paramètre Twilio ni routage de numéro modifié.
-Un outil de préparation privée des identifiants Voice est disponible séparément
-des conteneurs ; il ne fait qu'une lecture du numéro sélectionné lorsqu'on lui
-demande de vérifier la connexion.
+Le code fournit une frontière fournisseur hors réseau, le SDK Python officiel et
+ses tests. Aucun routeur téléphonique, migration, accès public aux webhooks, jeton
+navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
+Voice ont été saisis dans un fichier privé du serveur ; sa lecture du numéro de
+test a réussi. Une nouvelle application TwiML distincte a ensuite été créée et
+vérifiée le 29 octobre 2026. Les trois applications précédentes et les paramètres
+des quatre numéros sont restés identiques après création. Aucun numéro n'a été
+assigné à cette nouvelle application ; son VoiceUrl n'est pas encore accessible.
+Les outils de préparation restent séparés des conteneurs applicatifs.
 
 ## Responsabilités cibles
 
@@ -57,6 +59,12 @@ Les SMS restent une livraison distincte ; aucune messagerie n'est envoyée ici.
   et chemin construits depuis la configuration. Les en-têtes Host/Forwarded ne
   décident pas de l'URL signée. Les paramètres supplémentaires et répétés restent
   inclus dans la vérification ; les champs critiques ambigus sont refusés.
+- Entrée initiale fixe `/api/telephony/twilio/voice`, correspondant à l'unique
+  VoiceUrl d'une application TwiML. Le champ `Intent` est vérifié après la
+  signature, sous forme UUID canonique, et doit correspondre à l'identité SDK
+  `From`. Cette cohérence ne remplace pas la réservation durable. Le statut parent
+  utilise `/api/telephony/twilio/parent-status` et exigera un CallSid déjà lié en
+  base. Les autres notifications conservent un chemin comprenant l'intention.
 - Signature avec une SharedKey dédiée ; identifiant et algorithme doivent
   correspondre au profil. Aucun repli vers le jeton principal du compte. Le SDK
   Python 9.12.0 utilise ici son validateur HMAC_SHA1 ; HMAC_SHA256 est refusé tant
@@ -126,6 +134,34 @@ dans un dossier root privé. Les actions sont séparées :
 Ces actions ne créent aucune application TwiML ni SharedKey, ne modifient aucun
 routage et n'activent aucun appel. Ne pas réutiliser les clés de l'ancienne version.
 
+### Provisionnement de l'application TwiML
+
+`scripts/twilio_voice_application.py`, installé avec les deux outils précédents,
+sépare `prepare`, `apply` et `check`. Le nom est `unlimited-talk-voice`, sans suffixe
+d'environnement. VoiceUrl et StatusCallback utilisent les deux routes fixes
+ci-dessus, en POST. CNAM payant et connexion publique depuis d'autres comptes
+sont désactivés ; aucune route SMS ni repli vers l'ancienne application.
+
+`prepare` lit l'inventaire du compte, vérifie le numéro de test et refuse un nom
+déjà occupé. Il conserve dans un journal root 600 les empreintes de toutes les
+propriétés des applications et numéros existants, hormis les dates. `apply` écrit
+et synchronise l'état `requested` avant l'unique POST de création autorisé. Une
+réponse perdue laisse ce résultat incertain ; les invocations suivantes font
+uniquement un rapprochement en lecture, sans deuxième création. Un nom ambigu,
+une modification concurrente ou une configuration différente impose une revue.
+
+La vérification relit la nouvelle application par son SID, vérifie ses paramètres
+et compare toutes les ressources précédentes. Aucun endpoint d'appel, modification
+de numéro ou modification d'application existante n'est autorisé par le transport.
+Un verrou exclusif protège les exécutions concurrentes ; les journaux sont écrits
+par remplacement atomique et synchronisation disque. Le SID AP vérifié reste dans
+`/etc/unlimited-talk-staging/twilio-voice-application.json`, hors du dépôt.
+
+La création du conteneur de configuration TwiML ne prouve pas les webhooks, une
+SharedKey, les jetons SDK ni l'audio. Aucune règle de signature n'a encore été
+appliquée. Le service durable et les routes publiques signées devront être livrés
+avant de distribuer un jeton réel ou de permettre un appel.
+
 ## Livraison de bout en bout à réaliser
 
 1. Schéma additif pour intentions, événements et enregistrements, droits bornés,
@@ -179,6 +215,7 @@ et ses seuils devront être mesurés ; aucun objectif de zéro attente n'est pro
 ## Références officielles
 
 - [Voice SDK](https://www.twilio.com/docs/voice/sdks/javascript).
+- [Applications TwiML](https://www.twilio.com/docs/usage/api/applications).
 - [Jetons SDK : clés Main/Standard, pas Restricted](https://www.twilio.com/docs/iam/access-tokens).
 - [Signatures dédiées SharedKey](https://www.twilio.com/docs/usage/webhooks/webhook-shared-keys).
 - [Validation des notifications](https://www.twilio.com/docs/usage/webhooks/webhooks-security).

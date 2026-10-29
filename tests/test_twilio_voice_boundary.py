@@ -74,6 +74,42 @@ class VoiceBoundaryTests(unittest.TestCase):
                 self.verify(body,signature,**overrides)
         with self.assertRaises(VoiceConfigurationError):webhook_url(self.profile,'../../Calls',self.intent)
 
+    def test_fixed_voice_entry_authenticates_intent_and_matching_sdk_identity(self):
+        fields = self.fields + [('Intent', str(self.intent)),
+                                ('From', 'client:' + client_identity(self.agent, self.intent))]
+        url = webhook_url(self.profile, 'voice')
+        self.assertEqual(url, self.profile.public_origin + '/api/telephony/twilio/voice')
+        signature = RequestValidator(self.profile.shared_key_secret).compute_signature(url, FormData(fields))
+        params = self.verify(urlencode(fields).encode(), signature, kind='voice', intent_id=None)
+        self.assertEqual(params['Intent'], str(self.intent))
+        for replacement in [str(UUID(int=4)), 'invalid', self.intent.hex]:
+            changed = [(key, replacement if key == 'Intent' else value) for key, value in fields]
+            # Even an authentic provider form must bind the exact intent to its
+            # SDK identity. A valid signature alone cannot authorize a call.
+            signed = RequestValidator(self.profile.shared_key_secret).compute_signature(url, FormData(changed))
+            with self.assertRaises(VoiceWebhookError):
+                self.verify(urlencode(changed).encode(), signed, kind='voice', intent_id=None)
+        for missing in ['Intent', 'From']:
+            changed = [(key, value) for key, value in fields if key != missing]
+            signed = RequestValidator(self.profile.shared_key_secret).compute_signature(url, FormData(changed))
+            with self.assertRaises(VoiceWebhookError):
+                self.verify(urlencode(changed).encode(), signed, kind='voice', intent_id=None)
+        for extra in [('Intent', str(self.intent)), ('From', 'client:' + client_identity(self.agent, self.intent))]:
+            changed = fields + [extra]
+            signed = RequestValidator(self.profile.shared_key_secret).compute_signature(url, FormData(changed))
+            with self.assertRaises(VoiceWebhookError):
+                self.verify(urlencode(changed).encode(), signed, kind='voice', intent_id=None)
+        with self.assertRaises(VoiceConfigurationError):webhook_url(self.profile, 'voice', self.intent)
+        with self.assertRaises(VoiceConfigurationError):webhook_url(self.profile, 'status')
+
+    def test_parent_status_uses_fixed_url_and_requires_a_signed_owned_account_call(self):
+        url = webhook_url(self.profile, 'parent-status')
+        signature = RequestValidator(self.profile.shared_key_secret).compute_signature(url, FormData(self.fields))
+        params = self.verify(urlencode(self.fields).encode(), signature, kind='parent-status', intent_id=None)
+        self.assertEqual(params['CallSid'], self.fields[1][1])
+        with self.assertRaises(VoiceWebhookError):
+            self.verify(urlencode(self.fields).encode(), signature, kind='voice', intent_id=None)
+
     def test_refuses_key_algorithm_and_legacy_signature_fallback(self):
         body,signature=self.signed()
         for settings in ['',None,self.settings.replace('HMAC_SHA1','HMAC_SHA256'),
