@@ -1,5 +1,9 @@
 # Installation téléphonique Unlimited Talks
 
+> Exploration VICIdial historique. Le parcours courant est décrit dans
+> [TELEPHONY.md](../../TELEPHONY.md) et utilise Twilio Programmable Voice.
+> Les réserves sur cette image ne bloquent pas ce parcours direct.
+
 Évaluation du 28 octobre 2026. Statut : image de laboratoire préparée, démarrage
 BIOS et initialisation cloud sur deux clones locaux validés. Démarrage réel
 DigitalOcean et choix du moteur pour la production non validés. Aucun achat, nouvel

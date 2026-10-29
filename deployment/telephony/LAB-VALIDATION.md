@@ -1,5 +1,9 @@
 # Validation locale de l'image téléphonique
 
+> Exploration VICIdial historique. Le parcours courant est décrit dans
+> [TELEPHONY.md](../../TELEPHONY.md) et utilise Twilio Programmable Voice.
+> Les réserves sur cette image ne bloquent pas ce parcours direct.
+
 28 octobre 2026. Ce rapport décrit des essais réels dans QEMU/KVM, sans serveur
 payant, sans modification du CRM et sans appel. Une validation locale ne constitue
 pas une validation DigitalOcean, de VICIdial en cluster ou de capacité téléphonique.

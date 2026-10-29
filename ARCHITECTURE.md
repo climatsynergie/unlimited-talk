@@ -13,8 +13,11 @@ flow must pass verification in the intended environment.
   asynchronous work; a broker outage must not erase durable business state.
 - Private object storage holds original imports and recordings, separate from
   database metadata. Retention and backup restore are explicit requirements.
-- A separate VICIdial/Asterisk installation is the single dialing engine,
-  subject to an integration proof. Its internal database remains separate.
+- Twilio Programmable Voice is the selected communications provider: browser
+  media through the Voice SDK, call control through the backend. PostgreSQL
+  remains authoritative for eligibility, intent reservations and agent state.
+- No VICIdial/Asterisk host is required for this selected path. The previous
+  SIP/image exploration remains historical evidence, not a provisioning plan.
 - Twilio supplies numbers/telecom and messaging. No HighLevel dependency.
 - Staging and production have separate credentials, databases and resources.
 - Twenty simultaneous agents is an acceptance target to load-test, not a
@@ -124,6 +127,6 @@ See [CALENDAR.md](CALENDAR.md) for the contract and rollout prerequisite.
 Callbacks owns dated agent reservations and immutable history in PostgreSQL, not
 broker ETA timers. Campaign suppression, source membership removal and real
 appointment booking cancel matching reservations in the same transaction. A shared
-timezone resolver serves both calendar and callback entry. The phone engine will
+timezone resolver serves both calendar and callback entry. The communications module will
 own availability, atomic call claims and attempt limits; callback priority queries
 are readonly candidates and cannot originate calls. See [CALLBACKS.md](CALLBACKS.md).

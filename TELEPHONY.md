@@ -1,212 +1,154 @@
-# Telephony integration proof
+# Téléphonie Unlimited Talks — Twilio Programmable Voice
 
-## Actual state and next delivery
+## Choix courant et état réel
 
-The CRM/calendar/callback application is functional on managed staging. Its
-communications mode remains disabled, and its runtime database guard rejects
-live mode. No Asterisk/VICIdial service or Twilio credential configuration was
-found on the application host during this preparation. No calls, messages,
-number purchases, trunk creation, routing changes or paid compute provisioning
-are performed by this preparation.
+Le parcours retenu utilise Twilio Programmable Voice directement avec l'interface
+Unlimited Talks. VICIdial/Asterisk n'est plus un prérequis de cette intégration.
+L'[exploration SIP précédente](deployment/telephony/SIP-EXPLORATION.md), ses profils
+privés et son image de laboratoire sont conservés comme historique. Ne pas créer
+les deux serveurs proposés dans cette exploration pour le parcours Twilio direct.
 
-The next proof connects one controlled agent and one explicitly approved test
-phone using a selected Twilio number, on an isolated telephony engine. It must
-prove real audio and application control before loading customer campaigns or
-claiming support for twenty concurrent agents. Synthetic tests validate code
-boundaries; they do not validate SIP, real audio, answer detection or capacity.
+Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
+le socle. Les communications de l'application déployée sont toujours désactivées.
+Cette livraison ajoute uniquement une frontière fournisseur hors réseau, le SDK
+Python officiel et ses tests. Aucun routeur téléphonique, migration, accès public
+aux webhooks, jeton navigateur réel ou numérotation n'est activé. Aucune nouvelle
+clé n'a été collectée, aucun paramètre Twilio ni routage de numéro modifié.
 
-The installation assessment, proposed host sizing, image-build procedure and
-unverified deployment gates are in [the installation dossier](deployment/telephony/INSTALLATION.md).
-A laboratory image and two local cloud-init clone proofs are documented there.
-DigitalOcean boot, engine security maintenance and production approval remain
-unverified. No customer call has been placed.
-
-## Ownership and topology
+## Responsabilités cibles
 
 ```mermaid
 flowchart LR
-    Agent["Agent: application et casque navigateur"] --> CRM["CRM: identité, contacts, campagnes, RDV, rappels"]
-    CRM --> PG["PostgreSQL: décisions, réservations et historique"]
-    CRM <-->|"Contrôle privé authentifié"| PBX["Moteur séparé VICIdial / Asterisk"]
-    Agent <-->|"Audio WebRTC protégé"| PBX
-    PBX <-->|"SIP trunk"| Twilio["Twilio"]
-    Twilio <--> Phone["Téléphone de test approuvé"]
-    PBX --> Archive["Archivage privé des enregistrements"]
+    Agent["Agent : interface et casque navigateur"] --> CRM["API : identité et décisions"]
+    CRM --> PG["PostgreSQL : réservations, appels, historique"]
+    CRM --> Jobs["Travaux durables : lancement et rapprochement"]
+    Jobs --> Twilio["Twilio Programmable Voice"]
+    Agent <-->|"Audio Voice SDK"| Twilio
+    Twilio <-->|"Notifications signées"| CRM
+    Twilio <--> Phone["Destinataire autorisé"]
+    Jobs --> Archive["Archive privée Spaces"]
 ```
 
-The application remains the business authority. The telephony engine owns live
-channels, media, dialing mechanics and its own internal database. It does not
-receive the CRM PostgreSQL password. Telephony credentials, administrative APIs,
-AMI/ARI and the engine's database do not belong in the browser or public CRM API.
-SIP trunk authentication is separate from a Twilio REST API key.
+Twilio transporte les médias et établit les communications. Le module applicatif
+communications doit décider qui appeler et quand, avec PostgreSQL comme autorité.
+Redis/Celery transporte du travail, pas la seule copie des réservations. L'API
+ne doit pas lancer indépendamment deux appels pour la même intention après un
+délai ou une notification tardive. Chaque commande externe est persistée avant
+son effet ; tout résultat incertain est rapproché avant une nouvelle tentative.
 
-VICIdial/Asterisk remains the intended single dialing engine, subject to proof.
-The application must not independently originate the same customer call via a
-second Twilio REST dialer. A provider read-only check is not such a dialer.
+Twilio devient le producteur des enregistrements, ensuite archivés dans Spaces
+privé avec métadonnées et permissions dans PostgreSQL. Ce choix remplace celui
+d'Asterisk dans l'exploration précédente. Le réglage d'enregistrement du trunk SIP
+historique n'est pas modifié : il ne sert pas au parcours Programmable Voice.
+Les SMS restent une livraison distincte ; aucune messagerie n'est envoyée ici.
 
-## Private Twilio read-only preparation
+## Frontière fournisseur livrée
 
-Install `scripts/staging_twilio_preflight.py` as root700 at
-`/root/staging-twilio-preflight.py`. Its CLI commands are:
+`backend/app/telephony/twilio_voice.py` fournit des fonctions sans client réseau :
 
-```sh
-python3 /root/staging-twilio-preflight.py store
-python3 /root/staging-twilio-preflight.py check
-```
+- Profil contrôlé : compte, application TwiML, origine HTTPS canonique et unique
+  destinataire approuvé côté serveur. Aucun paramètre navigateur `To` n'est utilisé.
+- Jeton Voice SDK de cinq minutes, identité liée à l'agent et à l'intention,
+  autorisation sortante pour une seule application TwiML, sans réception d'appels.
+- Vérification des formulaires signés avec le validateur du SDK officiel, origine
+  et chemin construits depuis la configuration. Les en-têtes Host/Forwarded ne
+  décident pas de l'URL signée. Les paramètres supplémentaires et répétés restent
+  inclus dans la vérification ; les champs critiques ambigus sont refusés.
+- Signature avec une SharedKey dédiée ; identifiant et algorithme doivent
+  correspondre au profil. Aucun repli vers le jeton principal du compte. Le SDK
+  Python 9.12.0 utilise ici son validateur HMAC_SHA1 ; HMAC_SHA256 est refusé tant
+  qu'un validateur officiel compatible n'est pas intégré et vérifié.
+- TwiML du premier essai : destination fixe, sonnerie de 20 secondes maximum,
+  durée de 180 secondes maximum, enregistrement double canal depuis la réponse,
+  notifications de statut/enregistrement et raccrochage final.
 
-The first command invisibly collects the selected account SID (`AC…`), restricted
-API key SID (`SK…`), secret plus confirmation, phone-number SID (`PN…`) and expected
-international caller number. It creates only the root-owned mode600 file
-`/etc/unlimited-talk-staging/twilio-preflight.json`, in the existing private host
-configuration directory, and refuses overwrite or symbolic links. These values
-must not be pasted into chat, Git, workflow inputs, command arguments or logs.
-The file is not mounted into application containers.
+**Ces fonctions ne constituent pas une autorisation d'appel.** Un jeton n'est pas
+une réservation à usage unique. Une signature authentique n'empêche pas le rejeu.
+Avant de retourner le TwiML, le futur service doit atomiquement consommer une
+intention non expirée et vérifier l'utilisateur, sa session toujours active, son
+identité SDK et le CallSid déjà lié. Les notifications doivent être liées à cette
+intention et aux identifiants d'appel/enregistrement attendus. Les fonctions sont
+volontairement inaccessibles depuis les routes actuelles tant que ce service et
+ses transactions ne sont pas livrés.
 
-Use an API key named `unlimited-talk-staging-readonly`, type **Restricted**, region
-**United States (US1)**, with only
-`twilio/phone-numbers/active-numbers/read`. Select the intended account/subaccount
-in the console before creating the key or copying account/number identifiers.
-The console's secret is available at creation; store it in the team's password
-manager and enter it using the private server prompt.
+## Informations nécessaires avant l'essai réel
 
-`check` makes one HTTPS **GET** for the configured IncomingPhoneNumber, with
-certificate verification, a fixed Twilio host/path, strict SID validation,
-bounded response size, timeout and refused redirects. It verifies the response's
-account, number SID and expected E.164 number, and reports announced Voice/SMS
-capabilities plus whether a SIP trunk or inbound route is already associated.
-It never displays credentials, the full number or an inbound webhook URL. The
-client exposes no call/message/write operation. Unit tests exercise the boundary
-without contacting Twilio. The operator must verify the key's granted scope in
-the console: successful read access alone does not prove it has no wider grants.
+1. Confirmer un destinataire de test explicitement autorisé. Aucun numéro de la
+   base importée ne sert au test. Son pays doit être permis dans le compte retenu.
+2. Confirmer si le compte Twilio sert à d'autres services. Une clé Standard peut
+   signer les jetons SDK mais possède des droits plus larges qu'une clé Restricted.
+   Préférer un sous-compte dédié si le compte est partagé. Vérifier alors ses
+   propres limites, numéros et capacités ; ne pas supposer qu'il hérite des 5 CPS.
+3. Préparer la clé Standard US1 et l'application TwiML dans ce compte, puis une
+   SharedKey de webhook et une règle limitée exactement au nouveau préfixe URL.
+   Ne pas appliquer une règle DEFAULT à tout le compte. Stockage privé, saisie
+   invisible, aucune valeur secrète dans le chat, Git ou navigateur.
 
-A successful read does **not** prove account billing status, geographic dialing
-permissions, outgoing caller-ID policy, SIP trunk authentication, reachable media,
-callback delivery, recording access or usable audio. Those require later checks.
-Existing inbound routes remain unchanged. Parent Auth Tokens and broad Main API
-keys are not needed for this number-resource read.
+La clé actuelle en lecture seule et le mot de passe SIP ne satisfont pas ces
+besoins. Aucun déplacement de numéro vers un autre compte ne doit être fait sans
+vérification préalable de son usage et de son routage. La validation statique du
+profil ne prouve pas l'appartenance de la clé, du numéro ou de l'application : un
+contrôle fournisseur et l'appel réel devront confirmer ces associations.
 
-Official references:
+## Livraison de bout en bout à réaliser
 
-- [Create API keys in the Twilio console](https://www.twilio.com/docs/iam/api-keys/keys-in-console).
-- [Restricted keys](https://www.twilio.com/docs/iam/api-keys/restricted-api-keys).
-- [Phone-number read permission mapping](https://docs-resources.prod.twilio.com/documents/Twilio_Restricted_API_Keys_Permissions_-_Numbers_Permissions.pdf).
-- [IncomingPhoneNumber resource](https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource).
-- [Elastic SIP Trunking](https://www.twilio.com/docs/sip-trunking).
+1. Schéma additif pour intentions, événements et enregistrements, droits bornés,
+   identifiants uniques et un appel actif par agent. Préparer la compatibilité de
+   retour arrière avant la migration. Ne pas élargir les gardes de base à un mode
+   général `live` pour rendre un test possible.
+2. API de création d'intention limitée aux administrateurs authentifiés pour le
+   premier essai ; contrôles de session, CSRF/origine et idempotence. Jeton court
+   seulement après réservation ; destinataire approuvé exclusivement côté serveur.
+3. Webhooks sur des routes POST précises, limitées en taille/fréquence et signées.
+   Exceptions au périmètre BasicAuth uniquement pour ces routes, jamais pour
+   l'ensemble de l'API. Conserver MFA/permissions sur les pages et opérations humaines.
+4. Interface française : préparation du casque, appel, état réel, raccrochage et
+   erreurs lisibles. Mettre à jour CSP et Permissions-Policy selon les domaines
+   du SDK et tester depuis les réseaux réels. Ne pas désactiver globalement CSP.
+5. Événements dupliqués, tardifs et désordonnés : progression monotone de l'appel,
+   aucun retour d'un état terminal à un état actif ; rapprochement après coupure.
+6. Archivage durable : charger le recording par SID attendu depuis les endpoints
+   Twilio autorisés, jamais une URL arbitraire du formulaire. Vérifier métadonnées,
+   deux canaux et copie privée avant suppression du fournisseur. Reprise après
+   échec d'upload et contrôle de lecture agent/admin ; aucun lien fournisseur public.
+7. Enchaînement, campagnes et rappels seulement après cette preuve : réservations
+   canoniques globales, pas de doublon entre campagnes, deux tentatives/jour local,
+   intervalle de deux heures, plages de campagne, exclusions et rappels attribués.
+   Pause/arrêt, changement de campagne et formulaire RDV doivent arbitrer l'état
+   réel de l'agent avant chaque lancement ; un RDV non sauvegardé conserve l'attente.
+8. Monter progressivement jusqu'à vingt agents avec médias réels, pannes,
+   raccrochages et enregistrements. Mesurer délai entre conversations, délai de
+   connexion après réponse, taux de réponse, erreurs et coût. Aucun test simulé
+   de cette livraison ne prouve la capacité ou la qualité audio.
 
-## Engine installation decision: verify before provisioning
+Le réseau des conteneurs bloque actuellement les sorties WAN arbitraires. Les
+flux fournisseur nécessaires devront passer par une sortie explicitement bornée,
+avec vérification TLS. La nouvelle configuration des webhooks et des secrets doit
+être prête avant toute ouverture. L'interface ne doit pas proposer de bouton
+fonctionnel tant que ces prérequis et la réservation durable ne sont pas validés.
 
-The vendor's site currently lists ViciBox 12.0.2 as stable, and 13.0.0-beta4 as a
-release candidate with a planned future stable release. The current vendor manual
-also identifies urgent PHP fixes for older installations. Its 13.0 documentation
-uses openSUSE Leap 16.0; the stable 12 server page lists Leap 15.6, which openSUSE
-states reached end of maintenance in April 2026. These are time-sensitive findings,
-not approval to deploy an unpatched image or a beta as a production baseline.
-Recheck current release/support and vendor fixes when choosing the installation.
+## CPS et attente des agents
 
-DigitalOcean custom images require a supported disk-image format, BIOS boot,
-correct cloud-init and SSH configuration; the ViciBox ISO cannot simply be selected
-as an existing Ubuntu Droplet image. Validate the complete supported installation
-and boot/network path, or a vendor-supported maintained deployment, before asking
-for a new paid host. No unreviewed install script is run on the application host.
+La console du compte consulté indique 5 CPS. Cela concerne les appels créés par
+l'API REST ; les appels `<Dial>` et entrants ne partagent pas cette limitation.
+Le premier essai navigateur/TwiML ne démontre donc pas la capacité de lancement
+d'un composeur REST à vingt agents. Ni 5 CPS, ni vingt comptes utilisateurs ne
+prouvent vingt conversations ni une attente minimale. Ne pas engager une nouvelle
+augmentation payante sans vérifier le compte, son tarif et le parcours final.
 
-Sources checked on 2026-10-28:
+Le taux de réponse et la durée des conversations déterminent les besoins de
+lancement. L'AMD peut introduire un délai ou classer une personne à tort. Son mode
+et ses seuils devront être mesurés ; aucun objectif de zéro attente n'est promis.
 
-- [Official ViciBox server releases](https://vicibox.com/server/).
-- [Current ViciBox manual and security errata](https://docs.vicibox.com/en/latest/).
-- [openSUSE maintenance notice](https://news.opensuse.org/2026/04/01/leap-15-eol/).
-- [DigitalOcean custom-image requirements](https://docs.digitalocean.com/products/custom-images/how-to/upload/).
-- [DigitalOcean image limits](https://docs.digitalocean.com/products/custom-images/details/limits/).
+## Références officielles
 
-## Recording ownership decision
+- [Voice SDK](https://www.twilio.com/docs/voice/sdks/javascript).
+- [Jetons SDK : clés Main/Standard, pas Restricted](https://www.twilio.com/docs/iam/access-tokens).
+- [Signatures dédiées SharedKey](https://www.twilio.com/docs/usage/webhooks/webhook-shared-keys).
+- [Validation des notifications](https://www.twilio.com/docs/usage/webhooks/webhooks-security).
+- [CPS et Calls API](https://www.twilio.com/docs/voice/api/call-resource).
+- [Détection des répondeurs](https://www.twilio.com/docs/voice/answering-machine-detection).
 
-Use the separate VICIdial/Asterisk engine as the recording producer. Keep the
-Twilio trunk's Call Recording setting at **Do Not Record** for this architecture.
-The application presents and authorizes playback; browser capture is not the
-recording authority. Private Spaces is the archive, with per-call metadata in
-PostgreSQL, agent-own/admin-all access and short-lived authorized playback links.
-
-Configure and prove recording on the actual supported engine build before live
-activation. Verify both speakers, correct start/stop boundaries and the stable
-original call UUID association, including when the agent has moved to a later
-call. Use trusted generated identifiers for file paths, never raw caller/name
-input. Wait for finalized files, upload with retries and verify the private copy
-before removing a local spool file. Expose pending/failed archive state accurately;
-a successful call does not prove its recording was archived.
-
-The controlled audio test must include restart/upload-failure recovery and denied
-playback by another agent. No engine or recording pipeline is installed by this
-decision alone. [Asterisk MixMonitor](https://docs.asterisk.org/Latest_API/API_Documentation/Dialplan_Applications/MixMonitor/)
-is the upstream capability reference; use the installed engine's supported native
-recording controls and options, verified in the proof.
-
-## Required integration proof
-
-1. Prove HTTPS agent control, browser audio transport and the selected Twilio SIP
-   trunk with one approved destination. Check outbound and inbound audio, hangup,
-   caller ID, late/duplicate events and channel recovery. No customer list is used.
-2. Map one CRM user, campaign, canonical contact and stable call UUID to their
-   engine session/lead/channel identifiers. Use the recorded original call ID for
-   every disposition and note, even after a later call starts.
-3. Prove a synchronous, authenticated, fail-closed pre-origination gate for every
-   attempted outbound call. The gate must atomically reserve the canonical contact
-   and apply global blocks, active assignments, calling hours and attempt limits.
-   A post-call URL notification is evidence after an event, not a pre-call lock.
-4. Two simultaneous requests for the same contact in different campaigns must
-   never produce two call originations. Enqueuing leads in a predictive hopper is
-   insufficient unless every actual dial path is guarded. Prove the gate on the
-   installed engine revision, including manual, callback and automatic paths.
-5. The agent controller must respect pause/stop, an active call, and an open RDV
-   form. Failed RDV saves keep the hold. Do not equate a pause API acknowledgment
-   with immediate physical call suspension; reconcile the actual engine state.
-6. Agent-owned due callbacks precede eligible ordinary campaign contacts, wait
-   for their owner and remain reserved across campaigns. Campaign switching must
-   not reassign them. Enforce the global two attempts/local day and two-hour gap
-   for callback attempts too. No-answer/machine attempts count; normal retry
-   eligibility returns to the queue tail. Machines disconnect without a message.
-7. Persist an external-command intent before side effects. Correlate acknowledgments
-   and provider/channel identifiers. After a timeout, reconcile before retrying an
-   origination. A generic Celery retry must not silently place a second call.
-8. Verify private recording ingestion, metadata association and authorization:
-   agent's own calls versus admin's all. Downloadable provider URLs/credentials
-   do not go into public pages or shared buckets. Verify inbound voicemail and
-   shared manual-callback handling separately from scheduled callback ownership.
-9. Only after these pass, prove the requested concurrency with twenty controlled
-   agent sessions, real media, failure recovery and measured answer/connect timing.
-   Record the tested dialing/AMD mode and resources; account count or RAM is not
-   evidence of usable voice capacity.
-
-[The official agent API](https://vicidial.org/docs/AGENT_API.txt) describes remote
-pause/resume, manual dial, hangup and dispositions for agent sessions. Its pause
-semantics are deferred when a call is active. These functions are candidates for
-an adapter, not proof that the custom interface, browser phone, state arbitration
-and pre-dial gate already work together. API credentials must be sent over HTTPS
-in private requests and kept out of URL/access logs.
-
-[Official Asterisk WebRTC configuration](https://docs.asterisk.org/Configuration/Channel-Drivers/SIP/Configuring-res_pjsip/) provides the media configuration
-reference. Pin versions and review the installed distribution's supported SIP
-stack rather than copying configuration for a different release.
-
-## Private SIP credential preparation
-
-The root operator helper also supports `store-sip` and `check-sip`. Before entry,
-an operator prepares `/etc/unlimited-talk-staging/twilio-sip-plan.json`, bound to
-the account and test number already verified by the read-only preflight. The plan
-requires encrypted trunking and Asterisk-owned recordings. It authorizes credential
-storage only, with no call destination or origination capability.
-
-`store-sip` prompts privately for the existing Credential List username and SIP
-password, with confirmation. It creates `twilio-sip-profile.json` in the same
-private directory, mode 0600, refusing overwrite. These credentials are separate
-from the read-only API key. `check-sip` validates the stored profile and reports
-redacted metadata only; it does not prove SIP authentication, engine configuration
-or audio. No credentials belong in GitHub, chat or application logs. The maintained
-engine installation and an explicitly approved test destination remain prerequisites
-for a live proof.
-
-## Delivery boundary
-
-This preparation adds a read-only operator tool, its tests, this proof contract
-and the queued contact-button spacing correction. It adds no schema migration or
-live call interface. The UI correction is held for the next substantive application
-delivery, as requested; no separate deployment is requested for spacing alone.
-The installed helper can be used without switching the running application.
+La correction d'espacement des boutons du contact reste groupée avec la prochaine
+livraison applicative substantielle. Aucune publication séparée pour l'espacement
+ou cette préparation de fournisseur n'est demandée.
