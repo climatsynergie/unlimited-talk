@@ -26,8 +26,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# The deployed calendar compatibility release remains the rollback target.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0006_callbacks'})
+# Accept the additive Voice schema before its migration is ever deployed.
+# This release remains usable for rollback without removing call history.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0006_callbacks', '0007_voice'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
