@@ -1,0 +1,134 @@
+"""Admin-controlled test API and narrowly scoped signed provider callbacks."""
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.exc import IntegrityError
+from starlette.concurrency import run_in_threadpool
+
+from app.identity import service as identity
+from app.identity.routes import same_origin
+from app.telephony import service
+from app.telephony.twilio_voice import (
+    MAX_WEBHOOK_BYTES, VoiceWebhookError, authenticate_webhook,
+    browser_token, controlled_call_twiml,
+)
+
+router = APIRouter(prefix='/api/telephony', tags=['Téléphonie'])
+HANGUP = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup /></Response>'
+
+
+class Reservation(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: UUID
+
+
+def profile(request):
+    value = getattr(request.app.state, 'voice_profile', None)
+    if value is None:
+        raise HTTPException(503, 'Les appels de test ne sont pas activés.')
+    return value
+
+
+@router.post('/test/intents', dependencies=[Depends(same_origin)], status_code=201)
+def reserve(body: Reservation, request: Request):
+    configured = profile(request)
+    identity.limited(request.app.state.engine, 'voice-reserve', request.cookies.get('__Host-ut_session', ''))
+    try:
+        with request.app.state.engine.begin() as db:
+            actor = identity.admin(db, request)
+            row = service.reserve(db, actor, body.id, configured)
+            payload = service.public(row)
+            actor_id = actor['id']
+    except IntegrityError:
+        raise HTTPException(409, 'Un appel est déjà réservé ou en cours pour cet utilisateur ou ce destinataire.') from None
+    # No token is issued until the durable reservation transaction has committed.
+    return {'intent': payload, 'token': browser_token(configured, actor_id, body.id)}
+
+
+@router.post('/test/intents/{identifier}/cancel', dependencies=[Depends(same_origin)])
+def cancel(identifier: UUID, request: Request):
+    profile(request)
+    with request.app.state.engine.begin() as db:
+        actor = identity.admin(db, request)
+        return service.cancel(db, actor, identifier)
+
+
+@router.get('/test/intents/{identifier}')
+def history(identifier: UUID, request: Request):
+    profile(request)
+    with request.app.state.engine.begin() as db:
+        identity.admin(db, request)
+        return service.history(db, identifier)
+
+
+async def signed_form(request, kind, identifier):
+    configured = profile(request)
+    if request.url.query or request.headers.get('content-encoding', 'identity') != 'identity':
+        raise HTTPException(400, 'Notification téléphonique invalide.')
+    for header in ('x-twilio-signature', 'x-twilio-webhooks-signature-settings', 'content-type', 'content-length'):
+        if len(request.headers.getlist(header)) > 1:
+            raise HTTPException(400, 'En-tête de notification ambigu.')
+    length = request.headers.get('content-length')
+    if length is not None and (not length.isascii() or not length.isdecimal() or len(length) > 8 or int(length) > MAX_WEBHOOK_BYTES):
+        raise HTTPException(413, 'Notification trop volumineuse.')
+    raw = bytearray()
+    async for part in request.stream():
+        if len(raw) + len(part) > MAX_WEBHOOK_BYTES:
+            raise HTTPException(413, 'Notification trop volumineuse.')
+        raw.extend(part)
+    try:
+        params = authenticate_webhook(configured, kind, identifier, bytes(raw), request.headers.get('content-type'),
+            request.headers.get('x-twilio-signature'), request.headers.get('x-twilio-webhooks-signature-settings'))
+    except VoiceWebhookError:
+        raise HTTPException(403, 'Notification téléphonique non authentifiée.') from None
+    return configured, params
+
+
+def apply_webhook(request, configured, kind, identifier, params):
+    try:
+        with request.app.state.engine.begin() as db:
+            if kind == 'voice':
+                accepted = service.consume(db, configured, params)
+            else:
+                service.notify(db, configured, kind, identifier, params)
+                accepted = False
+    except IntegrityError:
+        raise HTTPException(403, 'Notification sans appel associé.') from None
+    # DB commit precedes the only response that can create the external call.
+    # Replays and revoked/expired reservations receive Hangup, never another Dial.
+    if accepted:
+        return controlled_call_twiml(configured, UUID(params['Intent']))
+    return HANGUP
+
+
+async def callback(request, kind, identifier=None):
+    configured, params = await signed_form(request, kind, identifier)
+    xml = await run_in_threadpool(apply_webhook, request, configured, kind, identifier, params)
+    return Response(xml, media_type='application/xml')
+
+
+@router.post('/twilio/voice', include_in_schema=False)
+async def voice(request: Request):
+    return await callback(request, 'voice')
+
+
+@router.post('/twilio/parent-status', include_in_schema=False)
+async def parent_status(request: Request):
+    return await callback(request, 'parent-status')
+
+
+@router.post('/twilio/status/{identifier}', include_in_schema=False)
+async def status(identifier: UUID, request: Request):
+    return await callback(request, 'status', identifier)
+
+
+@router.post('/twilio/finish/{identifier}', include_in_schema=False)
+async def finish(identifier: UUID, request: Request):
+    return await callback(request, 'finish', identifier)
+
+
+@router.post('/twilio/recording/{identifier}', include_in_schema=False)
+async def recording(identifier: UUID, request: Request):
+    return await callback(request, 'recording', identifier)

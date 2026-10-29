@@ -10,9 +10,9 @@ les deux serveurs proposés dans cette exploration pour le parcours Twilio direc
 
 Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
 le socle. Les communications de l'application déployée sont toujours désactivées.
-Le code fournit une frontière fournisseur hors réseau, le SDK Python officiel et
-ses tests. Aucun routeur téléphonique, migration, accès public aux webhooks, jeton
-navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
+Cette branche ajoute une API de test contrôlé, sa migration additive et la
+validation des notifications signées. Elle n'est pas encore déployée. Aucun accès
+public aux webhooks, jeton navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
 Voice ont été saisis dans un fichier privé du serveur ; sa lecture du numéro de
 test a réussi. Une nouvelle application TwiML distincte a ensuite été créée et
 vérifiée le 29 octobre 2026. Les trois applications précédentes et les paramètres
@@ -63,7 +63,7 @@ Les SMS restent une livraison distincte ; aucune messagerie n'est envoyée ici.
   VoiceUrl d'une application TwiML. Le champ `Intent` est vérifié après la
   signature, sous forme UUID canonique, et doit correspondre à l'identité SDK
   `From`. Cette cohérence ne remplace pas la réservation durable. Le statut parent
-  utilise `/api/telephony/twilio/parent-status` et exigera un CallSid déjà lié en
+  utilise `/api/telephony/twilio/parent-status` et exige un CallSid déjà lié en
   base. Les autres notifications conservent un chemin comprenant l'intention.
 - Signature avec une SharedKey dédiée ; identifiant et algorithme doivent
   correspondre au profil. Aucun repli vers le jeton principal du compte. Le SDK
@@ -75,12 +75,81 @@ Les SMS restent une livraison distincte ; aucune messagerie n'est envoyée ici.
 
 **Ces fonctions ne constituent pas une autorisation d'appel.** Un jeton n'est pas
 une réservation à usage unique. Une signature authentique n'empêche pas le rejeu.
-Avant de retourner le TwiML, le futur service doit atomiquement consommer une
-intention non expirée et vérifier l'utilisateur, sa session toujours active, son
-identité SDK et le CallSid déjà lié. Les notifications doivent être liées à cette
-intention et aux identifiants d'appel/enregistrement attendus. Les fonctions sont
-volontairement inaccessibles depuis les routes actuelles tant que ce service et
-ses transactions ne sont pas livrés.
+Le service `telephony/service.py` consomme donc atomiquement une intention non
+expirée et vérifie l'administrateur, sa session toujours active et son identité
+SDK. La transaction est validée avant de retourner le premier TwiML Dial. Même
+une seconde requête avec le même CallSid reçoit seulement Hangup. Les routes
+restent indisponibles (503) dans le mode `disabled`, qui reste le défaut des
+déploiements locaux et gérés.
+
+## API contrôlée et historique durable
+
+Le schéma `0007_voice` ajoute intentions, événements immuables et métadonnées des
+enregistrements sans réécrire les tables métier. Les sessions ne sont pas une
+clé étrangère des intentions : leur révocation ne supprime jamais l'historique.
+Un index unique interdit deux intentions actives pour le même utilisateur ; un
+autre interdit deux appels de test simultanés vers le même destinataire du compte.
+
+- `POST /api/telephony/test/intents` accepte uniquement un UUID d'idempotence,
+  jamais un numéro choisi par le navigateur. Il exige une session administrateur
+  récente avec MFA, CSRF et origine valide. La réservation de deux minutes est
+  validée en base avant émission du jeton de cinq minutes. La même session peut
+  reprendre la même réservation encore disponible ; aucun jeton n'est réémis pour
+  une réservation consommée ou une autre session.
+- L'annulation libère seulement une réservation non consommée. Ni le navigateur,
+  ni un délai local ne peut libérer un appel déjà autorisé. Après une réponse
+  perdue, l'intention reste bloquée jusqu'à un résultat terminal du fournisseur
+  ou un rapprochement contrôlé. Le worker de rapprochement fournisseur reste à
+  livrer avant d'élargir les appels ; aucune nouvelle tentative aveugle.
+- Au webhook Voice, utilisateur, session et intention sont verrouillés dans cet
+  ordre. Une révocation, désactivation, modification de rôle ou expiration entre
+  le jeton et l'appel empêche le Dial. La destination et le CallerID sont figés
+  dans le profil et l'intention, pas lus depuis les champs du navigateur.
+- Les statuts enfants exigent le parent déjà lié, le destinataire et le CallerID
+  attendus. Les événements sont dédoublonnés sur leur contenu métier, pas sur des
+  champs arbitraires du fournisseur. SequenceNumber et la progression monotone
+  empêchent une notification ancienne de réactiver un appel terminé. Le résultat
+  détaillé de Dial prime sur le statut générique du parent, même reçu plus tard.
+- Les notifications d'enregistrement exigent la source DialVerb et le parent
+  déjà lié, conformément au contrat Twilio. Elles peuvent donc arriver avant
+  tous les statuts enfants, tout en vérifiant SID, durée et deux canaux. Les
+  métadonnées passent à `pending_archive` ; aucune URL de formulaire
+  n'est stockée ni téléchargée. Une même RecordingSid ne peut pas être réaffectée.
+  Cette réception ne prouve pas encore une copie Spaces ni une lecture audio.
+- Les routes POST précises refusent en-têtes ambigus, compression, requêtes avec
+  query string et corps supérieurs à 16 Kio, y compris sans Content-Length. Le
+  gateway ajoute une limite de taille et de fréquence dédiée. Son adresse vue
+  derrière le proxy est partagée : ce plafond est celui du premier essai, à
+  mesurer et dimensionner pour les vingt agents.
+
+`COMMUNICATIONS_MODE=controlled_test` exige un profil privé complet via
+`VOICE_TEST_PROFILE_FILE`, lié exactement à APP_ORIGIN, à l'environnement staging
+et au rôle runtime. Les modes généraux `live` et `production` restent refusés. Le
+fichier accepte seulement un propriétaire root/runtime, sans accès aux autres
+et sans liens ; son montage en lecture seule est requis. Seule l'API recevra ce profil ;
+le migrateur, les imports et leurs workers restent en `disabled`. Aucun secret
+réel n'est monté par cette livraison.
+
+## Ordre de déploiement
+
+1. Déployer la version de compatibilité main
+   `6e2c3c97a418f3bebde690f0c206e90ccbebfa6c` après Foundation CI réussi. Elle reste
+   sur le schéma 6, accepte aussi le futur schéma 7 et ne modifie aucune donnée.
+2. Vérifier sur le serveur cette révision et `communications=disabled`. Préparer
+   le déployeur et le gateway depuis les fichiers revus. Le déployeur du schéma 7
+   refuse une migration depuis une version qui n'accepte pas son retour arrière.
+3. Intégrer et déployer cette branche via l'image attestée. La migration 7 est
+   additive, et le retour à la version de compatibilité conserve toutes les
+   données, y compris les nouvelles réservations et métadonnées. Aucun downgrade.
+4. Préparer la SharedKey/règle limitée au nouveau préfixe, tester sa signature,
+   puis exposer uniquement les routes POST précises au travers de BasicAuth.
+   Armer un profil réel est une opération distincte, après raccordement et
+   vérification de l'interface, des notifications et du rapprochement.
+
+Les tests HTTP/PostgreSQL utilisent une base jetable, des profils et signatures
+synthétiques et un serveur local dans un processus séparé. Ils n'activent pas le
+profil réel du conteneur déployé et ne prouvent ni l'acceptation du jeton par Twilio
+ni l'audio. L'application existante n'est jamais utilisée comme base de test.
 
 ## Informations nécessaires avant l'essai réel
 
@@ -164,16 +233,12 @@ avant de distribuer un jeton réel ou de permettre un appel.
 
 ## Livraison de bout en bout à réaliser
 
-1. Schéma additif pour intentions, événements et enregistrements, droits bornés,
-   identifiants uniques et un appel actif par agent. Préparer la compatibilité de
-   retour arrière avant la migration. Ne pas élargir les gardes de base à un mode
-   général `live` pour rendre un test possible.
-2. API de création d'intention limitée aux administrateurs authentifiés pour le
-   premier essai ; contrôles de session, CSRF/origine et idempotence. Jeton court
-   seulement après réservation ; destinataire approuvé exclusivement côté serveur.
-3. Webhooks sur des routes POST précises, limitées en taille/fréquence et signées.
-   Exceptions au périmètre BasicAuth uniquement pour ces routes, jamais pour
-   l'ensemble de l'API. Conserver MFA/permissions sur les pages et opérations humaines.
+1. Déployer le schéma et l'API préparés ci-dessus dans l'ordre de compatibilité,
+   puis vérifier le profil et la règle de signature réels.
+2. Préparer le rapprochement fournisseur en lecture et sa sortie WAN bornée avant
+   d'armer le premier appel. Une intention au résultat incertain ne s'expire pas.
+3. Exposer uniquement les POST précis au travers de BasicAuth après test de la
+   signature ; conserver MFA/permissions sur toutes les opérations humaines.
 4. Interface française : préparation du casque, appel, état réel, raccrochage et
    erreurs lisibles. Mettre à jour CSP et Permissions-Policy selon les domaines
    du SDK et tester depuis les réseaux réels. Ne pas désactiver globalement CSP.
@@ -216,6 +281,7 @@ et ses seuils devront être mesurés ; aucun objectif de zéro attente n'est pro
 
 - [Voice SDK](https://www.twilio.com/docs/voice/sdks/javascript).
 - [Applications TwiML](https://www.twilio.com/docs/usage/api/applications).
+- [Notifications d'enregistrement Dial](https://www.twilio.com/docs/voice/twiml/dial#recordingstatuscallback).
 - [Jetons SDK : clés Main/Standard, pas Restricted](https://www.twilio.com/docs/iam/access-tokens).
 - [Signatures dédiées SharedKey](https://www.twilio.com/docs/usage/webhooks/webhook-shared-keys).
 - [Validation des notifications](https://www.twilio.com/docs/usage/webhooks/webhooks-security).

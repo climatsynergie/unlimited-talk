@@ -14,7 +14,7 @@ sql("""INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,req
 tables=['identity_users','contacts','contact_imports','contact_import_rows','contact_history','campaigns','campaign_stages','campaign_contacts','campaign_agents','contact_notes','campaign_events','appointments','appointment_events']
 fingerprint='SELECT '+" || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+t+' t)' for t in tables)
 before=sql(fingerprint)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0006_callbacks'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0006_callbacks'
 assert sql(fingerprint)==before
 print('Callback migration preserves existing identity, contact, campaign and appointment data: PASS')

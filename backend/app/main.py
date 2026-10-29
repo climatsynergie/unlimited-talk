@@ -18,6 +18,8 @@ from app.campaigns.routes import router as campaigns_router
 from app.calendar.routes import router as calendar_router
 from app.callbacks.routes import router as callbacks_router
 from app.scheduling_routes import router as scheduling_router
+from app.telephony.routes import router as telephony_router
+from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,7 +30,7 @@ logger = logging.getLogger('uvicorn.error')
 
 # Accept the additive Voice schema before its migration is ever deployed.
 # This release remains usable for rollback without removing call history.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0006_callbacks', '0007_voice'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0007_voice'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
@@ -41,6 +43,7 @@ async def lifespan(app):
         raise RuntimeError('Built frontend is missing')
     app.state.identity_origin = validate_origin(os.environ['APP_ORIGIN'],os.environ.get('DB_DEPLOYMENT','local'))
     app.state.identity_cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
+    app.state.voice_profile = load_profile()
     app.state.engine = make_engine()
     yield
     app.state.engine.dispose()
@@ -53,6 +56,7 @@ app.include_router(campaigns_router)
 app.include_router(calendar_router)
 app.include_router(callbacks_router)
 app.include_router(scheduling_router)
+app.include_router(telephony_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -92,8 +96,8 @@ async def request_metadata(request: Request, call_next):
 @app.get('/api/system')
 def root():
     return {'application': 'Unlimited Talks', 'environment': 'staging',
-            'milestone': 'callbacks', 'communications': 'disabled',
-            'business_features': 'callbacks', 'readiness': '/health/ready',
+            'milestone': 'voice_api', 'communications': os.environ.get('COMMUNICATIONS_MODE', 'disabled'),
+            'business_features': 'voice_api', 'readiness': '/health/ready',
             'revision': os.environ.get('APP_REVISION', 'development')}
 
 
@@ -131,7 +135,8 @@ def ready(request: Request):
             for table in ('identity_users','identity_sessions','identity_invitations',
                           'identity_password_resets','identity_recovery_codes','identity_audit','identity_rate_limits',
                           'contacts','contact_imports','contact_import_rows','contact_history',
-                          'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events'):
+                          'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events',
+                          'voice_intents','voice_events','voice_recordings'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:
@@ -143,5 +148,5 @@ def ready(request: Request):
         logger.warning('Staging database readiness failed')
         return JSONResponse(status_code=503, content={'status': 'not_ready'})
     return {'status': 'ready', 'environment': 'staging', 'database': 'connected',
-            'migration': version, 'communications': 'disabled',
+            'migration': version, 'communications': os.environ.get('COMMUNICATIONS_MODE', 'disabled'),
             'revision': os.environ.get('APP_REVISION', 'development')}

@@ -22,7 +22,9 @@ MAX_WEBHOOK_BYTES = 16384
 FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status'})
 INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish'})
 HOOK_KINDS = FIXED_HOOK_KINDS | INTENT_HOOK_KINDS
-CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent'})
+CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent',
+                            'CallStatus', 'SequenceNumber', 'DialCallSid', 'DialCallStatus',
+                            'RecordingSid', 'RecordingStatus', 'RecordingChannels', 'RecordingDuration', 'RecordingSource'})
 
 
 class VoiceConfigurationError(ValueError):

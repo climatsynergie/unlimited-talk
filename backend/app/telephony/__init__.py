@@ -1,1 +1,1 @@
-"""Provider boundary; no router, network client or call origination is installed."""
+"""Controlled test API; general dialing remains disabled by configuration."""

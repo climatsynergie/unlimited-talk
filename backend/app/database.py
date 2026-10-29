@@ -5,11 +5,13 @@ from sqlalchemy import URL, create_engine
 
 
 def make_engine():
-    # Refuse production targets and live communications in this staging build.
-    expected = {'APP_ENV': 'staging', 'COMMUNICATIONS_MODE': 'disabled',
-                'DB_NAME': 'unlimited_talk_staging'}
+    # General live mode remains forbidden; an explicit bounded test requires its
+    # complete private profile and the runtime role before creating any engine.
+    expected = {'APP_ENV': 'staging', 'DB_NAME': 'unlimited_talk_staging'}
     if any(os.environ.get(key) != value for key, value in expected.items()):
         raise RuntimeError('Invalid staging environment')
+    from app.telephony.configuration import load_profile
+    load_profile()
     user = os.environ['DB_USER']
     if user not in {'ut_staging_runtime', 'ut_staging_migrator'}:
         raise RuntimeError('Unrecognized staging database role')

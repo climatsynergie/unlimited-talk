@@ -14,7 +14,8 @@ separate PostgreSQL database. The business application is under development.
 
 Individual authentication and the React account/admin interface are implemented.
 Private contact imports, campaigns/pipelines, the shared calendar and agent-owned
-callbacks are implemented. Telephony is in preparation; live communications remain
+callbacks are implemented. A controlled Voice API and its additive migration are
+prepared on the telephony branch; live communications remain
 disabled. See [TELEPHONY.md](TELEPHONY.md) for the current Twilio integration boundary.
 
 ## Local development

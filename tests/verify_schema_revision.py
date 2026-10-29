@@ -32,10 +32,10 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0006_callbacks')
+ready(200,'0007_voice')
 try:
-    sql("UPDATE staging.alembic_version SET version_num='0007_voice'")
-    ready(200,'0007_voice')
+    sql("UPDATE staging.alembic_version SET version_num='0006_callbacks'")
+    ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0005_calendar'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0004_campaigns'")
@@ -43,6 +43,6 @@ try:
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0006_callbacks'")
-ready(200,'0006_callbacks')
+    sql("UPDATE staging.alembic_version SET version_num='0007_voice'")
+ready(200,'0007_voice')
 print('Application schema guard: older and unknown revisions rejected, current revision restored: PASS')
