@@ -10,8 +10,10 @@ les deux serveurs proposés dans cette exploration pour le parcours Twilio direc
 
 Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
 le socle. Les communications de l'application déployée sont toujours désactivées.
-Cette branche ajoute une API de test contrôlé, sa migration additive et la
-validation des notifications signées. Elle n'est pas encore déployée. Aucun accès
+L'API de test contrôlé, sa migration additive et la validation des notifications
+signées sont déployées dans la révision `90e3cfc58a7a216cc79307c990e1440e14756fba`,
+schéma 7 et communications désactivées. Cette branche prépare maintenant le
+worker de rapprochement ; il n'est pas encore installé ni démarré. Aucun accès
 public aux webhooks, jeton navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
 Voice ont été saisis dans un fichier privé du serveur ; sa lecture du numéro de
 test a réussi. Une nouvelle application TwiML distincte a ensuite été créée et
@@ -99,8 +101,8 @@ autre interdit deux appels de test simultanés vers le même destinataire du com
 - L'annulation libère seulement une réservation non consommée. Ni le navigateur,
   ni un délai local ne peut libérer un appel déjà autorisé. Après une réponse
   perdue, l'intention reste bloquée jusqu'à un résultat terminal du fournisseur
-  ou un rapprochement contrôlé. Le worker de rapprochement fournisseur reste à
-  livrer avant d'élargir les appels ; aucune nouvelle tentative aveugle.
+  ou un rapprochement contrôlé. Le worker décrit ci-dessous ne peut créer aucun
+  appel ; aucune nouvelle tentative aveugle.
 - Au webhook Voice, utilisateur, session et intention sont verrouillés dans cet
   ordre. Une révocation, désactivation, modification de rôle ou expiration entre
   le jeton et l'appel empêche le Dial. La destination et le CallerID sont figés
@@ -126,9 +128,53 @@ autre interdit deux appels de test simultanés vers le même destinataire du com
 `VOICE_TEST_PROFILE_FILE`, lié exactement à APP_ORIGIN, à l'environnement staging
 et au rôle runtime. Les modes généraux `live` et `production` restent refusés. Le
 fichier accepte seulement un propriétaire root/runtime, sans accès aux autres
-et sans liens ; son montage en lecture seule est requis. Seule l'API recevra ce profil ;
+et sans liens ; son montage en lecture seule est requis. Seuls l'API et le worker
+Voice dédié recevront ce profil, dans leurs propres processus ;
 le migrateur, les imports et leurs workers restent en `disabled`. Aucun secret
 réel n'est monté par cette livraison.
+
+## Récupération après notification perdue
+
+`backend/app/telephony/reconciliation.py` prépare le worker dédié
+`python -m app.telephony.reconciliation`. Son rôle est uniquement de consulter
+Twilio pour les intentions déjà consommées, âgées d'au moins vingt secondes.
+Une réservation sans appel autorisé ne peut pas être consommée par ce worker.
+La réservation durable reste la source de reprise après un arrêt du processus.
+
+- La lecture est limitée au compte configuré, à un parent déjà lié, à la liste
+  de ses enfants et à l'enfant attendu. GET seulement, origine Twilio fixe,
+  certificat TLS vérifié, aucun suivi de redirection et réponse limitée à 64 Kio.
+  Les lectures ont un délai maximal de cinq secondes chacune. Les URL présentes
+  dans une réponse ne sont jamais suivies.
+- Chaque enfant doit appartenir au parent, au CallerID et au destinataire figés,
+  avec direction `outbound-dial`. Le parent doit correspondre à l'identité SDK
+  originale. Une page incomplète ou plusieurs enfants imposent une vérification.
+  Un enfant déjà lié est relu directement même s'il manque dans la liste.
+- La réservation n'est libérée que si le parent et tout enfant attendu sont
+  terminés. Une réponse 404, 429, une coupure, une identité différente ou un état
+  encore actif conserve la réservation. Il n'existe aucun repli vers une
+  expiration locale d'un appel consommé.
+- Le réseau est consulté hors transaction PostgreSQL. À la réception du résultat,
+  une nouvelle transaction verrouille et vérifie l'intention. Un enfant associé
+  entre-temps invalide une observation qui ne le connaissait pas ; un webhook
+  ayant déjà terminé l'appel garde son autorité. Deux workers peuvent lire le
+  même appel, mais un seul applique sa récupération.
+- Les événements de rapprochement sont dédoublonnés sur les états observés, sans
+  répéter une ligne d'historique à chaque passage inchangé. Les compteurs et codes
+  d'échec sont bornés et expurgés : aucun numéro, secret ou corps Twilio dans les
+  journaux. Les métadonnées de conversation restent dans PostgreSQL.
+
+Le processus est séparé des workers d'import et de l'API. Il traite au plus vingt
+intentions par passage avec quatre lectures concurrentes maximum, puis attend
+dix secondes. Un heartbeat est écrit seulement après un passage sans échec ; le
+contrôle d'exploitation doit tenir compte du temps maximal d'un lot. Ces bornes
+ne prouvent pas une capacité audio ni le délai de connexion de vingt agents.
+
+Le service n'est pas ajouté aux déploiements actuels. Son raccordement exige le
+profil privé et une sortie réseau explicitement limitée au fournisseur, sans
+retirer le blocage WAN des conteneurs existants. Il devra fonctionner avant
+d'armer le premier appel réel. Les tests utilisent des réponses synthétiques et
+un vrai PostgreSQL jetable ; aucun appel réel n'a été interrogé ou relancé.
 
 ## Ordre de déploiement
 
@@ -235,7 +281,7 @@ avant de distribuer un jeton réel ou de permettre un appel.
 
 1. Déployer le schéma et l'API préparés ci-dessus dans l'ordre de compatibilité,
    puis vérifier le profil et la règle de signature réels.
-2. Préparer le rapprochement fournisseur en lecture et sa sortie WAN bornée avant
+2. Raccorder le worker de rapprochement préparé et sa sortie WAN bornée avant
    d'armer le premier appel. Une intention au résultat incertain ne s'expire pas.
 3. Exposer uniquement les POST précis au travers de BasicAuth après test de la
    signature ; conserver MFA/permissions sur toutes les opérations humaines.
@@ -288,6 +334,5 @@ et ses seuils devront être mesurés ; aucun objectif de zéro attente n'est pro
 - [CPS et Calls API](https://www.twilio.com/docs/voice/api/call-resource).
 - [Détection des répondeurs](https://www.twilio.com/docs/voice/answering-machine-detection).
 
-La correction d'espacement des boutons du contact reste groupée avec la prochaine
-livraison applicative substantielle. Aucune publication séparée pour l'espacement
-ou cette préparation de fournisseur n'est demandée.
+La correction d'espacement des boutons du contact est livrée dans la révision
+`90e3cfc58a7a216cc79307c990e1440e14756fba`, avec l'API contrôlée.

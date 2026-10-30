@@ -248,6 +248,77 @@ try:
     second_parent,_=voice(second_user,second)
     signed('recording',second,{**record_fields,'CallSid':second_parent},403)
     signed('parent-status',fields={'CallSid':second_parent,'CallStatus':'completed'})
+    # Polling recovery is tested against the same real PG and HTTP callbacks.
+    # No network read may retain a DB connection/transaction across the wait.
+    from app.telephony.reconciliation import (Observation, ProviderReadError, reconcile_once,
+                                              candidates, apply_observation)
+
+    def old_consumed(identifier):
+        with engine.begin() as db:
+            query(db, '''UPDATE staging.voice_intents SET created_at=clock_timestamp()-interval '90 seconds',
+                expires_at=clock_timestamp()+interval '30 seconds',consumed_at=clock_timestamp()-interval '30 seconds'
+                WHERE id=:id''',id=identifier)
+
+    recovery_user=Browser()
+    recover_id,_=recovery_user.reserve()
+    recover_parent,_=voice(recovery_user,recover_id)
+
+    class Provider:
+        def __init__(self,parent='completed',child=None,status=None,fail=False,hook=None):
+            self.parent,self.child,self.status,self.fail,self.hook=parent,child,status,fail,hook
+            self.reads=0
+        def read(self,pending):
+            self.reads+=1
+            assert engine.pool.checkedout()==0,'Network read retained a DB connection'
+            if self.hook:self.hook()
+            if self.fail:raise ProviderReadError('provider_unavailable')
+            return Observation(pending,self.parent,self.child,self.status)
+
+    provider=Provider()
+    assert reconcile_once(engine,profile,provider)['checked']==0 and provider.reads==0
+    old_consumed(recover_id)
+    failed=reconcile_once(engine,profile,Provider(fail=True))
+    assert failed['failed']==1 and row(recover_id)['state']=='authorized'
+    still_active=reconcile_once(engine,profile,Provider(parent='in-progress'))
+    assert still_active['pending']==1 and row(recover_id)['state']=='authorized'
+    # A consumed call can finish after session revocation. Recovery does not
+    # require a human session and cannot grant another token or call.
+    with engine.begin() as db:
+        query(db,'DELETE FROM staging.identity_sessions WHERE user_id=:id',id=recovery_user.id)
+    recovered=reconcile_once(engine,profile,provider)
+    assert recovered['recovered']==1 and row(recover_id)['state']=='finished'
+    assert reconcile_once(engine,profile,provider)['checked']==0
+
+    race_user=Browser()
+    race_id,_=race_user.reserve();race_parent,_=voice(race_user,race_id);old_consumed(race_id)
+    race_child='CA'+uuid4().hex
+    # A child bound AFTER the snapshot must block an observation which did not
+    # read that child, even when its parent was reported as completed.
+    def late_child():
+        signed('status',race_id,dict(CallSid=race_child,ParentCallSid=race_parent,From=profile.caller_number,
+            To=profile.approved_destination,CallStatus='in-progress',SequenceNumber='0'))
+    stale=reconcile_once(engine,profile,Provider(hook=late_child))
+    assert stale['stale']==1 and row(race_id)['state']=='answered'
+    parent_not_finished=reconcile_once(engine,profile,Provider(parent='in-progress',child=race_child,status='completed'))
+    assert parent_not_finished['pending']==1 and row(race_id)['state']=='answered'
+    assert reconcile_once(engine,profile,Provider(child=race_child,status='busy'))['recovered']==1
+    assert row(race_id)['outcome']=='busy'
+
+    callback_user=Browser()
+    callback_id,_=callback_user.reserve();callback_parent,_=voice(callback_user,callback_id);old_consumed(callback_id)
+    def late_final():signed('parent-status',fields={'CallSid':callback_parent,'CallStatus':'completed'})
+    assert reconcile_once(engine,profile,Provider(hook=late_final))['stale']==1
+    assert row(callback_id)['state']=='finished'
+
+    duplicate_user=Browser()
+    duplicate_id,_=duplicate_user.reserve();_,_=voice(duplicate_user,duplicate_id);old_consumed(duplicate_id)
+    snapshot=next(p for p in candidates(engine,profile) if p.id==duplicate_id)
+    observation=Observation(snapshot,'completed',None,None)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(lambda _:apply_observation(engine,profile,observation),range(2)))
+    assert sorted(results)==['recovered','resolved_elsewhere']
+    with engine.connect() as db:
+        assert query(db,"SELECT count(*) FROM staging.voice_events WHERE intent_id=:id AND kind='reconciliation.observed'",id=duplicate_id).scalar_one()==1
     for statement in ['DELETE FROM staging.voice_intents','DELETE FROM staging.voice_recordings',
                       'UPDATE staging.voice_events SET kind=kind','DELETE FROM staging.voice_events','TRUNCATE staging.voice_events']:
         try:
@@ -257,7 +328,7 @@ try:
             assert error.orig.sqlstate=='42501'
         else:
             raise AssertionError('Voice history permissions are too broad')
-    print('Voice HTTP/PG: admin/MFA/CSRF, fixed target, atomic replay gate, concurrent claims, revocation, monotone callbacks, recording ownership and immutable history: PASS')
+    print('Voice HTTP/PG: authorization, fixed target, atomic claims, signed callbacks, recording ownership, immutable history and read-only recovery races: PASS')
 finally:
     server.should_exit=True
     thread.join(5)
