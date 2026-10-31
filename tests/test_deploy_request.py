@@ -32,6 +32,17 @@ class DeploymentRequestTests(unittest.TestCase):
     def test_expected_request(self):
         self.assertEqual(deployer.parse_request(json.dumps(self.request)), self.request)
 
+    def test_gateway_can_read_a_copy_of_a_root_private_host_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'private-template.conf'
+            target = Path(tmp) / 'nginx.conf'
+            source.write_text('server { listen 8080; }\n')
+            source.chmod(0o600)
+            deployer.copy_gateway_template(source, target)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(source.stat().st_mode & 0o777, 0o600)
+
     def test_readiness_accepts_only_modes_without_call_permission(self):
         base = {'status': 'ready', 'environment': 'staging', 'revision': 'a' * 40}
         for mode, enabled, accepted in [

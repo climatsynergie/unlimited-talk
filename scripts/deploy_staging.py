@@ -74,6 +74,13 @@ def switch_current(release):
     os.replace(link, BASE / 'current')
 
 
+def copy_gateway_template(source, destination):
+    # This static Nginx configuration contains no credentials. The gateway runs
+    # as uid 101 and cannot read a root-only copy of a private host template.
+    shutil.copy2(source, destination)
+    destination.chmod(0o644)
+
+
 def check_health(revision=None):
     with urllib.request.urlopen('http://127.0.0.1:8110/health/ready', timeout=8) as response:
         result = json.load(response)
@@ -172,7 +179,7 @@ def deploy(request):
         if not manifest.exists():
             shutil.copy2(TEMPLATE / 'compose.managed.yaml', release / 'compose.managed.yaml')
             (release / 'scripts').mkdir(mode=0o755)
-            shutil.copy2(TEMPLATE / 'nginx.conf', release / 'scripts/nginx.conf')
+            copy_gateway_template(TEMPLATE / 'nginx.conf', release / 'scripts/nginx.conf')
             shutil.copy2(TEMPLATE / 'broker-start.sh', release / 'scripts/broker-start.sh')
             identity_config = json.loads((ROOT / 'identity-config.json').read_text())
             from urllib.parse import urlsplit
