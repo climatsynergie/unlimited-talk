@@ -157,6 +157,8 @@ session expiration; fragment removal/no token in network URLs; secure cookies
 and no credential storage; desktop/mobile layouts; HTML/static/404 boundaries;
 and axe WCAG A/AA checks on login, admin and agent pages. Traces, failure
 screenshots, video and persisted auth state are disabled to avoid secret capture.
+CI failure annotations identify only the test and source location, without DOM
+snapshots, API bodies, input values or error payloads.
 Optional local screenshots are limited to synthetic login/admin views. Synthetic
 fixture helpers explicitly refuse managed database configuration.
 

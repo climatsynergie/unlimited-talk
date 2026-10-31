@@ -4,7 +4,9 @@ export default defineConfig({
   timeout: 120_000,
   workers: 1,
   retries: 0,
-  reporter: "line",
+  reporter: process.env.GITHUB_ACTIONS
+    ? [["line"], ["./scripts/browser-summary.ts"]]
+    : "line",
   maxFailures: 1,
   use: {
     baseURL: process.env.UI_TEST_URL ?? "https://localhost:18443",
