@@ -73,7 +73,7 @@ services:
     logging: *id005
     environment:
       APP_ENV: staging
-      COMMUNICATIONS_MODE: disabled
+      COMMUNICATIONS_MODE: webhooks_only
       DB_DEPLOYMENT: managed
       DB_PRIVATE_CIDR: ${STAGING_DB_CIDR:?Set the private staging database CIDR}
       DB_HOST: ${STAGING_DB_HOST:?Set the private staging database hostname}
@@ -81,6 +81,7 @@ services:
       DB_SSLMODE: verify-full
       DB_SSLROOTCERT: /run/secrets/postgres_ca
       APP_ORIGIN: ${STAGING_APP_ORIGIN:?Set the HTTPS staging origin}
+      VOICE_TEST_PROFILE_FILE: /run/secrets/voice_profile
       IDENTITY_KEY_FILE: /run/secrets/identity_key
       DB_USER: ut_staging_runtime
       DB_PASSWORD_FILE: /run/secrets/runtime_password
@@ -90,6 +91,7 @@ services:
     - runtime_password
     - identity_key
     - spaces_config
+    - voice_profile
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -251,6 +253,59 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+  voice-reconciler:
+    image: ${STAGING_IMAGE:?Set a tested image by immutable digest}
+    pull_policy: never
+    user: 10001:10001
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 100
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: recovery_only
+      DB_DEPLOYMENT: managed
+      DB_PRIVATE_CIDR: ${STAGING_DB_CIDR:?Set the private staging database CIDR}
+      DB_HOST: ${STAGING_DB_HOST:?Set the private staging database hostname}
+      DB_NAME: unlimited_talk_staging
+      DB_SSLMODE: verify-full
+      DB_SSLROOTCERT: /run/secrets/postgres_ca
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+      APP_ORIGIN: ${STAGING_APP_ORIGIN:?Set the HTTPS staging origin}
+      VOICE_TEST_PROFILE_FILE: /run/secrets/voice_profile
+      VOICE_READ_GATEWAY_URL: http://172.30.8.1:8112
+      NO_PROXY: 172.30.8.1
+      VOICE_READ_TOKEN_FILE: /run/secrets/voice_read_token
+    secrets:
+    - postgres_ca
+    - runtime_password
+    - voice_profile
+    - voice_read_token
+    command: [python, -m, app.telephony.reconciliation]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.25
+    restart: on-failure:5
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '2'
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/voice-reconciliation-heartbeat').stat().st_mtime<120"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   broker:
     image: redis:8.2-alpine@sha256:35bf3d49a07b693d8defb4e4fc9ef8c663f71c2993f181eba99c7b72966c1f9b
     user: 999:999
@@ -295,6 +350,10 @@ networks:
       config:
       - subnet: 172.30.8.0/24
 secrets:
+  voice_profile:
+    file: /etc/unlimited-talk-staging/voice-runtime.json
+  voice_read_token:
+    file: /etc/unlimited-talk-staging/voice-read-auth
   postgres_ca:
     file: /etc/unlimited-talk-staging/postgres-ca.crt
   runtime_password:

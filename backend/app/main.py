@@ -39,11 +39,14 @@ WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'se
 
 @asynccontextmanager
 async def lifespan(app):
+    if os.environ.get('COMMUNICATIONS_MODE') == 'recovery_only':
+        raise RuntimeError('Le profil de récupération est réservé au worker Voice.')
     if not (WEB_ROOT / 'index.html').is_file():
         raise RuntimeError('Built frontend is missing')
     app.state.identity_origin = validate_origin(os.environ['APP_ORIGIN'],os.environ.get('DB_DEPLOYMENT','local'))
     app.state.identity_cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
     app.state.voice_profile = load_profile()
+    app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') == 'controlled_test'
     app.state.engine = make_engine()
     yield
     app.state.engine.dispose()
@@ -149,4 +152,5 @@ def ready(request: Request):
         return JSONResponse(status_code=503, content={'status': 'not_ready'})
     return {'status': 'ready', 'environment': 'staging', 'database': 'connected',
             'migration': version, 'communications': os.environ.get('COMMUNICATIONS_MODE', 'disabled'),
+            'calling_enabled': getattr(request.app.state, 'voice_calling_enabled', False),
             'revision': os.environ.get('APP_REVISION', 'development')}

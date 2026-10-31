@@ -123,5 +123,20 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(result['checked'],0)
         engine.connect.assert_not_called();provider.read.assert_not_called()
 
+    def test_private_gateway_uses_only_its_bearer_and_cannot_target_another_origin(self):
+        requests=[]
+        def send(request):
+            requests.append(request)
+            if '/Calls.json?' in request.full_url:return {'calls':[],'meta':{},'next_page_uri':None}
+            return self.parent
+        client=ReadOnlyCalls(self.profile,send,gateway='http://172.30.8.1:8112',token='a'*64)
+        self.assertTrue(client.read(self.pending).terminal)
+        for request in requests:
+            self.assertEqual(urlsplit(request.full_url).netloc,'172.30.8.1:8112')
+            self.assertEqual(request.get_header('Authorization'),'Bearer '+'a'*64)
+            self.assertNotIn(self.profile.api_key_secret,json.dumps(dict(request.headers)))
+        for gateway,token in [('https://untrusted.example','a'*64),('http://172.30.8.1:8112','invalid')]:
+            with self.assertRaises(ProviderReadError):ReadOnlyCalls(self.profile,gateway=gateway,token=token)
+
 
 if __name__=='__main__':unittest.main()

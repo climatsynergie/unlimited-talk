@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import base64
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import ssl
@@ -78,12 +79,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class ReadOnlyCalls:
-    def __init__(self, profile: ControlledVoiceProfile, send=None):
+    def __init__(self, profile: ControlledVoiceProfile, send=None, gateway=None, token=None):
         if not isinstance(profile, ControlledVoiceProfile):
             raise ProviderReadError('invalid_profile')
         self.profile = profile
         self.base = 'https://api.twilio.com/2010-04-01/Accounts/' + profile.account_sid
         self.send = send
+        self.authorization = 'Basic ' + base64.b64encode((profile.api_key_sid + ':' + profile.api_key_secret).encode()).decode()
+        if gateway is not None:
+            if gateway != 'http://172.30.8.1:8112' or not isinstance(token, str) or not re.fullmatch('[0-9a-f]{64}', token):
+                raise ProviderReadError('invalid_profile')
+            self.base = gateway + '/2010-04-01/Accounts/' + profile.account_sid
+            self.authorization = 'Bearer ' + token
 
     def _get(self, suffix):
         # This allowlist exists in addition to validation of the reservation and
@@ -91,9 +98,8 @@ class ReadOnlyCalls:
         if not (re.fullmatch(r'/Calls/CA[0-9a-fA-F]{32}\.json', suffix)
                 or re.fullmatch(r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=2', suffix)):
             raise ProviderReadError('endpoint_refused')
-        authorization = base64.b64encode((self.profile.api_key_sid + ':' + self.profile.api_key_secret).encode()).decode()
         request = urllib.request.Request(self.base + suffix, method='GET', headers={
-            'Authorization': 'Basic ' + authorization, 'Accept': 'application/json',
+            'Authorization': self.authorization, 'Accept': 'application/json',
             'Cache-Control': 'no-cache', 'User-Agent': 'Unlimited-Talks-call-reconciliation/1'})
         try:
             if self.send is not None:
@@ -208,10 +214,21 @@ def apply_observation(engine, profile, observed):
         return 'pending'
 
 
+def configured_provider(profile):
+    if os.environ.get('DB_DEPLOYMENT', 'local') == 'managed':
+        from app.telephony.configuration import private_bytes
+        try:
+            token = private_bytes(os.environ['VOICE_READ_TOKEN_FILE']).decode().strip()
+            return ReadOnlyCalls(profile, gateway=os.environ['VOICE_READ_GATEWAY_URL'], token=token)
+        except Exception:
+            raise ProviderReadError('invalid_profile') from None
+    return ReadOnlyCalls(profile)
+
+
 def reconcile_once(engine, profile, provider=None):
     if profile is None:
         return {'checked': 0, 'recovered': 0, 'pending': 0, 'failed': 0, 'stale': 0, 'errors': {}}
-    provider = ReadOnlyCalls(profile) if provider is None else provider
+    provider = configured_provider(profile) if provider is None else provider
     pending = candidates(engine, profile)
     result = {'checked': len(pending), 'recovered': 0, 'pending': 0, 'failed': 0, 'stale': 0, 'errors': {}}
     # At most four I/O operations at once; no DB connection/row lock is kept
@@ -237,12 +254,17 @@ def main():
     from app.telephony.configuration import load_profile
     profile = load_profile()
     if profile is None:
-        raise RuntimeError('Le worker Voice exige son profil privé contrôlé.')
+        # Local CI and explicitly disabled installations stay idle without
+        # loading credentials, touching PG or contacting any provider.
+        while True:
+            Path('/tmp/voice-reconciliation-heartbeat').touch()
+            time.sleep(10)
     engine = make_engine()
+    provider = configured_provider(profile)
     try:
         while True:
             try:
-                result = reconcile_once(engine, profile)
+                result = reconcile_once(engine, profile, provider)
                 if result['failed']:
                     logger.warning('Rapprochement Voice en attente : %s', result)
                 else:

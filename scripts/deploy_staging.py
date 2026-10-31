@@ -77,7 +77,9 @@ def switch_current(release):
 def check_health(revision=None):
     with urllib.request.urlopen('http://127.0.0.1:8110/health/ready', timeout=8) as response:
         result = json.load(response)
-    if result.get('status') != 'ready' or result.get('environment') != 'staging' or result.get('communications') != 'disabled':
+    safe_mode = (result.get('communications') == 'disabled' and not result.get('calling_enabled', False)
+                 or result.get('communications') == 'webhooks_only' and result.get('calling_enabled') is False)
+    if result.get('status') != 'ready' or result.get('environment') != 'staging' or not safe_mode:
         raise RuntimeError('Staging readiness check failed')
     if revision and result.get('revision') != revision:
         raise RuntimeError('Running revision differs from approved commit')
@@ -160,6 +162,8 @@ def deploy(request):
             raise ValueError('Image provenance labels do not match deployment request')
         if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice'}:
             raise ValueError('This deployment template requires a compatible worker image')
+        if labels.get('io.unlimitedtalk.schema') == '0007_voice' and labels.get('io.unlimitedtalk.voice-runtime') != '1':
+            raise ValueError('This deployment template requires the reviewed Voice worker capability')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}
@@ -182,9 +186,9 @@ def deploy(request):
             (release / '.env').chmod(0o600)
             manifest.write_text(json.dumps(metadata, indent=2) + '\n')
         config = json.loads(compose(release, 'config', '--format', 'json', env=env))
-        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway','broker','worker','dispatcher'}:
+        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler'}:
             raise ValueError('Unexpected root-owned deployment template')
-        if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher')):
+        if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler')):
             raise ValueError('Migration and API must use the same tested image')
         require_identity_rollback_target(labels)
         # Migrations must follow expand/contract compatibility. Never downgrade
@@ -194,14 +198,14 @@ def deploy(request):
         switch_current(release)
         try:
             compose(release, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher', env=env)
+                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher','voice-reconciler', env=env)
             check_health(revision)
         except Exception:
-            compose(release,'stop','worker','dispatcher',env=env)
+            compose(release,'stop','worker','dispatcher','voice-reconciler',env=env)
             switch_current(previous)
             try:
                 previous_config=json.loads(compose(previous,'config','--format','json',env=env))
-                previous_workers=[name for name in ('worker','dispatcher') if name in previous_config['services']]
+                previous_workers=[name for name in ('worker','dispatcher','voice-reconciler') if name in previous_config['services']]
                 compose(previous, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
                         '--wait', '--wait-timeout', '120', 'api', 'gateway', *previous_workers, env=env)
                 check_health()

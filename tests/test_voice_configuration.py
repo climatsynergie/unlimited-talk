@@ -27,6 +27,9 @@ class VoiceConfigurationTests(unittest.TestCase):
     def test_only_controlled_profile_loads_and_disabled_mode_never_reads_secrets(self):
         with patch.dict(os.environ,self.env,clear=True):
             self.assertEqual(load_profile().approved_destination,self.value['approved_destination'])
+        for mode in ['webhooks_only','recovery_only']:
+            with patch.dict(os.environ,{**self.env,'COMMUNICATIONS_MODE':mode},clear=True):
+                self.assertEqual(load_profile().approved_destination,self.value['approved_destination'])
         self.path.unlink()
         with patch.dict(os.environ,{**self.env,'COMMUNICATIONS_MODE':'disabled'},clear=True):
             self.assertIsNone(load_profile())

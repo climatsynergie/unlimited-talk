@@ -12,7 +12,7 @@ from app.identity.routes import same_origin
 from app.telephony import service
 from app.telephony.twilio_voice import (
     MAX_WEBHOOK_BYTES, VoiceWebhookError, authenticate_webhook,
-    browser_token, controlled_call_twiml,
+    browser_token, controlled_call_twiml, authenticate_probe,
 )
 
 router = APIRouter(prefix='/api/telephony', tags=['Téléphonie'])
@@ -33,6 +33,8 @@ def profile(request):
 
 @router.post('/test/intents', dependencies=[Depends(same_origin)], status_code=201)
 def reserve(body: Reservation, request: Request):
+    if not getattr(request.app.state, 'voice_calling_enabled', False):
+        raise HTTPException(503, 'Les appels de test ne sont pas activés.')
     configured = profile(request)
     identity.limited(request.app.state.engine, 'voice-reserve', request.cookies.get('__Host-ut_session', ''))
     try:
@@ -65,7 +67,7 @@ def history(identifier: UUID, request: Request):
 
 async def signed_form(request, kind, identifier):
     configured = profile(request)
-    if request.url.query or request.headers.get('content-encoding', 'identity') != 'identity':
+    if (request.url.query and kind != 'probe') or request.headers.get('content-encoding', 'identity') != 'identity':
         raise HTTPException(400, 'Notification téléphonique invalide.')
     for header in ('x-twilio-signature', 'x-twilio-webhooks-signature-settings', 'content-type', 'content-length'):
         if len(request.headers.getlist(header)) > 1:
@@ -79,6 +81,10 @@ async def signed_form(request, kind, identifier):
             raise HTTPException(413, 'Notification trop volumineuse.')
         raw.extend(part)
     try:
+        if kind == 'probe':
+            authenticate_probe(configured, bytes(raw), request.headers.get('content-type'),
+                request.headers.get('x-twilio-signature'), request.headers.get('x-twilio-webhooks-signature-settings'), request.url.query)
+            return configured, None
         params = authenticate_webhook(configured, kind, identifier, bytes(raw), request.headers.get('content-type'),
             request.headers.get('x-twilio-signature'), request.headers.get('x-twilio-webhooks-signature-settings'))
     except VoiceWebhookError:
@@ -87,10 +93,12 @@ async def signed_form(request, kind, identifier):
 
 
 def apply_webhook(request, configured, kind, identifier, params):
+    if kind == 'voice' and not getattr(request.app.state, 'voice_calling_enabled', False):
+        return HANGUP
     try:
         with request.app.state.engine.begin() as db:
             if kind == 'voice':
-                accepted = service.consume(db, configured, params)
+                accepted = getattr(request.app.state, 'voice_calling_enabled', False) and service.consume(db, configured, params)
             else:
                 service.notify(db, configured, kind, identifier, params)
                 accepted = False
@@ -112,6 +120,12 @@ async def callback(request, kind, identifier=None):
 @router.post('/twilio/voice', include_in_schema=False)
 async def voice(request: Request):
     return await callback(request, 'voice')
+
+
+@router.post('/twilio/probe', include_in_schema=False)
+async def probe(request: Request):
+    await signed_form(request, 'probe', None)
+    return Response(status_code=204)
 
 
 @router.post('/twilio/parent-status', include_in_schema=False)

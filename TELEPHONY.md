@@ -13,7 +13,10 @@ le socle. Les communications de l'application déployée sont toujours désactiv
 L'API de test contrôlé, sa migration additive et la validation des notifications
 signées sont déployées dans la révision `90e3cfc58a7a216cc79307c990e1440e14756fba`,
 schéma 7 et communications désactivées. Cette branche prépare maintenant le
-worker de rapprochement ; il n'est pas encore installé ni démarré. Aucun accès
+worker de rapprochement et la connexion signée ; cette livraison n'est pas encore
+déployée. La SharedKey et son Setting sont créés, leur secret est privé et aucune
+Rule n'est appliquée. La passerelle de lecture est installée sur le pont Docker
+privé. Aucun accès
 public aux webhooks, jeton navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
 Voice ont été saisis dans un fichier privé du serveur ; sa lecture du numéro de
 test a réussi. Une nouvelle application TwiML distincte a ensuite été créée et
@@ -82,7 +85,8 @@ expirée et vérifie l'administrateur, sa session toujours active et son identit
 SDK. La transaction est validée avant de retourner le premier TwiML Dial. Même
 une seconde requête avec le même CallSid reçoit seulement Hangup. Les routes
 restent indisponibles (503) dans le mode `disabled`, qui reste le défaut des
-déploiements locaux et gérés.
+déploiements locaux. La configuration gérée suivante reçoit les notifications
+en mode `webhooks_only`, sans autoriser les appels.
 
 ## API contrôlée et historique durable
 
@@ -131,7 +135,21 @@ fichier accepte seulement un propriétaire root/runtime, sans accès aux autres
 et sans liens ; son montage en lecture seule est requis. Seuls l'API et le worker
 Voice dédié recevront ce profil, dans leurs propres processus ;
 le migrateur, les imports et leurs workers restent en `disabled`. Aucun secret
-réel n'est monté par cette livraison.
+réel n'est monté dans les environnements locaux. Le déploiement géré monte les
+fichiers privés préparés sur le serveur.
+
+La nouvelle configuration sépare l'autorisation de recevoir de l'autorisation
+d'appeler. `webhooks_only` charge le profil pour vérifier les notifications, mais
+refuse toute réservation/émission de jeton et répond Hangup à une demande Voice,
+même munie d'un jeton antérieur. Les statuts des appels déjà liés restent recevables.
+`recovery_only` est réservé au processus de récupération ; l'API refuse de démarrer
+avec ce mode. Seul `controlled_test` arme le chemin de création d'appel.
+
+`POST /api/telephony/twilio/probe` vérifie une signature sans accéder à la base et
+retourne 204. Il accepte un formulaire, un test vide ou le protocole JSON
+`bodySHA256` validé par le SDK officiel. Ce point de contrôle ne peut créer aucune
+intention, instruction Dial ou notification métier. Les en-têtes de signature et
+l'identifiant de SharedKey sont exigés, comme sur les routes d'appel.
 
 ## Récupération après notification perdue
 
@@ -170,26 +188,68 @@ dix secondes. Un heartbeat est écrit seulement après un passage sans échec ; 
 contrôle d'exploitation doit tenir compte du temps maximal d'un lot. Ces bornes
 ne prouvent pas une capacité audio ni le délai de connexion de vingt agents.
 
-Le service n'est pas ajouté aux déploiements actuels. Son raccordement exige le
-profil privé et une sortie réseau explicitement limitée au fournisseur, sans
-retirer le blocage WAN des conteneurs existants. Il devra fonctionner avant
-d'armer le premier appel réel. Les tests utilisent des réponses synthétiques et
-un vrai PostgreSQL jetable ; aucun appel réel n'a été interrogé ou relancé.
+Le service `voice-reconciler` est ajouté à la prochaine configuration de
+déploiement, avec son image attestée, un profil en lecture seule et une mémoire
+bornée. Il reste inactif sans accès au fournisseur dans la configuration locale.
+Le mode géré `recovery_only` exige la passerelle privée et son secret distinct ;
+aucun repli vers une sortie Internet directe. Il devra être sain avant d'armer
+le premier appel. Les tests métier utilisent des réponses synthétiques et un vrai
+PostgreSQL jetable ; aucun appel réel n'a été interrogé ou relancé.
+
+## Connexion privée et signature
+
+`scripts/twilio_voice_signing.py` prépare une SharedKey et un Setting HMAC_SHA1
+inactif. Les POST sont journalisés et synchronisés avant envoi. Une réponse de clé
+perdue impose un examen, car son secret n'est récupérable qu'à la création ; aucun
+deuxième POST automatique. Une création de Setting incertaine est rapprochée par
+lecture, sans duplication. L'outil n'autorise aucune écriture de Rule ni modification
+d'une ressource existante. Le profil assemblé reste hors de Git.
+
+`scripts/prepare_voice_runtime.py` exporte les montages root:groupe10001 en mode
+0440, en refusant de remplacer un contenu différent. Le worker reçoit également
+un secret de passerelle distinct ; les workers d'import ne le reçoivent pas.
+
+La passerelle Caddy écoute uniquement sur `172.30.8.1:8112`. Une règle UFW autorise
+l'accès depuis le pont Docker attendu, avec contrôle du sous-réseau, de son
+interface et de son identité. La route exige son secret et un GET vers le compte
+Twilio figé : lecture d'une CallSid ou liste de ses enfants, avec filtre parent et
+PageSize exacts. Toute liste globale, autre compte, autre requête ou autre méthode
+est refusée. L'upstream HTTPS est toujours `api.twilio.com`, avec TLS vérifié ; le
+corps et les en-têtes de substitution de méthode ne sont pas transmis. Le blocage
+WAN général des conteneurs est conservé.
+
+Un contrôle réel a vérifié la connexion à Twilio avec une CallSid inexistante et
+une liste d'enfants vide, ainsi que le refus du POST et d'une requête non authentifiée.
+Il ne constitue pas une validation d'appel ou une lecture d'historique client.
+
+Le helper valide le proxy avant rechargement, garde une sauvegarde privée et
+restaure la configuration si le rechargement échoue. L'ordre de démarrage de Caddy
+est placé après Docker pour le listener du pont privé. Le helper `enable-hooks`
+refuse toute ouverture avant une API saine en `webhooks_only`, appels explicitement
+désactivés. Son exception publique est limitée aux routes POST téléphoniques
+précises ; l'import d'authentification humaine est préservé pour le reste.
+
+Après ce déploiement, tester la livraison depuis l'API Webhooks Tests de Twilio,
+vérifier le 204 et la signature, puis appliquer uniquement la Rule du préfixe
+`https://staging.unlimitedtalkapp.com/api/telephony/twilio/`. La Rule DEFAULT et les
+routes de l'ancienne application ne doivent pas être modifiées. Les tests de
+signature et la propagation de Rule restent à vérifier sur le fournisseur.
 
 ## Ordre de déploiement
 
-1. Déployer la version de compatibilité main
-   `6e2c3c97a418f3bebde690f0c206e90ccbebfa6c` après Foundation CI réussi. Elle reste
-   sur le schéma 6, accepte aussi le futur schéma 7 et ne modifie aucune donnée.
-2. Vérifier sur le serveur cette révision et `communications=disabled`. Préparer
-   le déployeur et le gateway depuis les fichiers revus. Le déployeur du schéma 7
-   refuse une migration depuis une version qui n'accepte pas son retour arrière.
-3. Intégrer et déployer cette branche via l'image attestée. La migration 7 est
-   additive, et le retour à la version de compatibilité conserve toutes les
-   données, y compris les nouvelles réservations et métadonnées. Aucun downgrade.
-4. Préparer la SharedKey/règle limitée au nouveau préfixe, tester sa signature,
-   puis exposer uniquement les routes POST précises au travers de BasicAuth.
-   Armer un profil réel est une opération distincte, après raccordement et
+La version de compatibilité `6e2c3c97a418f3bebde690f0c206e90ccbebfa6c`, puis
+la migration additive du schéma 7 ont déjà été déployées et vérifiées. Cette
+livraison conserve le schéma 7 ; aucun downgrade ni nouvelle migration métier.
+
+1. Valider cette branche dans Foundation CI, puis publier depuis main l'image
+   testée et attestée. Préparer les templates et le déployeur revus sur le serveur.
+2. Déployer cette image par le workflow, puis vérifier `webhooks_only`,
+   `calling_enabled=false` et le worker de récupération sain. Un retour arrière
+   restaure l'ancienne application et arrête le nouveau worker sans toucher au schéma.
+3. Exposer les POST précis au travers de BasicAuth, puis tester la signature
+   depuis Webhooks Tests avec le Setting inactif et vérifier la réponse 204.
+4. Appliquer la Rule limitée au nouveau préfixe et vérifier sa propagation.
+   Armer les appels reste une opération distincte, après raccordement et
    vérification de l'interface, des notifications et du rapprochement.
 
 Les tests HTTP/PostgreSQL utilisent une base jetable, des profils et signatures
@@ -281,8 +341,9 @@ avant de distribuer un jeton réel ou de permettre un appel.
 
 1. Déployer le schéma et l'API préparés ci-dessus dans l'ordre de compatibilité,
    puis vérifier le profil et la règle de signature réels.
-2. Raccorder le worker de rapprochement préparé et sa sortie WAN bornée avant
-   d'armer le premier appel. Une intention au résultat incertain ne s'expire pas.
+2. Déployer le worker dédié via sa passerelle privée, vérifier sa santé et tester
+   les notifications signées avant d'armer le premier appel. Une intention au
+   résultat incertain ne s'expire pas.
 3. Exposer uniquement les POST précis au travers de BasicAuth après test de la
    signature ; conserver MFA/permissions sur toutes les opérations humaines.
 4. Interface française : préparation du casque, appel, état réel, raccrochage et

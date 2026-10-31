@@ -19,7 +19,7 @@ from twilio.twiml.voice_response import VoiceResponse
 TOKEN_TTL_SECONDS = 300
 MAX_TEST_CALL_SECONDS = 180
 MAX_WEBHOOK_BYTES = 16384
-FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status'})
+FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status', 'probe'})
 INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish'})
 HOOK_KINDS = FIXED_HOOK_KINDS | INTENT_HOOK_KINDS
 CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent',
@@ -113,6 +113,20 @@ def webhook_url(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | No
     return profile.public_origin + path
 
 
+def signature_metadata(profile, signature, signing_settings):
+    if not isinstance(signature, str) or not re.fullmatch(r'[A-Za-z0-9+/]{27}=', signature):
+        raise VoiceWebhookError('Signature téléphonique invalide.')
+    if not isinstance(signing_settings, str) or len(signing_settings) > 256:
+        raise VoiceWebhookError('Paramètres de signature téléphonique invalides.')
+    try:
+        pairs = [part.strip().split('=', 1) for part in signing_settings.split(',')]
+        settings = dict(pairs)
+        if len(pairs) != 2 or settings != {'key': profile.shared_key_id, 'algorithm': 'HMAC_SHA1'}:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise VoiceWebhookError('Paramètres de signature téléphonique invalides.') from None
+
+
 def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | None,
                          body: bytes, content_type: str, signature: str, signing_settings: str):
     """Authenticate all form values against a configured URL, never proxy headers.
@@ -126,19 +140,11 @@ def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: 
         raise VoiceWebhookError('Notification téléphonique invalide.')
     if not isinstance(content_type, str) or content_type.split(';')[0].strip().lower() != 'application/x-www-form-urlencoded':
         raise VoiceWebhookError('Format de notification téléphonique invalide.')
-    if not isinstance(signature, str) or not re.fullmatch(r'[A-Za-z0-9+/]{27}=', signature):
-        raise VoiceWebhookError('Signature téléphonique invalide.')
-    if not isinstance(signing_settings, str) or len(signing_settings) > 256:
-        raise VoiceWebhookError('Paramètres de signature téléphonique invalides.')
+    signature_metadata(profile, signature, signing_settings)
     try:
-        pairs = [part.strip().split('=', 1) for part in signing_settings.split(',')]
-        settings = dict(pairs)
-        if len(pairs) != 2 or set(settings) != {'key', 'algorithm'} or settings != {
-                'key': profile.shared_key_id, 'algorithm': 'HMAC_SHA1'}:
-            raise ValueError
         values = parse_qsl(body.decode('utf-8'), keep_blank_values=True, strict_parsing=True,
                            encoding='utf-8', errors='strict', max_num_fields=128)
-        if not values or any(len(key) > 128 or len(value) > 4096 for key, value in values):
+        if (not values and kind != 'probe') or any(len(key) > 128 or len(value) > 4096 for key, value in values):
             raise ValueError
         # Reject malformed percent escapes; urllib otherwise leaves them literal.
         if re.search(rb'%(?![0-9A-Fa-f]{2})', body):
@@ -148,7 +154,9 @@ def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: 
             raise ValueError
         if not RequestValidator(profile.shared_key_secret).validate(url, params, signature):
             raise ValueError
-        if params.get('AccountSid') != profile.account_sid or not sid(params.get('CallSid'), 'CA'):
+        if kind != 'probe' and (params.get('AccountSid') != profile.account_sid or not sid(params.get('CallSid'), 'CA')):
+            raise ValueError
+        if kind == 'probe' and params.get('AccountSid', profile.account_sid) != profile.account_sid:
             raise ValueError
         if kind == 'voice':
             # A TwiML Application has one fixed VoiceUrl. Authenticate the entire
@@ -163,6 +171,28 @@ def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: 
     except (ValueError, UnicodeError, TypeError):
         raise VoiceWebhookError('Notification téléphonique non authentifiée.') from None
     return params
+
+
+def authenticate_probe(profile, body, content_type, signature, signing_settings, query=''):
+    """No business effect: verify delivery with official form/JSON validators."""
+    if not isinstance(body, bytes) or len(body) > MAX_WEBHOOK_BYTES:
+        raise VoiceWebhookError('Notification de contrôle invalide.')
+    if query:
+        if not re.fullmatch(r'bodySHA256=[0-9a-f]{64}', query):
+            raise VoiceWebhookError('Requête de contrôle invalide.')
+        signature_metadata(profile, signature, signing_settings)
+        try:
+            valid = RequestValidator(profile.shared_key_secret).validate(
+                webhook_url(profile, 'probe') + '?' + query, body.decode('utf-8'), signature)
+        except (ValueError, UnicodeError, TypeError):
+            valid = False
+        if not valid:
+            raise VoiceWebhookError('Notification de contrôle non authentifiée.')
+        return
+    # With no bytes there is no payload to interpret; Twilio's delivery tester
+    # may still attach a JSON content type. The URL signature remains required.
+    content_type = 'application/x-www-form-urlencoded' if not body else content_type
+    authenticate_webhook(profile, 'probe', None, body, content_type, signature, signing_settings)
 
 
 def controlled_call_twiml(profile: ControlledVoiceProfile, intent_id: UUID):

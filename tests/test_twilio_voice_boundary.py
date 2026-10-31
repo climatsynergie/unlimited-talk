@@ -14,7 +14,7 @@ from twilio.request_validator import RequestValidator
 from app.telephony.twilio_voice import (
     ControlledVoiceProfile, MAX_TEST_CALL_SECONDS, TOKEN_TTL_SECONDS,
     VoiceConfigurationError, VoiceWebhookError, authenticate_webhook,
-    browser_token, client_identity, controlled_call_twiml, webhook_url,
+    browser_token, client_identity, controlled_call_twiml, webhook_url, authenticate_probe,
 )
 
 
@@ -109,6 +109,23 @@ class VoiceBoundaryTests(unittest.TestCase):
         self.assertEqual(params['CallSid'], self.fields[1][1])
         with self.assertRaises(VoiceWebhookError):
             self.verify(urlencode(self.fields).encode(), signature, kind='voice', intent_id=None)
+
+    def test_probe_uses_dedicated_signed_form_or_json_hash_without_call_fields(self):
+        validator=RequestValidator(self.profile.shared_key_secret)
+        url=webhook_url(self.profile,'probe')
+        signature=validator.compute_signature(url,{})
+        authenticate_probe(self.profile,b'',None,signature,self.settings)
+        authenticate_probe(self.profile,b'','application/json',signature,self.settings)
+        body='{"test":true}'
+        query='bodySHA256='+validator.compute_hash(body)
+        signature=validator.compute_signature(url+'?'+query,{})
+        authenticate_probe(self.profile,body.encode(),'application/json',signature,self.settings,query)
+        for changed in [b'{"test":false}',b'bad-body']:
+            with self.assertRaises(VoiceWebhookError):
+                authenticate_probe(self.profile,changed,'application/json',signature,self.settings,query)
+        for changed in ['arbitrary=1',query+'&extra=1']:
+            with self.assertRaises(VoiceWebhookError):
+                authenticate_probe(self.profile,body.encode(),'application/json',signature,self.settings,changed)
 
     def test_refuses_key_algorithm_and_legacy_signature_fallback(self):
         body,signature=self.signed()

@@ -245,6 +245,42 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+  voice-reconciler:
+    image: unlimited-talk-staging-api:foundation
+    build: .
+    user: 10001:10001
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 100
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: disabled
+      DB_HOST: db
+      DB_NAME: unlimited_talk_staging
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+    secrets:
+    - runtime_password
+    command: [python, -m, app.telephony.reconciliation]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.25
+    restart: on-failure:5
+    healthcheck:
+      test: [CMD, python, -c, "import pathlib,time; assert time.time()-pathlib.Path('/tmp/voice-reconciliation-heartbeat').stat().st_mtime<120"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
   broker:
     image: redis:8.2-alpine@sha256:35bf3d49a07b693d8defb4e4fc9ef8c663f71c2993f181eba99c7b72966c1f9b
     user: 999:999

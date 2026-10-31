@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import io
 from pathlib import Path
 import unittest
 import tempfile
@@ -30,6 +31,22 @@ class DeploymentRequestTests(unittest.TestCase):
 
     def test_expected_request(self):
         self.assertEqual(deployer.parse_request(json.dumps(self.request)), self.request)
+
+    def test_readiness_accepts_only_modes_without_call_permission(self):
+        base = {'status': 'ready', 'environment': 'staging', 'revision': 'a' * 40}
+        for mode, enabled, accepted in [
+            ('disabled', False, True), ('webhooks_only', False, True),
+            ('webhooks_only', True, False), ('controlled_test', True, False),
+            ('recovery_only', False, False), ('disabled', True, False),
+            ('webhooks_only', None, False)]:
+            value = {**base, 'communications': mode, 'calling_enabled': enabled}
+            with self.subTest(mode=mode, enabled=enabled), patch.object(
+                    deployer.urllib.request, 'urlopen', return_value=io.StringIO(json.dumps(value))):
+                if accepted:
+                    self.assertEqual(deployer.check_health('a' * 40), value)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        deployer.check_health('a' * 40)
 
     def test_refuses_mutable_tags_and_other_registries(self):
         for image in ('ghcr.io/climatsynergie/unlimited-talk-api:latest',
@@ -82,7 +99,7 @@ class DeploymentRequestTests(unittest.TestCase):
             def compose(release, *args, **kwargs):
                 calls.append((release, args))
                 if args[:1] == ('config',):
-                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {},'broker': {},'worker': {'image':self.request['image']},'dispatcher': {'image':self.request['image']}}})
+                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {},'broker': {},'worker': {'image':self.request['image']},'dispatcher': {'image':self.request['image']},'voice-reconciler': {'image':self.request['image']}}})
                 return ''
             real_tempdir = tempfile.TemporaryDirectory
             def temporary_credentials(**kwargs):

@@ -43,6 +43,7 @@ async def fixture_lifespan(application):
     # synthetic provider after the normal disabled-mode startup has completed.
     async with lifespan(application):
         application.state.voice_profile = profile
+        application.state.voice_calling_enabled = True
         yield
 
 
@@ -133,6 +134,9 @@ try:
     app.state.voice_profile = None
     browser.reserve(expected=503)
     app.state.voice_profile = profile
+    app.state.voice_calling_enabled = False
+    browser.reserve(expected=503)
+    app.state.voice_calling_enabled = True
     assert http('POST','/api/telephony/test/intents',json.dumps({'id':str(uuid4())}).encode(),{'Origin':origin,'Content-Type':'application/json'})[0] == 401
     agent = Browser('agent')
     agent.reserve(expected=403)
@@ -158,6 +162,12 @@ try:
     identifier, first = browser.reserve()
     assert first['intent']['state'] == 'reserved' and first['token']
     assert browser.reserve(identifier)[1]['intent']['id'] == str(identifier)
+    app.state.voice_calling_enabled = False
+    assert voice(browser,identifier)[1].find('Dial') is None
+    assert row(identifier)['state']=='reserved'
+    app.state.voice_calling_enabled = True
+    signed('probe',fields={'Test':'true'},expected=204)
+    signed('probe',fields={'Test':'true'},expected=403,**{'X-Twilio-Signature':'A'*27+'='})
     browser.reserve(expected=409)
     other = Browser()
     other.reserve(expected=409)

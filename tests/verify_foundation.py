@@ -32,6 +32,7 @@ assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
                               'database': 'connected', 'migration': '0007_voice',
                               'communications': 'disabled',
+                              'calling_enabled': False,
                               'revision': os.environ.get('GITHUB_SHA', 'development')}
 config = json.loads(run('config', '--format', 'json'))
 assert config['name'] == os.environ.get('FOUNDATION_TEST_PROJECT', 'unlimited-talk-staging')

@@ -24,10 +24,10 @@ for path in ('/api/system', '/health/live', '/health/ready', '/openapi.json'):
         body = json.load(response)
         if path == '/health/ready':
             assert body['database'] == 'connected' and body['migration'] == '0007_voice'
-            assert body['communications'] == 'disabled'
+            assert body['communications'] == 'webhooks_only' and body['calling_enabled'] is False
 
 config = json.loads(run('config', '--format', 'json'))
-assert set(config['services']) == {'api', 'migrate', 'gateway','broker','worker','dispatcher'}
+assert set(config['services']) == {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler'}
 assert set(config.get('volumes',{}))=={'broker_data'}
 assert 'ports' not in config['services']['broker']
 for name in ('worker','dispatcher'):
@@ -35,7 +35,7 @@ for name in ('worker','dispatcher'):
     assert sources=={'postgres_ca','runtime_password','broker_password'}
 assert 'ports' not in config['services']['api']
 assert config['services']['gateway']['ports'][0]['host_ip'] == '127.0.0.1'
-assert [s['source'] for s in config['services']['api']['secrets']] == ['postgres_ca', 'runtime_password', 'identity_key','spaces_config']
+assert [s['source'] for s in config['services']['api']['secrets']] == ['postgres_ca', 'runtime_password', 'identity_key','spaces_config','voice_profile']
 assert [s['source'] for s in config['services']['migrate']['secrets']] == ['postgres_ca', 'migrator_password']
 for service in config['services'].values():
     assert service['read_only']
