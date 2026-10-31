@@ -85,7 +85,8 @@ Confirmed requirements:
 - Missed-call follow-up remains manual, as previously agreed. A missed incoming
   call does not automatically enter the outbound campaign dialer.
 
-Proposed call-center behavior, awaiting operating choices:
+Recommended operating model accepted on 31 October; numerical settings and
+opening hours remain configurable implementation choices:
 
 - Configure inbound queues by business number, with assigned agents, hours and
   timezone. Do not silently attach all numbers to one campaign or change legacy
@@ -100,14 +101,19 @@ Proposed call-center behavior, awaiting operating choices:
 - Reserve one eligible agent atomically across incoming and outgoing work.
   Never interrupt an established conversation or offer a second call to a busy
   agent. Inbound-only, outbound-only and mixed permissions are admin settings;
-  prioritization for mixed agents must be confirmed before automatic dialing.
+  mixed agents give waiting inbound calls priority over starting fresh outbound
+  calls. An established conversation is never interrupted. Due agent-owned
+  callbacks retain their explicit ownership; do not assign them to another agent.
 - Offer to the longest-idle eligible agent, then try another on rejection or
   timeout. An individual missed offer is distinct from a caller who never
   reaches any agent. Queue wait and offer limits must be configurable and bounded.
-- Propose a French waiting announcement, then voicemail if no agent answers.
+- Use a French waiting announcement, then voicemail if no agent answers.
   Also record abandonment before answer and arrivals outside opening hours.
-  Waiting duration and fallback selection remain pending confirmation.
-- Proposed follow-up stages: À traiter, Pris en charge, Rappel programmé,
+  The initial policy defaults are a 60-second queue wait, 20-second offers bounded
+  by the remaining wait, and a 30-second presence freshness limit. Expiry of an
+  offer requires confirmed provider completion before another offer; elapsed
+  time alone never frees an agent or authorizes a duplicate call.
+- Follow-up stages: À traiter, Pris en charge, Rappel programmé,
   Traité. Voicemail presence and telecom outcomes (missed, abandoned, answered)
   are separate facts, not substitutes for follow-up status. A booked appointment
   links the actual calendar entry rather than fabricating an appointment outcome.
@@ -139,6 +145,14 @@ offer timeout/rejection, caller abandonment during an offer, duplicate and late
 events, lost callbacks, multiple calls from one contact, private voicemail access
 and restart recovery. The existing controlled outbound test stays disabled until
 its separate integration checks pass; this scope adds no provider routing change.
+
+The decision component `backend/app/telephony/inbound.py` is now prepared and
+scenario-tested for assigned/available agents, longest-idle ordering, bounded
+offers, verified rejection, uncertain outcomes, overflow and caller abandonment.
+It is deliberately a policy proposal over trusted snapshots, with no provider or
+database effects. Durable queue/agent reservations, follow-up persistence, admin
+settings and the browser receiving flow still need their implementation and
+integration proof before incoming call handling can be considered delivered.
 
 ## Reliability boundaries
 
