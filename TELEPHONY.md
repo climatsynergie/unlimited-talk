@@ -9,8 +9,8 @@ privés et son image de laboratoire sont conservés comme historique. Ne pas cr�
 les deux serveurs proposés dans cette exploration pour le parcours Twilio direct.
 
 Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
-le socle. La révision `76f875eacd2f0d0e823a397c3b60141a3a49958f` est déployée,
-schéma 7, API `webhooks_only` et `calling_enabled=false`. Le worker de rapprochement
+le socle. La révision `9c78e29641f4a8c6dcdaef17878a179b01ab150c` est déployée,
+schéma 8, API `webhooks_only` et `calling_enabled=false`. Le worker de rapprochement
 est sain en `recovery_only`, avec sa passerelle de lecture privée vérifiée depuis
 son propre conteneur. La SharedKey et son Setting sont créés et leur secret est
 privé. Les exceptions publiques sont limitées aux POST téléphoniques précis ;
@@ -27,12 +27,70 @@ assigné à cette nouvelle application. Son VoiceUrl est accessible avec signatu
 le mode actuel répond Hangup sans autoriser une numérotation.
 Les outils de préparation restent séparés des conteneurs applicatifs.
 
-La prochaine livraison ajoute « Poste d’appel » à l'interface : test local du
-microphone et du casque, pour agents et administrateurs. Ce test d'équipement
-est préparé dans cette branche et n'est pas encore déployé. Il ne crée aucune
-réservation et n'émet aucun jeton SDK. L'appel réel vers le destinataire autorisé
-reste une preuve distincte, après intégration de l'audio téléphonique et de
-l'archivage privé. Voir [WEB.md](WEB.md#audio-equipment-check).
+« Poste d’appel », le test local du casque et l’archivage privé sont déployés.
+Le service `voice-archiver` est sain ; ses accès PostgreSQL TLS, Spaces et
+passerelle Twilio ont été vérifiés depuis son propre conteneur. Aucun appel réel
+n’a encore produit d’enregistrement. Le test physique du casque est confirmé
+par l’utilisatrice. Voir [WEB.md](WEB.md#audio-equipment-check).
+
+La branche navigateur prépare les commandes Appeler/Raccrocher. Elle laisse les
+appels désactivés dans le template ; la validation réelle vers le destinataire
+approuvé nécessite le déploiement de cette interface puis une activation
+opérateur explicite, limitée au profil déjà vérifié.
+
+## Interface d’appel navigateur préparée
+
+Le SDK officiel `@twilio/voice-sdk` 2.18.5 est verrouillé par le lockfile et chargé
+uniquement au clic Appeler. Aucun script fournisseur distant ni `eval` n’est
+autorisé. Les seules sorties CSP ajoutées sont les domaines SDK/sons, événements
+et WebSocket roaming documentés par Twilio ; les médias locaux restent autorisés.
+Les clés API et le numéro ne proviennent jamais du formulaire navigateur :
+`device.connect` transmet uniquement l’UUID `Intent`. Le jeton est conservé en
+mémoire, sans React state, URL, journal ni stockage navigateur. Le SDK est silencieux.
+
+Le contrôleur est monté au niveau de la session : les changements de page internes
+conservent l’appel et sa barre de commandes. Déconnexion, révocation ou sortie de
+page ferment les médias ; une autorisation/connexion tardive est immédiatement
+fermée. Une page restaurée ou rechargée relit la réservation et ne recrée jamais
+automatiquement un jeton ou un appel. La lecture d’une archive et les tests du
+casque sont suspendus pendant un appel.
+
+`GET /api/telephony/test/session`, réservé aux administrateurs authentifiés,
+retourne l’activation, le destinataire approuvé et leur seule intention active.
+Il ne distribue pas de jeton. Les commandes POST conservent MFA récent, origine,
+CSRF, liaison à la session et unicité en base. L’annulation ne libère que les
+préparations non consommées. Le bouton Raccrocher ferme les médias mais attend
+la confirmation serveur avant d’autoriser une nouvelle tentative. Une coupure
+ou une erreur SDK ne vaut jamais résultat terminal. La sonnerie, la conversation,
+la reconnexion et la vérification ont des libellés français.
+
+Les tests unitaires du contrôleur couvrent doubles clics, réponses tardives,
+rechargement, perte réseau et autorité du résultat serveur. Playwright remplace
+uniquement le module SDK importé à la demande par un faux fournisseur local ;
+les véritables composants, commandes et navigation sont exercés. Ce faux SDK
+reste dans les tests, absent de l’image applicative finale. Ces tests ne prouvent
+ni l’audio PSTN, ni la réception d’un jeton par Twilio, ni vingt conversations.
+Ces preuves restent à réaliser avec le casque et le premier appel autorisé.
+
+L’outil hôte `scripts/control_voice_test.py` sépare l’activation du test de son
+lancement. Installé hors du checkout CI, il exige la révision déployée, l’image
+attestée avec capacité navigateur, le schéma 8, les workers de reprise sains,
+l’archive vérifiée, un accès Spaces actuel et aucune intention active. Il relit
+les configurations Twilio vérifiées sans les modifier. Un override root privé
+change seulement le mode de l’API ; les templates et la release restent fermés.
+
+```sh
+python3 /root/unlimited-talk-voice-tools/control_voice_test.py enable --revision FULL_DEPLOYED_SHA
+python3 /root/unlimited-talk-voice-tools/control_voice_test.py check --revision FULL_DEPLOYED_SHA
+python3 /root/unlimited-talk-voice-tools/control_voice_test.py disable --revision FULL_DEPLOYED_SHA
+```
+
+`enable` ne crée aucun jeton ni appel : le clic authentifié reste nécessaire.
+`disable` ferme les nouveaux appels ; il ne promet pas de terminer une
+conversation déjà établie. Les notifications et l’archivage restent actifs.
+Fermer le test avant une nouvelle livraison, car le déployeur exige un mode
+sans numérotation. Aucune modification de numéro, trunk ou application existante
+n’est autorisée par cet outil.
 
 ## Responsabilités cibles
 
@@ -262,27 +320,25 @@ automatique a conservé l'application. Les permissions du template et du fichier
 de release ont été corrigées à 0644, sans changement de contenu. Le même fichier
 a passé `nginx -t` dans l'image épinglée, puis le redéploiement de la même image
 attestée a réussi. Le déployeur source impose désormais 0644 pour cette seule
-configuration statique sans secret, avec un test de régression ; cette évolution
-source sera installée lors de la prochaine livraison de l'outil hôte.
+configuration statique sans secret, avec un test de régression. Cette correction
+est installée dans l’outil hôte.
 
-## Ordre de déploiement
+## Ordre de déploiement du schéma 8
 
 La livraison de compatibilité suivante reste au schéma 7 et accepte le futur
 schéma additif `0008_recordings`. Elle doit être déployée avant l'archivage durable
 afin de permettre un retour à cette image sans supprimer les enregistrements.
 Elle ne crée aucune table, ne change aucun appel ni réglage Twilio et conserve
-les appels désactivés. Le schéma 8 et le worker seront livrés séparément après
-validation de cette version sur le serveur.
+les appels désactivés. Cet ordre a été appliqué sur le serveur avant le schéma 8.
 
 La version de compatibilité est `a8316b7b42850d95b2440b370077813a59563e22`,
 publiée et attestée depuis main. Le déployeur du schéma 8 refuse une migration
-depuis une autre version du schéma 7. La branche `feature/recording-archive`
-prépare la livraison fonctionnelle ; elle ne doit pas remplacer main avant la
-vérification de la compatibilité réellement déployée.
+depuis une autre version du schéma 7. La livraison fonctionnelle est ensuite
+déployée depuis main dans `9c78e29641f4a8c6dcdaef17878a179b01ab150c`.
 
-## Archivage privé préparé — schéma 8
+## Archivage privé — schéma 8
 
-Cette branche ajoute une file PostgreSQL `voice_archive_jobs`, son index de
+La livraison ajoute une file PostgreSQL `voice_archive_jobs`, son index de
 travaux dus et les index d'historique/enregistrements en attente. Les tables
 Voice existantes ne sont pas réécrites. La migration récupère les enregistrements
 déjà en attente ; le worker récupère aussi ceux reçus par une ancienne API après

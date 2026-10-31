@@ -37,7 +37,13 @@ const outcomes: Record<string, string> = {
   canceled: "Annulé",
 };
 
-function RecordingPlayer({ recording }: { recording: Recording }) {
+function RecordingPlayer({
+  recording,
+  disabled,
+}: {
+  recording: Recording;
+  disabled: boolean;
+}) {
   const [error, setError] = useState(false);
   const player = useRef<HTMLAudioElement>(null);
   useEffect(() => {
@@ -47,7 +53,8 @@ function RecordingPlayer({ recording }: { recording: Recording }) {
       audio?.removeAttribute("src");
       audio?.load();
     };
-  }, [recording.playback_path]);
+  }, [recording.playback_path, disabled]);
+  if (disabled) return <p>Lecture suspendue pendant l’appel.</p>;
   if (!recording.playback_path)
     return (
       <p className="audio-result">
@@ -87,7 +94,7 @@ function RecordingPlayer({ recording }: { recording: Recording }) {
   );
 }
 
-export function CallHistory() {
+export function CallHistory({ disabled = false }: { disabled?: boolean }) {
   const [calls, setCalls] = useState<Call[]>([]);
   const [cursor, setCursor] = useState<Cursor | null>(null);
   const [busy, setBusy] = useState(true);
@@ -140,12 +147,12 @@ export function CallHistory() {
   }, []);
 
   useEffect(() => {
-    void load();
+    if (!disabled) void load();
     return () => {
       request.current?.abort();
       sequence.current += 1;
     };
-  }, [load]);
+  }, [load, disabled]);
 
   return (
     <section
@@ -182,7 +189,11 @@ export function CallHistory() {
                 "État en cours de mise à jour"}
             </p>
             {call.recordings.map((recording) => (
-              <RecordingPlayer key={recording.sid} recording={recording} />
+              <RecordingPlayer
+                key={recording.sid}
+                recording={recording}
+                disabled={disabled}
+              />
             ))}
           </article>
         ))}

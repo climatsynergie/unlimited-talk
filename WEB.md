@@ -40,17 +40,27 @@ have French messages and a retry path. Speaker audibility requires user
 confirmation; successful browser playback alone is not proof that a person heard
 the tone. HTML permits the same-origin microphone and disables camera access.
 
-The current controlled-call backend remains disabled for this delivery. No Voice
-SDK token, call intent or provider request is issued by the equipment check.
-Telephone calling still requires its separate browser/provider and private
-recording-archive integration before the approved controlled real-call test.
+No Voice SDK token, call intent or provider request is issued by the equipment
+check. Calling remains disabled in the managed template until the operator
+explicitly enables the approved controlled test after browser delivery.
 
-The archive feature branch adds cursor-based call history and audio players to
+The deployed archive delivery adds cursor-based call history and audio players to
 this workstation. It lists only calls authorized by the API, waits for a verified
 private archive and fetches audio on user playback with `preload="none"`. A failed
 playback offers an explicit retry. It does not expose a provider/object-store URL
-or enable telephone calling. Its schema-8 runtime is a separate delivery after
-the schema-7 compatibility image has been deployed.
+or enable telephone calling. Its schema-8 runtime and private storage access are
+verified. A real Twilio recording still requires the first approved test call.
+
+## Controlled browser calling
+
+The browser delivery adds Appeler/Raccrocher and French call states. The official
+Voice SDK is lazy-loaded only after an explicit authorized call command; requests
+contain the intent UUID, never a chosen destination. The session-level controller
+survives internal CRM/calendar navigation. Reload restores server state without
+redialing. Media cleanup, late-promise fencing, server-confirmed completion,
+bounded requests, and explicit recovery prevent automatic duplicate attempts.
+During a call, equipment tests and archive playback are suspended. The first
+controlled test is admin-only; this does not implement the general agent dialer.
 
 Sensitive account actions open a confirmation dialog. Failure does not appear as
 success; server messages explain an expired session, insufficient permissions,
@@ -67,9 +77,10 @@ There are no simulated contacts, campaigns, calls, appointments or metrics.
 Unknown API routes still return JSON 404 responses, never the application shell.
 `/api/system` retains the non-sensitive foundation metadata previously at `/`.
 HTML/identity responses are not cached; content-hashed `/assets` files are cached
-immutably. The HTML policy permits only same-origin scripts/styles/connections,
-plus local QR image data; it blocks inline/eval scripts, embedding, object content
-and external form targets. Referrers are suppressed.
+immutably. The HTML policy retains same-origin scripts/styles, local QR image
+data, no inline/eval scripts, no embedding/object content and same-origin form
+targets. Voice adds only documented Twilio roaming signalling, events and audio
+asset connections, plus local media streams. Referrers are suppressed.
 
 Invitation/reset secrets use fragments, not URL query parameters or paths. The
 fragment is removed with `replaceState` before API requests. Generated links are
@@ -82,8 +93,8 @@ Recovery codes are shown once; refreshing after enrollment cannot retrieve them.
 Session/CSRF cookies follow IDENTITY.md. Logout clears the authenticated UI only
 after server acknowledgement (or an explicit expired-session response). A
 BroadcastChannel synchronizes logout between tabs without transmitting secrets;
-returning to a visible tab rechecks the session. There is no idle polling that
-would keep inactive sessions alive. Aborted requests cannot replace current UI
+returning to a visible tab rechecks the session. Only an unresolved telephone
+operation polls state; idle pages do not keep inactive sessions alive. Aborted requests cannot replace current UI
 state or terminate a newer session. Failed login requests do not pretend that an
 existing session has expired. All important actions use server validation.
 
@@ -118,6 +129,7 @@ changes; TypeScript/format checks can be run with host Node 22:
 npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
 npm run --prefix frontend format:check
 npm run --prefix frontend build
+npm run --prefix frontend test:phone
 ```
 
 After starting the disposable local Compose database/API, run:

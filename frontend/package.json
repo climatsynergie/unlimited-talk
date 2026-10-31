@@ -6,10 +6,12 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "test:browser": "playwright test",
+    "test:phone": "node --experimental-strip-types --test tests/phone-controller.unit.ts",
     "format": "prettier --write src tests scripts *.ts *.json index.html",
     "format:check": "prettier --check src tests scripts *.ts *.json index.html"
   },
   "dependencies": {
+    "@twilio/voice-sdk": "2.18.5",
     "qrcode": "1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1"

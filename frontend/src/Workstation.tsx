@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, Notice } from "./ui";
 import { CallHistory } from "./CallHistory";
+import { PhonePanel, usePhone } from "./Phone";
 
 type Microphone = {
   context?: AudioContext;
@@ -23,7 +24,8 @@ function audioError(error: unknown): string {
   return "Le test audio n’a pas pu démarrer. Vérifiez votre équipement et réessayez.";
 }
 
-export function Workstation() {
+export function Workstation({ admin }: { admin: boolean }) {
+  const { busy: calling } = usePhone();
   const [microState, setMicroState] = useState<MicroState>("idle");
   const [level, setLevel] = useState(0);
   const [detected, setDetected] = useState(false);
@@ -267,6 +269,7 @@ export function Workstation() {
             <select
               id="microphone-choice"
               value={deviceId}
+              disabled={calling}
               onChange={(event) => {
                 stopMicrophone();
                 setDeviceId(event.currentTarget.value);
@@ -304,6 +307,7 @@ export function Workstation() {
               <button
                 type="button"
                 className="button primary"
+                disabled={calling}
                 onClick={() => void startMicrophone()}
               >
                 Tester mon microphone
@@ -341,7 +345,7 @@ export function Workstation() {
             <button
               type="button"
               className="button primary"
-              disabled={playing}
+              disabled={playing || calling}
               onClick={() => void playSound()}
             >
               {playing ? "Son en cours…" : "Écouter un son de test"}
@@ -366,17 +370,15 @@ export function Workstation() {
           {heard ? <p className="audio-result">Écoute confirmée.</p> : null}
         </section>
       </div>
-      <section
-        className="panel audio-panel audio-call-status"
-        aria-labelledby="calls-heading"
-      >
-        <h2 id="calls-heading">Appels téléphoniques</h2>
-        <p>
-          Le test ci-dessus vérifie votre équipement. Les appels téléphoniques
-          ne sont pas encore activés.
-        </p>
-      </section>
-      <CallHistory />
+      <PhonePanel
+        admin={admin}
+        input={deviceId}
+        beforeStart={() => {
+          stopMicrophone();
+          stopOutput();
+        }}
+      />
+      <CallHistory disabled={calling} />
     </>
   );
 }

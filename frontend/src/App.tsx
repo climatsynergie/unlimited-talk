@@ -10,6 +10,7 @@ import { Calendar } from "./Calendar";
 import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
 import { Workstation } from "./Workstation";
+import { PhoneBar, PhoneProvider } from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
 type Page =
@@ -360,6 +361,7 @@ function Workspace({
             </span>
           </div>
         </header>
+        <PhoneBar />
         <main id="main" className="workspace-main">
           {error ? <Notice error>{error}</Notice> : null}
           <div className="reauth-note">
@@ -379,7 +381,7 @@ function Workspace({
           ) : selected === "callbacks" ? (
             <Callbacks admin={admin} userId={identity.user.id} />
           ) : selected === "workstation" ? (
-            <Workstation />
+            <Workstation admin={admin} />
           ) : selected === "calendar" ? (
             <Calendar userId={identity.user.id} />
           ) : selected === "contacts" ? (
@@ -599,14 +601,16 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
     );
   if (identity)
     return (
-      <Workspace
-        identity={identity}
-        setIdentity={setIdentity}
-        onSessionEnded={() =>
-          signedOut("Reconnectez-vous pour confirmer votre identité.")
-        }
-        onLogout={logout}
-      />
+      <PhoneProvider key={identity.user.id}>
+        <Workspace
+          identity={identity}
+          setIdentity={setIdentity}
+          onSessionEnded={() =>
+            signedOut("Reconnectez-vous pour confirmer votre identité.")
+          }
+          onLogout={logout}
+        />
+      </PhoneProvider>
     );
   return (
     <AuthLayout>

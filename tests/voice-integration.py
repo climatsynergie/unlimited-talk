@@ -136,10 +136,14 @@ try:
     app.state.voice_profile = profile
     app.state.voice_calling_enabled = False
     browser.reserve(expected=503)
+    off_session=browser.request('GET','/api/telephony/test/session')
+    assert off_session['enabled'] is False and off_session['active'] is None and 'token' not in off_session
     app.state.voice_calling_enabled = True
     assert http('POST','/api/telephony/test/intents',json.dumps({'id':str(uuid4())}).encode(),{'Origin':origin,'Content-Type':'application/json'})[0] == 401
     agent = Browser('agent')
     agent.reserve(expected=403)
+    agent.request('GET','/api/telephony/test/session',expected=403)
+    assert http('GET','/api/telephony/test/session')[0]==401
     unenrolled = Browser(verified=False)
     unenrolled.reserve(expected=403)
     browser.request('POST','/api/telephony/test/intents',{'id':str(uuid4())},403,Origin='https://untrusted.example.invalid')
@@ -160,6 +164,10 @@ try:
     duplicate.endheaders()
     response=duplicate.getresponse();assert response.status==400;response.read();duplicate.close()
     identifier, first = browser.reserve()
+    current=browser.request('GET','/api/telephony/test/session')
+    assert current['enabled'] is True and current['active']['id']==str(identifier) and current['active']['owned_session'] is True
+    assert current['destination']==profile.approved_destination and current['max_duration_seconds']==180
+    assert not any(k in json.dumps(current) for k in ('token','profile_hash','session_hash','api_key'))
     assert first['intent']['state'] == 'reserved' and first['token']
     assert browser.reserve(identifier)[1]['intent']['id'] == str(identifier)
     app.state.voice_calling_enabled = False
@@ -170,6 +178,7 @@ try:
     signed('probe',fields={'Test':'true'},expected=403,**{'X-Twilio-Signature':'A'*27+'='})
     browser.reserve(expected=409)
     other = Browser()
+    assert other.request('GET','/api/telephony/test/session')['active'] is None
     other.reserve(expected=409)
     assert signed('voice',fields={'CallSid':'CA'+uuid4().hex,'Intent':str(identifier),
         'From':'client:'+client_identity(browser.id,identifier)}, expected=403, **{'X-Twilio-Signature':'A'*27+'='})

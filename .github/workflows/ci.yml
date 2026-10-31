@@ -50,6 +50,7 @@ jobs:
         run: |
           npm ci --prefix frontend --ignore-scripts --no-audit --no-fund
           npm run --prefix frontend format:check
+          npm run --prefix frontend test:phone
       - name: Install the tested Chromium headless shell
         timeout-minutes: 5
         working-directory: frontend

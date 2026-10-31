@@ -2090,3 +2090,29 @@ th {
   display: block;
   margin: 12px 0;
 }
+.phone-bar {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 24px 0;
+  padding: 16px 20px;
+  background: #fff;
+  border: 2px solid #6454d9;
+  border-radius: 14px;
+}
+.phone-bar > div {
+  flex: 1;
+  min-width: 180px;
+}
+.phone-bar p {
+  margin: 5px 0 0;
+  color: #4c4664;
+}
+.phone-destination {
+  font-size: 1.15rem;
+  font-weight: 650;
+}

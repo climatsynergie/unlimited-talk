@@ -10,6 +10,7 @@ ARG GIT_REVISION=development
 LABEL org.opencontainers.image.source="https://github.com/climatsynergie/unlimited-talk" org.opencontainers.image.revision="$GIT_REVISION" io.unlimitedtalk.schema="0008_recordings"
 LABEL io.unlimitedtalk.voice-runtime="1"
 LABEL io.unlimitedtalk.voice-archive="1"
+LABEL io.unlimitedtalk.voice-browser="1"
 ENV APP_REVISION=$GIT_REVISION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app

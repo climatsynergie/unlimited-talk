@@ -34,7 +34,10 @@ logger = logging.getLogger('uvicorn.error')
 COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0008_recordings'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-           "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
+           "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
+           "https://media.twiliocdn.com https://sdk.twilio.com; "
+           "media-src 'self' blob: mediastream: https://media.twiliocdn.com https://sdk.twilio.com; "
+           "font-src 'self'; object-src 'none'; base-uri 'none'; "
            "form-action 'self'; frame-ancestors 'none'")
 
 
