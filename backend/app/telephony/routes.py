@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
@@ -23,6 +23,16 @@ HANGUP = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup /></Response>'
 class Reservation(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: UUID
+    # Optional only for the preceding browser delivery. New clients always send
+    # their explicit dialled number; it is never silently replaced by the test target.
+    destination: str | None = Field(default=None, max_length=40)
+
+    @field_validator('destination')
+    @classmethod
+    def explicit_number(cls, value):
+        if value is None:
+            raise ValueError('Numéro requis')
+        return value
 
 
 def profile(request):
@@ -60,6 +70,7 @@ def reserve(body: Reservation, request: Request):
     try:
         with request.app.state.engine.begin() as db:
             actor = identity.admin(db, request)
+            service.validate_destination(body.destination, configured)
             row = service.reserve(db, actor, body.id, configured)
             payload = service.public(row)
             actor_id = actor['id']

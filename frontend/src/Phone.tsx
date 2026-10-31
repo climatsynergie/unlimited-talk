@@ -11,7 +11,7 @@ import { api } from "./api";
 import { PhoneController } from "./phone-controller";
 import type { Intent, Session, MediaDevice } from "./phone-controller";
 import { createPhoneDevice } from "./phone-device";
-import { Notice } from "./ui";
+import { Field, Notice } from "./ui";
 
 const Context = createContext<PhoneController | null>(null);
 export function makePhoneController(
@@ -23,10 +23,10 @@ export function makePhoneController(
         api<Session>("/telephony/test/session", {
           signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
         }),
-      reserve: (id, signal) =>
+      reserve: (id, signal, destination) =>
         api<{ intent: Intent; token: string }>("/telephony/test/intents", {
           method: "POST",
-          body: { id },
+          body: { id, destination },
           signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
         }),
       cancel: (id, signal) =>
@@ -171,14 +171,33 @@ export function PhonePanel({
           Les appels seront disponibles après leur activation pour votre compte.
         </p>
       ) : (
-        <>
-          <p>
-            Appel de validation vers le numéro autorisé. Durée maximale : 3
-            minutes.
-          </p>
-          {state.destination ? (
-            <p className="phone-destination">{state.destination}</p>
-          ) : null}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (
+              !state.loaded ||
+              !state.enabled ||
+              busy ||
+              !state.dialNumber.trim()
+            )
+              return;
+            beforeStart();
+            void controller.start(input);
+          }}
+        >
+          <Field
+            label="Numéro à appeler"
+            name="dial_number"
+            type="tel"
+            autoComplete="off"
+            inputMode="tel"
+            placeholder="+1 514 555 0123"
+            maxLength={40}
+            value={state.dialNumber}
+            disabled={busy}
+            onChange={(event) => controller.setDialNumber(event.target.value)}
+            hint="Saisissez le numéro avec son indicatif : +1 pour le Canada, +44 pour le Royaume-Uni."
+          />
           {!state.loaded ? (
             <p role="status">Vérification du téléphone…</p>
           ) : !state.enabled ? (
@@ -196,13 +215,14 @@ export function PhonePanel({
           ) : null}
           <div className="audio-actions">
             <button
-              type="button"
+              type="submit"
               className="button primary"
-              disabled={!state.loaded || !state.enabled || busy}
-              onClick={() => {
-                beforeStart();
-                void controller.start(input);
-              }}
+              disabled={
+                !state.loaded ||
+                !state.enabled ||
+                busy ||
+                !state.dialNumber.trim()
+              }
             >
               Appeler
             </button>
@@ -231,7 +251,7 @@ export function PhonePanel({
               conversation.
             </p>
           ) : null}
-        </>
+        </form>
       )}
     </section>
   );

@@ -107,9 +107,9 @@ test("aucun jeton ni média avant activation et clic explicite", async (t) => {
   const f = fixture();
   t.after(() => f.controller.dispose());
   f.session.enabled = false;
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   await f.controller.refresh();
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   assert.equal(f.reservations(), 0);
   assert.equal(f.creations(), 0);
 });
@@ -117,7 +117,10 @@ test("double clic : une réservation, un SDK, transitions et fin serveur obligat
   const f = fixture();
   t.after(() => f.controller.dispose());
   await f.controller.refresh();
-  await Promise.all([f.controller.start(), f.controller.start()]);
+  await Promise.all([
+    f.controller.start("", "+14165550101"),
+    f.controller.start("", "+14165550101"),
+  ]);
   assert.equal(f.reservations(), 1);
   assert.equal(f.device.connections.length, 1);
   assert.equal(
@@ -140,7 +143,7 @@ test("double clic : une réservation, un SDK, transitions et fin serveur obligat
   await setImmediate();
   assert.equal(f.device.destroyed, 1);
   assert.equal(f.device.call.disconnected, 1);
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   assert.equal(f.reservations(), 1);
   f.rows.set(id, { id, state: "finished", outcome: "completed" });
   await f.controller.refresh();
@@ -160,7 +163,7 @@ test("rechargement avec appel actif : lecture seule, aucune reconnexion ni relan
   f.rows.set(intent.id, intent);
   await f.controller.refresh();
   await f.controller.refresh();
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   assert.equal(f.controller.state.phase, "checking");
   assert.equal(f.controller.state.local, false);
   assert.equal(f.controller.state.intent?.owned_session, false);
@@ -190,7 +193,7 @@ test("raccrochage pendant le chargement SDK : fermeture tardive, aucune connexio
   const controller = new PhoneController(f.api, () => loaded.promise);
   t.after(() => controller.dispose());
   await controller.refresh();
-  const starting = controller.start();
+  const starting = controller.start("", "+14165550101");
   await setImmediate();
   controller.hangup();
   loaded.resolve(f.device);
@@ -210,7 +213,7 @@ test("raccrochage avant résolution de connect : le média tardif est immédiate
     return connected.promise;
   };
   await f.controller.refresh();
-  const starting = f.controller.start();
+  const starting = f.controller.start("", "+14165550101");
   await setImmediate();
   const id = f.device.connections[0];
   f.rows.set(id, { id, state: "authorized", outcome: null });
@@ -220,7 +223,7 @@ test("raccrochage avant résolution de connect : le média tardif est immédiate
   assert.equal(f.device.call.disconnected, 1);
   assert.ok(f.device.destroyed >= 1);
   await f.controller.refresh();
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   assert.equal(f.reservations(), 1);
 });
 test("déconnexion de session pendant une réservation : aucun SDK même après réponse tardive", async () => {
@@ -232,7 +235,7 @@ test("déconnexion de session pendant une réservation : aucun SDK même après 
     return reserved.promise;
   };
   await f.controller.refresh();
-  const starting = f.controller.start();
+  const starting = f.controller.start("", "+14165550101");
   f.controller.dispose();
   assert.equal(requestSignal?.aborted, true);
   const before = f.controller.state;
@@ -248,7 +251,7 @@ test("perte réseau après connexion : résultat inconnu conserve le blocage", a
   const f = fixture();
   t.after(() => f.controller.dispose());
   await f.controller.refresh();
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   f.api.session = async () => {
     throw new Error("offline");
   };
@@ -256,7 +259,7 @@ test("perte réseau après connexion : résultat inconnu conserve le blocage", a
   await setImmediate();
   assert.equal(f.controller.state.phase, "checking");
   assert.equal(f.device.destroyed, 1);
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   assert.equal(f.reservations(), 1);
   assert.ok(f.controller.state.error.includes("ne peut pas être confirmé"));
 });
@@ -269,7 +272,7 @@ test("fin serveur avant résolution de connect et appel suivant : ancien résult
     return connected.promise;
   };
   await f.controller.refresh();
-  const oldStart = f.controller.start();
+  const oldStart = f.controller.start("", "+14165550101");
   await setImmediate();
   const id = f.device.connections[0];
   f.rows.set(id, { id, state: "finished", outcome: "failed" });
@@ -287,7 +290,7 @@ test("échec avant connect : annulation confirmée, pas de fuite de message four
   });
   t.after(() => controller.dispose());
   await controller.refresh();
-  await controller.start();
+  await controller.start("", "+14165550101");
   assert.equal(controller.state.phase, "idle");
   assert.equal(controller.state.result, "cancelled");
   assert.ok(controller.state.error.includes("n’a pas pu démarrer"));
@@ -304,7 +307,7 @@ test("plafond de préparation : annulation atomique puis fermeture du média tar
     return connected.promise;
   };
   await f.controller.refresh();
-  const starting = f.controller.start();
+  const starting = f.controller.start("", "+14165550101");
   await setImmediate();
   t.mock.timers.tick(45_000);
   await setImmediate();
@@ -319,7 +322,7 @@ test("restauration de page après fermeture média : état relu sans nouvel appe
   const f = fixture();
   t.after(() => f.controller.dispose());
   await f.controller.refresh();
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   const id = f.device.connections[0];
   f.rows.set(id, { id, state: "answered", outcome: null });
   f.controller.dispose();
@@ -347,9 +350,73 @@ test("un autre onglet réserve entre la vérification et le clic : récupératio
   f.api.reserve = async () => {
     throw { status: 409 };
   };
-  await f.controller.start();
+  await f.controller.start("", "+14165550101");
   await f.controller.refresh();
   assert.equal(f.controller.state.intent?.id, active.id);
   assert.equal(f.controller.state.phase, "checking");
   assert.equal(f.creations(), 0);
+});
+
+test("numéro saisi : normalisation avant réservation et brouillon conservé", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  const reserve = f.api.reserve;
+  let sent = "";
+  f.api.reserve = (id, signal, destination) => {
+    sent = destination;
+    return reserve(id, signal, destination);
+  };
+  f.controller.setDialNumber("+1 (416) 555-0101");
+  await f.controller.refresh();
+  assert.equal(f.controller.state.dialNumber, "+1 (416) 555-0101");
+  await f.controller.start();
+  assert.equal(sent, "+14165550101");
+  assert.equal(f.controller.state.destination, sent);
+  f.controller.setDialNumber("+442079460123");
+  assert.equal(f.controller.state.dialNumber, "+1 (416) 555-0101");
+});
+
+test("numéro absent ou ambigu : aucune réservation ni autorisation microphone", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  for (const value of [
+    "",
+    "4165550101",
+    "+14165550101 ext 2",
+    "+14165550101\n",
+    "++14165550101",
+    "sip:test@example.invalid",
+  ]) {
+    f.controller.setDialNumber(value);
+    await f.controller.start();
+    assert.equal(f.controller.state.phase, "idle");
+    assert.ok(f.controller.state.error);
+  }
+  assert.equal(f.reservations(), 0);
+  assert.equal(f.creations(), 0);
+});
+
+test("numéro refusé par le serveur : correction immédiate, aucune substitution", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  let cancellations = 0;
+  f.api.reserve = async () => {
+    throw Object.assign(
+      new Error("Les appels vers ce numéro ne sont pas encore activés."),
+      { status: 400 },
+    );
+  };
+  f.api.cancel = async () => {
+    cancellations++;
+    throw { status: 404 };
+  };
+  await f.controller.refresh();
+  f.controller.setDialNumber("+442079460123");
+  await f.controller.start();
+  assert.equal(f.controller.state.phase, "idle");
+  assert.equal(f.controller.state.dialNumber, "+442079460123");
+  assert.match(f.controller.state.error, /ce numéro/);
+  assert.equal(f.creations(), 0);
+  assert.equal(cancellations, 0);
 });

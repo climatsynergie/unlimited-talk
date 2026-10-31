@@ -163,6 +163,20 @@ try:
     duplicate.putheader('X-Twilio-Signature','A'*27+'=')
     duplicate.endheaders()
     response=duplicate.getresponse();assert response.status==400;response.read();duplicate.close()
+    # A submitted destination must never be ignored or silently substituted.
+    for value,status in [(None,422),('',400),('+14165550109',400),('4165550101',400),
+                         ('+14165550101 ext 2',400),('+14165550101\\n',400)]:
+        rejected_id=uuid4()
+        browser.request('POST','/api/telephony/test/intents',
+                        {'id':str(rejected_id),'destination':value},status)
+        with engine.connect() as db:
+            assert query(db,'SELECT count(*) FROM staging.voice_intents WHERE id=:id',id=rejected_id).scalar_one()==0
+    explicit_id=uuid4()
+    explicit=browser.request('POST','/api/telephony/test/intents',
+                             {'id':str(explicit_id),'destination':profile.approved_destination},201)
+    assert explicit['intent']['destination']==profile.approved_destination
+    assert row(explicit_id)['destination']==profile.approved_destination
+    browser.request('POST','/api/telephony/test/intents/'+str(explicit_id)+'/cancel',{})
     identifier, first = browser.reserve()
     current=browser.request('GET','/api/telephony/test/session')
     assert current['enabled'] is True and current['active']['id']==str(identifier) and current['active']['owned_session'] is True

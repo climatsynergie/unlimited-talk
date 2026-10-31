@@ -67,7 +67,8 @@ async function setup(page: Page, enabled = true) {
   );
   await page.route("**/api/telephony/test/intents", async (route) => {
     const body = route.request().postDataJSON();
-    expect(Object.keys(body)).toEqual(["id"]);
+    expect(Object.keys(body)).toEqual(["id", "destination"]);
+    expect(body.destination).toBe("+14165550101");
     expect(body.id).toMatch(/^[a-f0-9-]{36}$/);
     state.reservations += 1;
     const intent = {
@@ -145,6 +146,9 @@ test("conversation persistante pendant la navigation et confirmation serveur du 
 }) => {
   const state = await setup(page);
   await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
@@ -244,6 +248,9 @@ test("raccrochage pendant connect : le média tardif est fermé sans nouvel appe
     };
   });
   await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.phoneProof.connections.length))
@@ -277,6 +284,9 @@ test("déconnexion pendant la réservation : aucune activation tardive du SDK", 
     await route.fulfill({ json: {} });
   });
   await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect.poll(() => state.reservations).toBe(1);
   const reservationAborted = page.waitForEvent("requestfailed", {
@@ -341,6 +351,9 @@ test("la lecture d’une archive est arrêtée avant de connecter l’appel", as
     node.loop = true;
     return node.play();
   });
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect(page.locator("audio")).toHaveCount(0);
   expect(
@@ -359,6 +372,9 @@ test("révocation de session : média fermé avant le prochain rendu", async ({
 }) => {
   await setup(page);
   await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
@@ -387,6 +403,9 @@ test("échec de déconnexion : session conservée et média fermé sans relance"
     }),
   );
   await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+1 (416) 555-0101");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
@@ -409,4 +428,68 @@ test("échec de déconnexion : session conservée et média fermé sans relance"
   ).toBeDisabled();
   expect(state.reservations).toBe(1);
   expect(state.sdkLoads).toBe(1);
+});
+
+test("saisie libre conservée pendant la navigation, numéro invalide sans appel", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  // This scenario uses a synthetic identity. Keep calendar requests in that
+  // same fixture instead of sending its nonexistent session to the real API.
+  await page.route("**/api/calendar/resolve?*", (route) => {
+    const start = new URL(route.request().url()).searchParams.get(
+      "local_start",
+    );
+    return route.fulfill({
+      json: {
+        options: [
+          { starts_at: start + ":00Z", utc_offset_minutes: 0, label: "UTC" },
+        ],
+      },
+    });
+  });
+  await page.route("**/api/calendar?*", (route) =>
+    route.fulfill({ json: { items: [], has_more: false } }),
+  );
+  await page.goto("/poste-appel");
+  const input = page.getByLabel("Numéro à appeler", { exact: true });
+  await expect(input).toHaveValue("");
+  await expect(
+    page.getByRole("button", { name: "Appeler", exact: true }),
+  ).toBeDisabled();
+  await input.fill("4165550101");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toContainText(
+    "indicatif international",
+  );
+  expect(state.reservations).toBe(0);
+  expect(state.sdkLoads).toBe(0);
+  await input.fill("+44 20 7946 0123");
+  await page.getByRole("link", { name: "Calendrier", exact: true }).click();
+  await page.getByRole("link", { name: "Poste d’appel", exact: true }).click();
+  await expect(input).toHaveValue("+44 20 7946 0123");
+  await expect(page.locator("body")).not.toContainText("Appel de validation");
+});
+
+test("numéro non autorisé : refus lisible et aucun chargement du SDK", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  let sent = "";
+  await page.route("**/api/telephony/test/intents", async (route) => {
+    sent = route.request().postDataJSON().destination;
+    await route.fulfill({
+      status: 400,
+      json: { detail: "Les appels vers ce numéro ne sont pas encore activés." },
+    });
+  });
+  await page.goto("/poste-appel");
+  const input = page.getByLabel("Numéro à appeler", { exact: true });
+  await input.fill("+44 20 7946 0123");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("ce numéro");
+  expect(sent).toBe("+442079460123");
+  await expect(input).toBeEnabled();
+  await expect(input).toHaveValue("+44 20 7946 0123");
+  expect(state.sdkLoads).toBe(0);
 });

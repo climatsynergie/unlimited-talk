@@ -5,6 +5,7 @@ export type Intent = {
   state: string;
   outcome: string | null;
   owned_session?: boolean;
+  destination?: string;
 };
 export type Session = {
   enabled: boolean;
@@ -26,6 +27,7 @@ export type Transport = {
   reserve: (
     id: string,
     signal: AbortSignal,
+    destination: string,
   ) => Promise<{ intent: Intent; token: string }>;
   cancel: (id: string, signal: AbortSignal) => Promise<Intent>;
   history: (id: string, signal: AbortSignal) => Promise<{ intent: Intent }>;
@@ -34,6 +36,7 @@ export type PhoneState = {
   loaded: boolean;
   enabled: boolean;
   destination: string | null;
+  dialNumber: string;
   phase:
     | "idle"
     | "preparing"
@@ -69,6 +72,7 @@ export class PhoneController {
     loaded: false,
     enabled: false,
     destination: null,
+    dialNumber: "",
     phase: "idle",
     intent: null,
     local: false,
@@ -140,7 +144,7 @@ export class PhoneController {
       this.update({
         loaded: true,
         enabled: session.enabled,
-        destination: session.destination,
+        destination: session.active?.destination ?? this.state.destination,
       });
       if (this.pending !== null && !this.state.intent) return;
       if (this.identifier) {
@@ -203,7 +207,11 @@ export class PhoneController {
       this.refreshing = false;
     }
   }
-  async start(input = "") {
+  setDialNumber(value: string) {
+    if (this.closed || this.state.phase !== "idle") return;
+    this.update({ dialNumber: value.slice(0, 40), error: "" });
+  }
+  async start(input = "", number = this.state.dialNumber) {
     if (
       this.closed ||
       !this.state.loaded ||
@@ -212,6 +220,19 @@ export class PhoneController {
       this.pending
     )
       return;
+    // Strip only presentation characters. Extensions, letters and control
+    // characters must never be interpreted as a different phone number.
+    const destination = number.replace(/[ ().-]/g, "");
+    if (
+      destination.trim() !== destination ||
+      !/^\+[1-9][0-9]{8,14}$/.test(destination)
+    ) {
+      this.update({
+        error:
+          "Saisissez un numéro avec son indicatif international, par exemple +15145550123.",
+      });
+      return;
+    }
     const generation = ++this.generation;
     const id = crypto.randomUUID();
     this.identifier = id;
@@ -224,10 +245,15 @@ export class PhoneController {
       error: "",
       result: "",
       intent: null,
+      destination,
     });
     let attemptedConnect = false;
     try {
-      const reserved = await this.transport.reserve(id, this.requests.signal);
+      const reserved = await this.transport.reserve(
+        id,
+        this.requests.signal,
+        destination,
+      );
       if (this.closed || generation !== this.generation) return;
       this.update({ intent: { ...reserved.intent, owned_session: true } });
       const device = await this.factory(reserved.token);
@@ -273,6 +299,24 @@ export class PhoneController {
       if (this.closed || generation !== this.generation) return;
       ++this.generation;
       this.release();
+      if (
+        !attemptedConnect &&
+        error instanceof Error &&
+        "status" in error &&
+        error.status === 400
+      ) {
+        // An explicit server refusal committed no reservation. Preserve the
+        // typed number and let the user correct it without an invented call.
+        this.identifier = null;
+        this.pending = null;
+        this.update({
+          phase: "idle",
+          intent: null,
+          local: false,
+          error: error.message,
+        });
+        return;
+      }
       this.update({
         phase: "checking",
         local: false,

@@ -44,9 +44,19 @@ Le SDK officiel `@twilio/voice-sdk` 2.18.5 est verrouillé par le lockfile et ch
 uniquement au clic Appeler. Aucun script fournisseur distant ni `eval` n’est
 autorisé. Les seules sorties CSP ajoutées sont les domaines SDK/sons, événements
 et WebSocket roaming documentés par Twilio ; les médias locaux restent autorisés.
-Les clés API et le numéro ne proviennent jamais du formulaire navigateur :
+Les clés API et le numéro affiché à l'appelé restent configurés côté serveur :
 `device.connect` transmet uniquement l’UUID `Intent`. Le jeton est conservé en
 mémoire, sans React state, URL, journal ni stockage navigateur. Le SDK est silencieux.
+
+Le champ « Numéro à appeler » remplace le destinataire affiché en dur et les
+consignes techniques de validation. Il commence vide, accepte les séparateurs
+usuels d'un numéro international et conserve le brouillon pendant la navigation
+interne, uniquement en mémoire. La réservation HTTP transmet explicitement le
+numéro normalisé. Le serveur refuse une saisie non autorisée avant toute création
+d'intention ou de jeton ; il ne la remplace jamais silencieusement par le numéro
+d'Omar. Le profil contrôlé reste limité à ce dernier tant que l'appel réel audio
+et enregistrement est reporté. La saisie n'active donc pas encore la numérotation
+générale, ni les appels agents. La limite fournisseur du test reste de 180 secondes.
 
 Le contrôleur est monté au niveau de la session : les changements de page internes
 conservent l’appel et sa barre de commandes. Le clic de déconnexion ferme le
@@ -165,8 +175,10 @@ clé étrangère des intentions : leur révocation ne supprime jamais l'historiq
 Un index unique interdit deux intentions actives pour le même utilisateur ; un
 autre interdit deux appels de test simultanés vers le même destinataire du compte.
 
-- `POST /api/telephony/test/intents` accepte uniquement un UUID d'idempotence,
-  jamais un numéro choisi par le navigateur. Il exige une session administrateur
+- `POST /api/telephony/test/intents` accepte un UUID d'idempotence et une
+  destination explicite qui doit correspondre au profil autorisé. Seule l'omission
+  du champ conserve le comportement du navigateur précédent ; `null`, une valeur
+  vide, un autre numéro ou une extension sont refusés. Il exige une session administrateur
   récente avec MFA, CSRF et origine valide. La réservation de deux minutes est
   validée en base avant émission du jeton de cinq minutes. La même session peut
   reprendre la même réservation encore disponible ; aucun jeton n'est réémis pour

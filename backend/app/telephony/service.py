@@ -38,7 +38,20 @@ def event(db, intent_id, kind, details):
 
 def public(row):
     return {key: str(row[key]) if row[key] is not None else None
-            for key in ('id', 'actor_id', 'state', 'outcome', 'created_at', 'expires_at', 'consumed_at', 'finished_at')}
+            for key in ('id', 'actor_id', 'state', 'outcome', 'created_at', 'expires_at', 'consumed_at', 'finished_at', 'destination')}
+
+
+def validate_destination(value, profile):
+    # General manual origination is a separate delivery. The explicit number
+    # must match this controlled profile before any intent/token can be created.
+    # Never accept an arbitrary input and silently call a different recipient.
+    if value is None:
+        return profile.approved_destination  # preceding browser compatibility
+    if not re.fullmatch(r'\+[1-9][0-9]{8,14}', value):
+        raise HTTPException(400, 'Saisissez un numéro international valide, par exemple +15145550123.')
+    if value != profile.approved_destination:
+        raise HTTPException(400, 'Les appels vers ce numéro ne sont pas encore activés.')
+    return value
 
 
 def reserve(db, actor, identifier, profile):

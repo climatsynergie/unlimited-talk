@@ -55,7 +55,13 @@ verified. A real Twilio recording still requires the first approved test call.
 
 The browser delivery adds Appeler/Raccrocher and French call states. The official
 Voice SDK is lazy-loaded only after an explicit authorized call command; requests
-contain the intent UUID, never a chosen destination. The session-level controller
+to the SDK contain only the intent UUID. The HTTP reservation sends the explicitly
+typed destination to the server first; a rejected number never falls back to a
+different recipient. An empty international-number field replaces the fixed
+recipient and test instructions. Its draft stays in session memory across internal
+navigation, without browser storage. Controlled calling still permits only the
+approved test recipient; unrestricted manual calling is not enabled by this UI.
+The session-level controller
 survives internal CRM/calendar navigation. Reload restores server state without
 redialing. Media cleanup, late-promise fencing, server-confirmed completion,
 bounded requests, and explicit recovery prevent automatic duplicate attempts.
