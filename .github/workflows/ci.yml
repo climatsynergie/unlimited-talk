@@ -72,6 +72,8 @@ jobs:
         run: python3 tests/verify_callbacks_upgrade.py
       - name: Verify Voice migration preserves existing business data
         run: python3 tests/verify_voice_upgrade.py
+      - name: Verify recording archive migration preserves Voice history
+        run: python3 tests/verify_recordings_upgrade.py
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
       - name: Verify HTTP, PostgreSQL and isolation

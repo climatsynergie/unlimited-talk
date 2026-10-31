@@ -26,6 +26,9 @@ test.use({
 });
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/telephony/calls*", (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } }),
+  );
   await page.addInitScript(() => {
     window.audioProof = { streams: [], requests: [], mode: "normal" };
     const original = navigator.mediaDevices.getUserMedia.bind(
@@ -258,6 +261,7 @@ test("écran mobile accessible et accès avec une vraie session d’agent", asyn
   page,
 }) => {
   await page.unroute("**/api/auth/me");
+  await page.unroute("**/api/telephony/calls*");
   const result = spawnSync(
     "python3",
     [path.resolve("..", "tests/browser-fixtures.py")],

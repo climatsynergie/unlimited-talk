@@ -2067,3 +2067,26 @@ th {
 .audio-call-status {
   margin-top: 24px;
 }
+.call-history {
+  margin-top: 24px;
+}
+.call-history-list {
+  display: grid;
+  gap: 18px;
+}
+.call-history-item {
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+.call-history-item h3 {
+  margin: 0 0 8px;
+}
+.call-history-item p {
+  color: #53576c;
+  line-height: 1.65;
+}
+.recording-player audio {
+  width: min(100%, 420px);
+  display: block;
+  margin: 12px 0;
+}

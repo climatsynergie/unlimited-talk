@@ -31,13 +31,15 @@ TOKEN = ROOT / 'voice-read-auth'
 GATEWAY = ROOT / 'voice-read-gateway.json'
 
 
-def render_gateway(config, token):
+def render_gateway(config, token, recordings=False):
     if (not re.fullmatch('AC[0-9a-fA-F]{32}', config['account_sid'])
             or not re.fullmatch('SK[0-9a-fA-F]{32}', config['api_key_sid'])
             or not re.fullmatch('[0-9a-f]{64}', token)):
         raise PreflightError('Paramètres de passerelle invalides.')
     base = '/2010-04-01/Accounts/' + config['account_sid']
     pattern = '^' + base + r'/Calls/CA[0-9a-fA-F]{32}\.json$|^' + base + r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=2$'
+    if recordings:
+        pattern += '|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.json$|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.wav\?RequestedChannels=2$'
     expression = '{http.request.uri}.matches(' + json.dumps(pattern) + ')'
     auth = base64.b64encode((config['api_key_sid'] + ':' + config['api_key_secret']).encode()).decode()
     return f'''http://172.30.8.1:8112 {{
@@ -182,7 +184,8 @@ def prepare(config):
     if FRAGMENT.exists() or FRAGMENT.is_symlink():
         info=FRAGMENT.lstat()
         if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_gid!=caddy_gid
-                or stat.S_IMODE(info.st_mode)!=0o640 or info.st_nlink!=1 or FRAGMENT.read_bytes()!=rendered):
+                or stat.S_IMODE(info.st_mode)!=0o640 or info.st_nlink!=1
+                or FRAGMENT.read_bytes() not in {rendered,render_gateway(config,gateway['token'],True).encode()}):
             raise PreflightError('Un fragment de passerelle différent existe déjà.')
     else:
         fd=os.open(FRAGMENT,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
@@ -191,9 +194,47 @@ def prepare(config):
         sync_directory(FRAGMENT.parent)
 
 
+def upgrade_recording_gateway(config):
+    """Validate both candidate files before changing the active private fragment."""
+    token=read_private(GATEWAY)['token']
+    old=FRAGMENT.read_bytes()
+    desired=render_gateway(config,token,True).encode()
+    if old==desired:return
+    if old!=render_gateway(config,token).encode():
+        raise PreflightError('Passerelle différente du plan ; aucune modification.')
+    original=CADDY.read_text()
+    line='import '+str(FRAGMENT)
+    if original.count(line)!=1:raise PreflightError('Import de passerelle inattendu.')
+    candidate=FRAGMENT.with_name('voice-recordings-candidate.caddy')
+    entry=CADDY.with_name('voice-recordings-main.caddy')
+    gid=grp.getgrnam('caddy').gr_gid
+    def write(path,content,mode=0o640):
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,mode)
+        with os.fdopen(fd,'wb') as f:
+            f.write(content);f.flush();os.fchown(f.fileno(),0,gid if mode==0o640 else 0);os.fchmod(f.fileno(),mode);os.fsync(f.fileno())
+    try:
+        write(candidate,desired)
+        write(entry,original.replace(line,'import '+str(candidate)).encode())
+        result=subprocess.run(['caddy','validate','--config',str(entry),'--adapter','caddyfile'],
+            env={**os.environ,'STAGING_DOMAIN':'staging.unlimitedtalkapp.com'},capture_output=True,timeout=30)
+        if result.returncode:raise PreflightError('Passerelle audio invalide ; configuration conservée.')
+        backup=ROOT/('read-gateway-before-recordings-'+hashlib.sha256(old).hexdigest()+'.txt')
+        if not backup.exists():write(backup,old,0o600);sync_directory(backup.parent)
+        if FRAGMENT.read_bytes()!=old or CADDY.read_text()!=original:
+            raise PreflightError('Le proxy a changé ; aucune modification.')
+        os.replace(candidate,FRAGMENT);sync_directory(FRAGMENT.parent)
+        result=subprocess.run(['systemctl','reload','caddy'],capture_output=True,timeout=30)
+        if result.returncode:
+            write(candidate,old);os.replace(candidate,FRAGMENT);sync_directory(FRAGMENT.parent)
+            subprocess.run(['systemctl','reload','caddy'],capture_output=True,check=True,timeout=30)
+            raise PreflightError('Rechargement refusé ; passerelle précédente restaurée.')
+    finally:
+        candidate.unlink(missing_ok=True);entry.unlink(missing_ok=True)
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Préparer les connexions Voice sans activer les appels.')
-    parser.add_argument('action',choices=['prepare','read-gateway','enable-hooks'])
+    parser.add_argument('action',choices=['prepare','read-gateway','enable-hooks','upgrade-recording-gateway'])
     args=parser.parse_args(argv)
     try:
         if os.geteuid()!=0:raise PreflightError('Exécutez cet outil en root.')
@@ -219,6 +260,11 @@ def main(argv=None):
                 if not dropin.exists():
                     dropin.write_text(value);dropin.chmod(0o644)
                     subprocess.run(['systemctl','daemon-reload'],capture_output=True,check=True,timeout=15)
+            elif args.action=='upgrade-recording-gateway':
+                with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=8) as response:health=json.load(response)
+                if health.get('calling_enabled') is not False:
+                    raise PreflightError('Désactivez les appels avant de modifier la passerelle.')
+                upgrade_recording_gateway(config)
             elif args.action=='enable-hooks':
                 with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=8) as response:health=json.load(response)
                 if health.get('communications')!='webhooks_only' or health.get('calling_enabled') is not False:

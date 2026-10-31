@@ -110,7 +110,7 @@ class DeploymentRequestTests(unittest.TestCase):
             def compose(release, *args, **kwargs):
                 calls.append((release, args))
                 if args[:1] == ('config',):
-                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {},'broker': {},'worker': {'image':self.request['image']},'dispatcher': {'image':self.request['image']},'voice-reconciler': {'image':self.request['image']}}})
+                    return json.dumps({'name': 'unlimited-talk-staging-managed', 'services': {'api': {'image': self.request['image']}, 'migrate': {'image': self.request['image']}, 'gateway': {},'broker': {},'worker': {'image':self.request['image']},'dispatcher': {'image':self.request['image']},'voice-reconciler': {'image':self.request['image']},'voice-archiver': {'image':self.request['image']}}})
                 return ''
             real_tempdir = tempfile.TemporaryDirectory
             def temporary_credentials(**kwargs):

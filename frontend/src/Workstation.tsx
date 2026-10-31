@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, Notice } from "./ui";
+import { CallHistory } from "./CallHistory";
 
 type Microphone = {
   context?: AudioContext;
@@ -375,6 +376,7 @@ export function Workstation() {
           ne sont pas encore activés.
         </p>
       </section>
+      <CallHistory />
     </>
   );
 }

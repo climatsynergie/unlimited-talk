@@ -201,6 +201,8 @@ def notify(db, profile, kind, identifier, params):
             raise HTTPException(403, 'Enregistrement déjà associé à un autre appel ou différent.')
         event(db, row['id'], kind, {'recording_sid': recording, 'call_sid': params['CallSid'],
                                   'duration': duration, 'channels': channels})
+        query(db,'''INSERT INTO staging.voice_archive_jobs(recording_sid) VALUES (:sid)
+            ON CONFLICT DO NOTHING''',sid=recording)
     else:
         raise HTTPException(400, 'Type de notification invalide.')
 

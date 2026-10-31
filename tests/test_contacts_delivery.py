@@ -10,6 +10,14 @@ spec.loader.exec_module(module)
 
 
 class ContactsDeploymentTests(unittest.TestCase):
+    def test_archive_requires_the_verified_compatibility_release(self):
+        labels={'io.unlimitedtalk.schema':'0008_recordings'}
+        for running in [dict(migration='0008_recordings',revision='a'*40),
+            dict(migration='0007_voice',revision='a8316b7b42850d95b2440b370077813a59563e22')]:
+            with patch.object(module,'check_health',return_value=running):module.require_identity_rollback_target(labels)
+        for running in [{},dict(migration='0007_voice',revision='220e92a6e8b6fe29d078ad6d148740b335a44b05')]:
+            with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):
+                module.require_identity_rollback_target(labels)
     def test_voice_requires_the_deployed_compatible_predecessor(self):
         labels={'io.unlimitedtalk.schema':'0007_voice'}
         for running in [dict(migration='0007_voice',revision='a'*40),

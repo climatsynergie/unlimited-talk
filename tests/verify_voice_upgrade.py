@@ -22,7 +22,7 @@ tables = ['identity_users','contacts','contact_imports','contact_import_rows','c
           'campaign_contacts','campaign_agents','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events']
 fingerprint = 'SELECT ' + " || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging." + table + ' t)' for table in tables)
 before = sql(fingerprint)
-subprocess.run([*compose, 'run', '--rm', '--no-deps', 'migrate'], check=True)
+subprocess.run([*compose, 'run', '--rm', '--no-deps', 'migrate','alembic','upgrade','0007_voice'], check=True)
 assert sql('SELECT version_num FROM staging.alembic_version') == '0007_voice'
 assert sql(fingerprint) == before
 print('Voice migration preserves identities, imports, campaigns, calendar and callback history: PASS')

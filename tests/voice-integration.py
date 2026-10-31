@@ -329,7 +329,105 @@ try:
     assert sorted(results)==['recovered','resolved_elsewhere']
     with engine.connect() as db:
         assert query(db,"SELECT count(*) FROM staging.voice_events WHERE intent_id=:id AND kind='reconciliation.observed'",id=duplicate_id).scalar_one()==1
-    for statement in ['DELETE FROM staging.voice_intents','DELETE FROM staging.voice_recordings',
+    # Durable archive claim/retry plus real private object-store and authenticated
+    # HTTP Range playback. No provider network requests or real telephone calls.
+    import io,wave
+    from app.telephony import recording_archive as archive,archive_storage
+    from app.telephony.service import profile_hash
+    from app.contacts.storage import client as storage_client
+    transport,bucket=storage_client()
+    try:transport.head_bucket(Bucket=bucket)
+    except Exception:transport.create_bucket(Bucket=bucket)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs=list(pool.map(lambda _:archive.claim(engine,profile),range(2)))
+    assert sum(job is not None for job in jobs)==1
+    job=next(job for job in jobs if job is not None)
+    assert job.recording_sid==recording and engine.pool.checkedout()==0
+    assert archive.fail(engine,job,'raw credentials must never be persisted')
+    assert archive.claim(engine,profile) is None  # retry delay is durable
+    with engine.begin() as db:
+        saved=query(db,'SELECT * FROM staging.voice_archive_jobs WHERE recording_sid=:sid',sid=recording).mappings().one()
+        assert saved['last_error_code']=='provider_unavailable' and saved['attempts']==1
+        query(db,"UPDATE staging.voice_archive_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE recording_sid=:sid",sid=recording)
+    retry=archive.claim(engine,profile)
+    assert retry.attempts==2 and retry.lease_token!=job.lease_token
+    assert archive.fail(engine,job,'provider_unavailable') is False  # stale owner
+    # Simulate a worker dying after claiming, then recover its expired lease.
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_archive_jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE recording_sid=:sid",sid=recording)
+    recovered_job=archive.claim(engine,profile)
+    assert recovered_job.lease_token!=retry.lease_token
+    data=io.BytesIO()
+    with wave.open(data,'wb') as wav:
+        wav.setnchannels(2);wav.setsampwidth(2);wav.setframerate(8000)
+        wav.writeframes(b'\x00\x00'*2*8000*recovered_job.duration)
+    content=data.getvalue()
+    assert engine.pool.checkedout()==0
+    key,checksum=archive_storage.put(recovered_job.intent_id,recovered_job.recording_sid,content)
+    assert archive.finish(engine,profile,retry,content,key,checksum)=='stale'
+    assert archive.finish(engine,profile,recovered_job,content,key,checksum)=='archived'
+    assert archive.finish(engine,profile,recovered_job,content,key,checksum)=='resolved_elsewhere'
+    assert archive.claim(engine,profile) is None
+    assert transport.get_object_acl(Bucket=bucket,Key=key)['Grants'][0]['Permission']=='FULL_CONTROL'
+    # Existing admin session remains authorized; a different ordinary agent gets
+    # a non-enumerating 404. No provider/storage URL is sent to the browser.
+    playback='/api/telephony/recordings/'+recording+'/audio'
+    admin_view=Browser()
+    status,audio_bytes,headers=http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})
+    assert status==200 and audio_bytes==content and headers['Cache-Control']=='no-store'
+    assert headers['Content-Type'].startswith('audio/wav') and not headers.get('Location')
+    status,chunk,headers=http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token,'Range':'bytes=10-29'})
+    assert status==206 and chunk==content[10:30] and headers['Content-Range']==f'bytes 10-29/{len(content)}'
+    other_agent=Browser(role='agent')
+    assert http('GET',playback,headers={'Cookie':COOKIE+'='+other_agent.token})[0]==404
+    assert http('GET',playback)[0]==401
+    # Storage corruption cannot be played, even under an authenticated session.
+    transport.put_object(Bucket=bucket,Key=key,Body=b'changed',ACL='private')
+    assert http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})[0]==503
+    transport.put_object(Bucket=bucket,Key=key,Body=content,ACL='private',ContentType='audio/wav')
+    # The worker's complete path releases DB connections before both external
+    # operations and retries a failed upload without losing the recording.
+    second_recording='RE'+uuid4().hex
+    signed('recording',identifier,{**record_fields,'RecordingSid':second_recording})
+    class MediaReader:
+        def read(self,job):
+            assert engine.pool.checkedout()==0
+            return content
+    def broken_upload(*args):
+        assert engine.pool.checkedout()==0
+        raise RuntimeError('synthetic storage outage')
+    assert archive.archive_once(engine,profile,MediaReader(),broken_upload)=='retry_scheduled'
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_archive_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE recording_sid=:sid",sid=second_recording)
+    def upload(*args):
+        assert engine.pool.checkedout()==0
+        return archive_storage.put(*args)
+    assert archive.archive_once(engine,profile,MediaReader(),upload)=='archived'
+    # Agent ownership and stable cursor pagination are independent of whether
+    # an agent is allowed to originate the controlled admin-only test.
+    with engine.begin() as db:
+        query(db,"UPDATE staging.identity_users SET role='agent' WHERE id=:id",id=browser.id)
+        for _ in range(21):
+            query(db,'''INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,account_sid,application_sid,
+                caller_number,destination,state,parent_call_sid,expires_at,consumed_at,finished_at)
+                VALUES (:id,:actor,:session,:profile,:account,:application,:caller,:destination,'finished',:call,
+                    clock_timestamp()+interval '2 minutes',clock_timestamp(),clock_timestamp())''',
+                id=uuid4(),actor=other_agent.id,session=digest(other_agent.token),profile=profile_hash(profile),
+                account=profile.account_sid,application=profile.twiml_app_sid,caller=profile.caller_number,
+                destination=profile.approved_destination,call='CA'+uuid4().hex)
+    assert http('GET',playback,headers={'Cookie':COOKIE+'='+browser.token})[0]==200
+    page1=other_agent.request('GET','/api/telephony/calls')
+    assert len(page1['items'])==20 and page1['next_cursor']
+    cursor=page1['next_cursor']
+    page2=other_agent.request('GET','/api/telephony/calls?'+urlencode({'before_id':cursor['id'],'before_created_at':cursor['created_at']}))
+    assert len(page2['items'])==1 and page2['next_cursor'] is None
+    assert not ({c['id'] for c in page1['items']} & {c['id'] for c in page2['items']})
+    other_agent.request('GET','/api/telephony/calls?before_id='+cursor['id'],expected=400)
+    serialized=json.dumps(page1)
+    assert all(name not in serialized for name in ['object_key','checksum','session_hash','profile_hash','api_key_secret'])
+    with engine.connect() as db:
+        assert query(db,"SELECT count(*) FROM staging.voice_events WHERE intent_id=:id AND kind='recording.archived' AND details->>'recording_sid'=:sid",id=recovered_job.intent_id,sid=recovered_job.recording_sid).scalar_one()==1
+    for statement in ['DELETE FROM staging.voice_archive_jobs','DELETE FROM staging.voice_intents','DELETE FROM staging.voice_recordings',
                       'UPDATE staging.voice_events SET kind=kind','DELETE FROM staging.voice_events','TRUNCATE staging.voice_events']:
         try:
             with engine.begin() as db:
@@ -338,7 +436,7 @@ try:
             assert error.orig.sqlstate=='42501'
         else:
             raise AssertionError('Voice history permissions are too broad')
-    print('Voice HTTP/PG: authorization, fixed target, atomic claims, signed callbacks, recording ownership, immutable history and read-only recovery races: PASS')
+    print('Voice HTTP/PG: authorization, signed callbacks, recovery races, durable private recording archive, cursor history and protected audio playback: PASS')
 finally:
     server.should_exit=True
     thread.join(5)

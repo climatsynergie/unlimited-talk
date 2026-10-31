@@ -19,6 +19,7 @@ from app.calendar.routes import router as calendar_router
 from app.callbacks.routes import router as callbacks_router
 from app.scheduling_routes import router as scheduling_router
 from app.telephony.routes import router as telephony_router
+from app.telephony.recording_routes import router as recording_router
 from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
@@ -28,9 +29,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Accept the additive Voice schema before its migration is ever deployed.
-# This release remains usable for rollback without removing call history.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0007_voice', '0008_recordings'})
+# Archive workers require schema 8. The preceding compatibility image accepts
+# both schemas and remains the rollback target without removing Voice history.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0008_recordings'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
@@ -52,7 +53,7 @@ async def lifespan(app):
     app.state.engine.dispose()
 
 
-app = FastAPI(title='Unlimited Talks — Staging', version='0.7.0', lifespan=lifespan)
+app = FastAPI(title='Unlimited Talks — Staging', version='0.8.0', lifespan=lifespan)
 app.include_router(identity_router)
 app.include_router(contacts_router)
 app.include_router(campaigns_router)
@@ -60,6 +61,7 @@ app.include_router(calendar_router)
 app.include_router(callbacks_router)
 app.include_router(scheduling_router)
 app.include_router(telephony_router)
+app.include_router(recording_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -141,7 +143,7 @@ def ready(request: Request):
                           'identity_password_resets','identity_recovery_codes','identity_audit','identity_rate_limits',
                           'contacts','contact_imports','contact_import_rows','contact_history',
                           'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events',
-                          'voice_intents','voice_events','voice_recordings'):
+                          'voice_intents','voice_events','voice_recordings','voice_archive_jobs'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:

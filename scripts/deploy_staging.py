@@ -95,6 +95,13 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0008_recordings':
+        running=check_health()
+        if running.get('migration') == '0008_recordings':
+            return
+        if running.get('migration') == '0007_voice' and running.get('revision') == 'a8316b7b42850d95b2440b370077813a59563e22':
+            return
+        raise ValueError('Deploy the recording archive compatibility release first')
     if labels.get('io.unlimitedtalk.schema') == '0007_voice':
         running=check_health()
         if running.get('migration') == '0007_voice':
@@ -167,10 +174,12 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice'}:
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings'}:
             raise ValueError('This deployment template requires a compatible worker image')
         if labels.get('io.unlimitedtalk.schema') == '0007_voice' and labels.get('io.unlimitedtalk.voice-runtime') != '1':
             raise ValueError('This deployment template requires the reviewed Voice worker capability')
+        if labels.get('io.unlimitedtalk.schema') == '0008_recordings' and labels.get('io.unlimitedtalk.voice-archive') != '1':
+            raise ValueError('This deployment template requires the recording archive capability')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}
@@ -193,9 +202,9 @@ def deploy(request):
             (release / '.env').chmod(0o600)
             manifest.write_text(json.dumps(metadata, indent=2) + '\n')
         config = json.loads(compose(release, 'config', '--format', 'json', env=env))
-        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler'}:
+        if config['name'] != 'unlimited-talk-staging-managed' or set(config['services']) != {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler','voice-archiver'}:
             raise ValueError('Unexpected root-owned deployment template')
-        if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler')):
+        if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler','voice-archiver')):
             raise ValueError('Migration and API must use the same tested image')
         require_identity_rollback_target(labels)
         # Migrations must follow expand/contract compatibility. Never downgrade
@@ -205,14 +214,14 @@ def deploy(request):
         switch_current(release)
         try:
             compose(release, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher','voice-reconciler', env=env)
+                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher','voice-reconciler','voice-archiver', env=env)
             check_health(revision)
         except Exception:
-            compose(release,'stop','worker','dispatcher','voice-reconciler',env=env)
+            compose(release,'stop','worker','dispatcher','voice-reconciler','voice-archiver',env=env)
             switch_current(previous)
             try:
                 previous_config=json.loads(compose(previous,'config','--format','json',env=env))
-                previous_workers=[name for name in ('worker','dispatcher','voice-reconciler') if name in previous_config['services']]
+                previous_workers=[name for name in ('worker','dispatcher','voice-reconciler','voice-archiver') if name in previous_config['services']]
                 compose(previous, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
                         '--wait', '--wait-timeout', '120', 'api', 'gateway', *previous_workers, env=env)
                 check_health()

@@ -336,6 +336,49 @@ services:
       options:
         max-size: 5m
         max-file: '2'
+  voice-archiver:
+    image: unlimited-talk-staging-api:foundation
+    build: .
+    user: 10001:10001
+    networks:
+    - staging
+    read_only: true
+    tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    pids_limit: 100
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: disabled
+      DB_HOST: db
+      DB_NAME: unlimited_talk_staging
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+    secrets:
+    - runtime_password
+    command:
+    - python
+    - -m
+    - app.telephony.recording_archive
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.25
+    restart: on-failure:5
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import pathlib,time; assert time.time()-pathlib.Path('/tmp/voice-archive-heartbeat').stat().st_mtime<300
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 networks:
   staging:
     internal: true

@@ -11,6 +11,18 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
 class RuntimePreparationTests(unittest.TestCase):
+    def test_recording_gateway_adds_only_two_scoped_get_resources(self):
+        import json
+        config=dict(account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32)
+        rendered=module.render_gateway(config,'d'*64,True)
+        expression=next(line for line in rendered.splitlines() if 'expression' in line)
+        regex=json.loads(expression.split('.matches(',1)[1].rsplit(')',1)[0])
+        base='/2010-04-01/Accounts/'+config['account_sid']+'/Recordings'
+        self.assertIsNotNone(re.fullmatch(regex,base+'/RE'+'1'*32+'.json'))
+        self.assertIsNotNone(re.fullmatch(regex,base+'/RE'+'1'*32+'.wav?RequestedChannels=2'))
+        for path in [base+'.json',base+'/RE'+'1'*32+'.wav',base+'/RE'+'1'*32+'.wav?RequestedChannels=1',
+            base+'/RE'+'1'*32+'.mp3',base+'/RE'+'1'*32+'.json?next=https://untrusted.invalid']:
+            self.assertIsNone(re.fullmatch(regex,path))
     def test_firewall_interface_is_bound_to_the_expected_private_network(self):
         network={'Name':'unlimited-talk-staging-managed_staging','Id':'a'*64,
                  'IPAM':{'Config':[{'Subnet':'172.30.8.0/24','Gateway':'172.30.8.1'}]}}

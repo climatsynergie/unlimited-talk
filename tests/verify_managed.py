@@ -23,11 +23,11 @@ for path in ('/api/system', '/health/live', '/health/ready', '/openapi.json'):
         assert response.headers['Cache-Control'] == 'no-store'
         body = json.load(response)
         if path == '/health/ready':
-            assert body['database'] == 'connected' and body['migration'] == '0007_voice'
+            assert body['database'] == 'connected' and body['migration'] == '0008_recordings'
             assert body['communications'] == 'webhooks_only' and body['calling_enabled'] is False
 
 config = json.loads(run('config', '--format', 'json'))
-assert set(config['services']) == {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler'}
+assert set(config['services']) == {'api', 'migrate', 'gateway','broker','worker','dispatcher','voice-reconciler','voice-archiver'}
 assert set(config.get('volumes',{}))=={'broker_data'}
 assert 'ports' not in config['services']['broker']
 for name in ('worker','dispatcher'):

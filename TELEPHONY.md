@@ -274,6 +274,62 @@ Elle ne crée aucune table, ne change aucun appel ni réglage Twilio et conserve
 les appels désactivés. Le schéma 8 et le worker seront livrés séparément après
 validation de cette version sur le serveur.
 
+La version de compatibilité est `a8316b7b42850d95b2440b370077813a59563e22`,
+publiée et attestée depuis main. Le déployeur du schéma 8 refuse une migration
+depuis une autre version du schéma 7. La branche `feature/recording-archive`
+prépare la livraison fonctionnelle ; elle ne doit pas remplacer main avant la
+vérification de la compatibilité réellement déployée.
+
+## Archivage privé préparé — schéma 8
+
+Cette branche ajoute une file PostgreSQL `voice_archive_jobs`, son index de
+travaux dus et les index d'historique/enregistrements en attente. Les tables
+Voice existantes ne sont pas réécrites. La migration récupère les enregistrements
+déjà en attente ; le worker récupère aussi ceux reçus par une ancienne API après
+un retour arrière. Une réservation de travail possède un jeton et un bail de
+cinq minutes ; son expiration autorise une nouvelle copie idempotente du fichier,
+jamais un second appel ou la libération d'une conversation incertaine.
+
+Le worker dédié prend un seul fichier à la fois, libère sa connexion PostgreSQL
+avant les accès réseau, puis vérifie sous verrou le même travail avant de valider
+la copie. Les reprises et délais exponentiels restent en base. Les erreurs ne
+conservent que des codes contrôlés. La terminaison met à jour le fichier, le
+travail et l'événement d'archivage dans une transaction unique. Une tentative
+ancienne ne peut pas terminer ou faire échouer un travail repris entre-temps.
+
+Le lecteur fournisseur accepte seulement GET des métadonnées du RecordingSid
+attendu et GET du WAV double canal correspondant, dans le compte configuré. Il
+ignore les URL des formulaires et réponses, vérifie le compte, l'appel parent,
+la source DialVerb, la durée et les deux canaux. Pas de redirection ni de repli
+mono. Le premier format pris en charge est WAV PCM 16 bits, 8 kHz, deux canaux,
+avec une taille maximale de 24 Mio. La lecture réelle d'un Recording Twilio
+restera à prouver pendant l'appel contrôlé ; les tests actuels utilisent des
+métadonnées et un WAV synthétiques.
+
+Spaces reçoit une clé incluant intention, RecordingSid et SHA-256. Le fichier
+est privé et relu pour vérifier ses octets avant la validation PostgreSQL. Une
+coupure après l'upload permet de refaire la même copie sans créer un deuxième
+enregistrement métier. Aucun fichier Twilio n'est supprimé par cette livraison.
+Le contrôle effectué sur le serveur avec un WAV synthétique a prouvé l'upload,
+la relecture intègre et le refus d'une lecture anonyme ; le fichier de contrôle
+a été supprimé.
+
+L'interface prépare l'historique paginé des appels et le lecteur audio dans
+« Poste d’appel ». L'agent accède à ses appels, l'admin à tous. La lecture passe
+par `/api/telephony/recordings/{sid}/audio`, après authentification et vérification
+de propriété, sans URL Spaces/Twilio publique. Le lecteur ne précharge pas les
+fichiers. Le serveur vérifie le SHA-256 avant de répondre, prend en charge une
+plage HTTP unique pour le déplacement audio et borne les lectures simultanées.
+Une copie incomplète ou modifiée ne peut pas être jouée. Les téléchargements
+ne gardent aucune transaction PostgreSQL ouverte.
+
+Avant la livraison fonctionnelle, le helper hôte doit activer explicitement
+`upgrade-recording-gateway`. Il accepte uniquement l'ancien fragment privé exact
+et son évolution vers les deux GET Recording, valide le candidat complet avec
+Caddy, sauvegarde et restaure en cas d'échec. La sortie WAN générale reste bloquée.
+Le template ajoute seulement le worker `voice-archiver`, avec le profil privé et
+la configuration Spaces en lecture seule ; les appels restent désactivés.
+
 La version de compatibilité `6e2c3c97a418f3bebde690f0c206e90ccbebfa6c`, puis
 la migration additive du schéma 7 ont déjà été déployées et vérifiées. Cette
 livraison conserve le schéma 7 ; aucun downgrade ni nouvelle migration métier.

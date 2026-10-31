@@ -1,4 +1,4 @@
-"""Archive compatibility accepts schema 7/8; older and unknown fail closed."""
+"""Archive runtime requires schema 8; compatibility is the preceding image."""
 import unittest
 from types import SimpleNamespace
 from app.main import ready
@@ -41,7 +41,7 @@ class CallbackSchemaTests(unittest.TestCase):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision not in {'0007_voice','0008_recordings'}:
+                if revision != '0008_recordings':
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

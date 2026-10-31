@@ -45,6 +45,13 @@ SDK token, call intent or provider request is issued by the equipment check.
 Telephone calling still requires its separate browser/provider and private
 recording-archive integration before the approved controlled real-call test.
 
+The archive feature branch adds cursor-based call history and audio players to
+this workstation. It lists only calls authorized by the API, waits for a verified
+private archive and fetches audio on user playback with `preload="none"`. A failed
+playback offers an explicit retry. It does not expose a provider/object-store URL
+or enable telephone calling. Its schema-8 runtime is a separate delivery after
+the schema-7 compatibility image has been deployed.
+
 Sensitive account actions open a confirmation dialog. Failure does not appear as
 success; server messages explain an expired session, insufficient permissions,
 last-admin protection, a stale reauthentication or a failed save. Native modal
