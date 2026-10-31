@@ -339,6 +339,13 @@ avant de distribuer un jeton réel ou de permettre un appel.
 
 ## Livraison de bout en bout à réaliser
 
+Le périmètre comprend désormais l'affectation explicite des agents aux appels
+entrants et le suivi des appels non traités dans « Appels entrants ». Le
+[contrat d'exploitation](ARCHITECTURE.md#inbound-operating-contract--scope-added-31-october-2026)
+sépare les exigences confirmées des propositions de distribution, d'attente et
+de messagerie. Cette logique doit partager les réservations d'agent avec le
+composeur sortant ; elle n'est pas activée par la livraison de signature actuelle.
+
 1. Déployer le schéma et l'API préparés ci-dessus dans l'ordre de compatibilité,
    puis vérifier le profil et la règle de signature réels.
 2. Déployer le worker dédié via sa passerelle privée, vérifier sa santé et tester

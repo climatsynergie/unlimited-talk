@@ -59,9 +59,86 @@ allowed within the modular backend. Microservices are not a prerequisite.
   assign sellers later. Sellers have no accounts in the initial scope.
 - All agents can read/reply to shared SMS threads, subject to global blocks.
   Recordings: agent accesses their calls; admins access all.
-- Inbound calls go to an available agent; otherwise voicemail and a shared
-  manual callback list. Hold/transfer and appointment confirmation automation
-  are outside the agreed initial scope.
+- Admins explicitly assign which agents receive inbound calls. Unanswered
+  inbound calls create durable follow-up in an Appels entrants pipeline, linked
+  to the call history and any voicemail. Follow-up calls remain manual. See the
+  inbound operating contract below for confirmed requirements and pending choices.
+- Agent-to-agent hold/transfer and appointment confirmation automation remain
+  outside the agreed initial scope. A bounded incoming waiting queue is a
+  proposed extension, not an enabled feature.
+
+## Inbound operating contract — scope added 31 October 2026
+
+This records the requested behavior and implementation boundaries; inbound
+routing and its pipeline automation are not implemented or activated yet.
+
+Confirmed requirements:
+
+- Admins select the agents allowed to receive incoming calls. Assignment is
+  explicit and independent of the agent's currently selected outbound campaign.
+- Calls not answered by an agent must be persisted and visible in a pipeline
+  provisionally named Appels entrants. An incoming call must not disappear when
+  its caller disconnects, the browser closes or a notification arrives late.
+- Preserve the contact when identifiable, the called business number, arrival
+  time, routing/offers, answering agent when applicable, outcome and any voicemail
+  or recording metadata. Existing contact/campaign history is retained.
+- Missed-call follow-up remains manual, as previously agreed. A missed incoming
+  call does not automatically enter the outbound campaign dialer.
+
+Proposed call-center behavior, awaiting operating choices:
+
+- Configure inbound queues by business number, with assigned agents, hours and
+  timezone. Do not silently attach all numbers to one campaign or change legacy
+  number routing. Existing number ownership must be verified before activation.
+- Agent states distinguish offline, ready, reserved/ringing, in conversation,
+  optional after-call work, appointment form, pause and stopped. An online browser alone
+  never establishes readiness. Expired presence stops new offers without freeing
+  an established call whose provider outcome remains uncertain.
+- Preserve the agreed automatic outbound continuation: do not impose a new
+  mandatory wrap-up delay after every call. The appointment form and explicit
+  pause/stop keep their existing precedence.
+- Reserve one eligible agent atomically across incoming and outgoing work.
+  Never interrupt an established conversation or offer a second call to a busy
+  agent. Inbound-only, outbound-only and mixed permissions are admin settings;
+  prioritization for mixed agents must be confirmed before automatic dialing.
+- Offer to the longest-idle eligible agent, then try another on rejection or
+  timeout. An individual missed offer is distinct from a caller who never
+  reaches any agent. Queue wait and offer limits must be configurable and bounded.
+- Propose a French waiting announcement, then voicemail if no agent answers.
+  Also record abandonment before answer and arrivals outside opening hours.
+  Waiting duration and fallback selection remain pending confirmation.
+- Proposed follow-up stages: À traiter, Pris en charge, Rappel programmé,
+  Traité. Voicemail presence and telecom outcomes (missed, abandoned, answered)
+  are separate facts, not substitutes for follow-up status. A booked appointment
+  links the actual calendar entry rather than fabricating an appointment outcome.
+
+Implementation boundaries:
+
+- Separate the live media queue, immutable call events and the CRM follow-up
+  pipeline. Moving a card must never answer, hang up or originate a call.
+- Existing campaign cards are unique per contact/campaign. Do not force repeated
+  incoming calls into that single record as though it were an individual call.
+  Persist every call separately; group open follow-up for a contact/queue with
+  links to each interaction. An anonymous caller still needs an interaction,
+  without inventing a phone number or merging unrelated anonymous callers.
+- Claim ownership of shared follow-up atomically so two agents cannot unknowingly
+  return the same call. Repeated provider events cannot duplicate calls, cards,
+  ownership changes or callback schedules. A new missed call after closure opens
+  follow-up again without rewriting the previous history.
+- An incoming contact match does not remove global outbound restrictions.
+  Return calls still recheck contact eligibility and agent authorization.
+- PostgreSQL remains authoritative for business state. Twilio can provide media
+  queues and agent routing; if TaskRouter is selected, its reservations must be
+  reconciled with application claims, never become an independent second owner.
+- Reports distinguish offered, agent-answered, abandoned and overflowed calls,
+  queue wait, agent response time and unresolved follow-up age. A voicemail or
+  waiting greeting is not an agent-answered conversation.
+
+Before activation, verify simultaneous inbound/outbound claims, stale presence,
+offer timeout/rejection, caller abandonment during an offer, duplicate and late
+events, lost callbacks, multiple calls from one contact, private voicemail access
+and restart recovery. The existing controlled outbound test stays disabled until
+its separate integration checks pass; this scope adds no provider routing change.
 
 ## Reliability boundaries
 
