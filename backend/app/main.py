@@ -114,6 +114,7 @@ def root():
 @app.get('/admin/invitations', include_in_schema=False)
 @app.get('/admin/journal', include_in_schema=False)
 @app.get('/rappels', include_in_schema=False)
+@app.get('/poste-appel', include_in_schema=False)
 @app.get('/calendrier', include_in_schema=False)
 @app.get('/campagnes', include_in_schema=False)
 @app.get('/admin/contacts', include_in_schema=False)
@@ -122,6 +123,7 @@ def web_app():
     return FileResponse(WEB_ROOT / 'index.html', headers={
         'Content-Security-Policy': WEB_CSP, 'X-Frame-Options': 'DENY',
         'Cross-Origin-Opener-Policy': 'same-origin',
+        'Permissions-Policy': 'microphone=(self), camera=()',
     })
 
 

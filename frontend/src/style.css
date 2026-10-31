@@ -2001,3 +2001,69 @@ th {
   flex: 1 1 100%;
   min-width: 0;
 }
+.audio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 24px;
+}
+.audio-panel {
+  padding: 28px;
+  min-width: 0;
+}
+.audio-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.audio-heading .icon {
+  flex: none;
+  color: var(--purple);
+}
+.audio-panel h2 {
+  margin: 0;
+}
+.audio-panel > p {
+  line-height: 1.65;
+}
+.audio-panel select {
+  width: 100%;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+}
+.audio-meter-label {
+  display: block;
+  font-weight: 600;
+  margin: 22px 0 10px;
+}
+.audio-meter {
+  display: block;
+  width: 100%;
+  height: 18px;
+  accent-color: #6260c5;
+}
+.audio-status {
+  font-weight: 600;
+  min-height: 3.3em;
+}
+.audio-result {
+  color: #444854;
+}
+.audio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0;
+}
+.audio-panel .audio-hint {
+  font-size: 13px;
+  color: #616579;
+  margin-top: 22px;
+}
+.audio-call-status {
+  margin-top: 24px;
+}

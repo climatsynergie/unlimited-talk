@@ -27,6 +27,13 @@ assigné à cette nouvelle application. Son VoiceUrl est accessible avec signatu
 le mode actuel répond Hangup sans autoriser une numérotation.
 Les outils de préparation restent séparés des conteneurs applicatifs.
 
+La prochaine livraison ajoute « Poste d’appel » à l'interface : test local du
+microphone et du casque, pour agents et administrateurs. Ce test d'équipement
+est préparé dans cette branche et n'est pas encore déployé. Il ne crée aucune
+réservation et n'émet aucun jeton SDK. L'appel réel vers le destinataire autorisé
+reste une preuve distincte, après intégration de l'audio téléphonique et de
+l'archivage privé. Voir [WEB.md](WEB.md#audio-equipment-check).
+
 ## Responsabilités cibles
 
 ```mermaid

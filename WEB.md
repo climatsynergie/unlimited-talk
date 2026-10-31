@@ -19,6 +19,31 @@ frontend secret, third-party font, analytics script or cross-origin API setting.
   session revocation and password-reset link creation.
 - Invitation creation, status/expiration, pagination and explicit revocation.
 - Read-only audit journal with actor/subject labels and cursor pagination.
+- Poste d’appel (`/poste-appel`): microphone and headset check for agents and
+  administrators. This equipment check does not yet place a telephone call.
+
+## Audio equipment check
+
+The workstation requests microphone access only after an explicit click. It
+displays a live input level and an input-device selector after permission, and
+plays a short locally generated tone for a user-confirmed output check. The
+microphone is not played through the speakers, recorded, uploaded or persisted.
+Device selections and check results exist only in component memory.
+
+The test stops on the explicit stop action, after thirty seconds, when its track
+ends, on navigation/logout, on page hide and when the tab becomes hidden. A late
+permission grant after cancellation/unmount has its tracks stopped immediately;
+request generations prevent an obsolete response from affecting a newer test.
+Audio contexts, tracks, animation frames and timers are released together.
+Permission denial, missing/unavailable devices and unsupported browser features
+have French messages and a retry path. Speaker audibility requires user
+confirmation; successful browser playback alone is not proof that a person heard
+the tone. HTML permits the same-origin microphone and disables camera access.
+
+The current controlled-call backend remains disabled for this delivery. No Voice
+SDK token, call intent or provider request is issued by the equipment check.
+Telephone calling still requires its separate browser/provider and private
+recording-archive integration before the approved controlled real-call test.
 
 Sensitive account actions open a confirmation dialog. Failure does not appear as
 success; server messages explain an expired session, insufficient permissions,
