@@ -226,10 +226,15 @@ test("raccrochage avant résolution de connect : le média tardif est immédiate
 test("déconnexion de session pendant une réservation : aucun SDK même après réponse tardive", async () => {
   const f = fixture(),
     reserved = deferred<{ intent: Intent; token: string }>();
-  f.api.reserve = () => reserved.promise;
+  let requestSignal: AbortSignal | undefined;
+  f.api.reserve = (_id, signal) => {
+    requestSignal = signal;
+    return reserved.promise;
+  };
   await f.controller.refresh();
   const starting = f.controller.start();
   f.controller.dispose();
+  assert.equal(requestSignal?.aborted, true);
   const before = f.controller.state;
   reserved.resolve({
     intent: { id: crypto.randomUUID(), state: "reserved", outcome: null },

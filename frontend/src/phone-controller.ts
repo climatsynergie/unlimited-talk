@@ -22,10 +22,13 @@ export type MediaDevice = {
   onError: (listener: () => void) => void;
 };
 export type Transport = {
-  session: () => Promise<Session>;
-  reserve: (id: string) => Promise<{ intent: Intent; token: string }>;
-  cancel: (id: string) => Promise<Intent>;
-  history: (id: string) => Promise<{ intent: Intent }>;
+  session: (signal: AbortSignal) => Promise<Session>;
+  reserve: (
+    id: string,
+    signal: AbortSignal,
+  ) => Promise<{ intent: Intent; token: string }>;
+  cancel: (id: string, signal: AbortSignal) => Promise<Intent>;
+  history: (id: string, signal: AbortSignal) => Promise<{ intent: Intent }>;
 };
 export type PhoneState = {
   loaded: boolean;
@@ -60,6 +63,7 @@ export class PhoneController {
   private identifier: string | null = null;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
   private pending: number | null = null;
+  private requests = new AbortController();
   private mediaAttempted = false;
   state: PhoneState = {
     loaded: false,
@@ -130,7 +134,7 @@ export class PhoneController {
     const generation = this.generation;
     let observedSession: Session | null = null;
     try {
-      const session = await this.transport.session();
+      const session = await this.transport.session(this.requests.signal);
       if (this.closed || generation !== this.generation) return;
       observedSession = session;
       this.update({
@@ -140,7 +144,10 @@ export class PhoneController {
       });
       if (this.pending !== null && !this.state.intent) return;
       if (this.identifier) {
-        const { intent } = await this.transport.history(this.identifier);
+        const { intent } = await this.transport.history(
+          this.identifier,
+          this.requests.signal,
+        );
         if (this.closed || generation !== this.generation) return;
         if (!this.settle(intent)) {
           const owned = this.state.intent?.owned_session;
@@ -220,7 +227,7 @@ export class PhoneController {
     });
     let attemptedConnect = false;
     try {
-      const reserved = await this.transport.reserve(id);
+      const reserved = await this.transport.reserve(id, this.requests.signal);
       if (this.closed || generation !== this.generation) return;
       this.update({ intent: { ...reserved.intent, owned_session: true } });
       const device = await this.factory(reserved.token);
@@ -281,7 +288,7 @@ export class PhoneController {
       // A missing/uncertain reservation stays blocked until an explicit refresh.
       if (!attemptedConnect) {
         try {
-          const row = await this.transport.cancel(id);
+          const row = await this.transport.cancel(id, this.requests.signal);
           if (!this.closed && this.identifier === id) {
             const failure = this.state.error;
             if (this.settle(row)) this.update({ error: failure });
@@ -312,7 +319,7 @@ export class PhoneController {
       // Race atomically with consume: late permission cannot redeem a cancelled
       // reservation; an already consumed call returns 409 and stays occupied.
       void this.transport
-        .cancel(id)
+        .cancel(id, this.requests.signal)
         .then((row) => {
           if (generation === this.generation) this.settle(row);
         })
@@ -336,7 +343,10 @@ export class PhoneController {
     this.release();
     this.update({ phase: "ending", error: "" });
     try {
-      const cancelled = await this.transport.cancel(row.id);
+      const cancelled = await this.transport.cancel(
+        row.id,
+        this.requests.signal,
+      );
       if (generation === this.generation) this.settle(cancelled);
     } catch {
       this.update({
@@ -348,12 +358,14 @@ export class PhoneController {
   }
   dispose() {
     this.closed = true;
+    this.requests.abort();
     ++this.generation;
     this.release();
   }
   activate() {
     if (!this.closed) return;
     this.closed = false;
+    this.requests = new AbortController();
     this.refreshing = false;
     this.pending = null;
     this.update({ local: false, phase: this.identifier ? "checking" : "idle" });

@@ -19,25 +19,25 @@ export function makePhoneController(
 ) {
   return new PhoneController(
     {
-      session: () =>
+      session: (signal) =>
         api<Session>("/telephony/test/session", {
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
         }),
-      reserve: (id) =>
+      reserve: (id, signal) =>
         api<{ intent: Intent; token: string }>("/telephony/test/intents", {
           method: "POST",
           body: { id },
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
         }),
-      cancel: (id) =>
+      cancel: (id, signal) =>
         api<Intent>(`/telephony/test/intents/${id}/cancel`, {
           method: "POST",
           body: {},
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
         }),
-      history: (id) =>
+      history: (id, signal) =>
         api<{ intent: Intent }>(`/telephony/test/intents/${id}`, {
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
         }),
     },
     factory,
@@ -66,9 +66,11 @@ export function PhoneProvider({
     }
     window.addEventListener("pagehide", leaving);
     window.addEventListener("pageshow", restored);
+    window.addEventListener("ut-session-expired", leaving);
     return () => {
       window.removeEventListener("pagehide", leaving);
       window.removeEventListener("pageshow", restored);
+      window.removeEventListener("ut-session-expired", leaving);
       controller.dispose();
     };
   }, [controller]);
@@ -88,10 +90,14 @@ export function PhoneProvider({
   return <Context.Provider value={controller}>{children}</Context.Provider>;
 }
 export function usePhone() {
-  const controller = useContext(Context);
-  if (!controller) throw new Error("Téléphone indisponible");
+  const controller = usePhoneController();
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
   return { controller, state, busy: state.phase !== "idle" };
+}
+export function usePhoneController() {
+  const controller = useContext(Context);
+  if (!controller) throw new Error("Téléphone indisponible");
+  return controller;
 }
 const labels = {
   idle: "Prêt",

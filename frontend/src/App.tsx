@@ -10,7 +10,7 @@ import { Calendar } from "./Calendar";
 import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
 import { Workstation } from "./Workstation";
-import { PhoneBar, PhoneProvider } from "./Phone";
+import { PhoneBar, PhoneProvider, usePhoneController } from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
 type Page =
@@ -208,6 +208,26 @@ function Workspace({
   const [page, setPage] = useState<Page>(
     () => currentPage() ?? (identity.user.role === "admin" ? "users" : "home"),
   );
+  const phone = usePhoneController();
+  async function leave(all = false) {
+    // Stop pending media immediately, before the logout response or React unmount.
+    phone.hangup();
+    phone.dispose();
+    try {
+      await onLogout(all);
+    } catch (failure) {
+      if (!(failure instanceof ApiError && failure.status === 401)) {
+        phone.activate();
+        void phone.refresh(); // Recover state, never reconnect the old call.
+      }
+      throw failure;
+    }
+  }
+  function reauthenticate() {
+    phone.hangup();
+    phone.dispose();
+    onSessionEnded();
+  }
   const [invite, setInvite] = useState(false);
   const [share, setShare] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -332,7 +352,7 @@ function Workspace({
             type="button"
             onClick={async () => {
               try {
-                await onLogout();
+                await leave();
               } catch (error) {
                 setError(message(error));
               }
@@ -371,7 +391,7 @@ function Workspace({
             <button
               type="button"
               className="text-button"
-              onClick={onSessionEnded}
+              onClick={reauthenticate}
             >
               Se reconnecter
             </button>
@@ -392,7 +412,7 @@ function Workspace({
             <Users
               me={identity.user}
               invite={() => setInvite(true)}
-              onSessionEnded={onSessionEnded}
+              onSessionEnded={reauthenticate}
             />
           ) : selected === "invitations" ? (
             <Invitations invite={() => setInvite(true)} revision={revision} />
@@ -402,7 +422,7 @@ function Workspace({
             <Account
               identity={identity}
               onIdentity={setIdentity}
-              onLogoutAll={() => onLogout(true)}
+              onLogoutAll={() => leave(true)}
             />
           ) : (
             <>
@@ -511,7 +531,8 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
       "BroadcastChannel" in window ? new BroadcastChannel("ut-identity") : null;
     if (channel)
       channel.onmessage = (event) => {
-        if (event.data === "signed-out") signedOut();
+        if (event.data === "signed-out")
+          window.dispatchEvent(new Event("ut-session-expired"));
       };
     return () => {
       window.removeEventListener("ut-session-expired", expired);

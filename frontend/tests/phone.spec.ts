@@ -78,6 +78,7 @@ async function setup(page: Page, enabled = true) {
     };
     state.rows.set(body.id, intent);
     if (state.reserveGate) await state.reserveGate;
+    if (route.request().failure()) return; // The closed client aborted this response.
     await route.fulfill({
       status: 201,
       json: { intent, token: "synthetic-sdk-token" },
@@ -267,16 +268,35 @@ test("déconnexion pendant la réservation : aucune activation tardive du SDK", 
   state.reserveGate = new Promise<void>((done) => {
     resolve = done;
   });
-  await page.route("**/api/auth/logout", (route) =>
-    route.fulfill({ json: {} }),
-  );
+  let confirmLogout!: () => void;
+  const logoutGate = new Promise<void>((done) => {
+    confirmLogout = done;
+  });
+  await page.route("**/api/auth/logout", async (route) => {
+    await logoutGate;
+    await route.fulfill({ json: {} });
+  });
   await page.goto("/poste-appel");
   await page.getByRole("button", { name: "Appeler", exact: true }).click();
   await expect.poll(() => state.reservations).toBe(1);
+  const reservationAborted = page.waitForEvent("requestfailed", {
+    predicate: (request) =>
+      request.url().endsWith("/api/telephony/test/intents"),
+  });
   await page
     .getByRole("button", { name: "Se déconnecter", exact: true })
     .click();
-  resolve();
+  try {
+    await reservationAborted;
+    resolve();
+    await page.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => done())),
+    );
+    expect(state.sdkLoads).toBe(0);
+  } finally {
+    resolve();
+    confirmLogout();
+  }
   await expect(
     page.getByRole("heading", {
       name: "Heureux de vous retrouver.",
@@ -332,4 +352,61 @@ test("la lecture d’une archive est arrêtée avant de connecter l’appel", as
   await expect
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
     .toBe(1);
+});
+
+test("révocation de session : média fermé avant le prochain rendu", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.goto("/poste-appel");
+  await page.getByRole("button", { name: "Appeler", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
+    .toBe(1);
+  const destroyed = await page.evaluate(() => {
+    window.dispatchEvent(new Event("ut-session-expired"));
+    return window.phoneProof.destroyed;
+  });
+  expect(destroyed).toBe(1);
+  await expect(
+    page.getByRole("heading", {
+      name: "Heureux de vous retrouver.",
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
+test("échec de déconnexion : session conservée et média fermé sans relance", async ({
+  page,
+}) => {
+  const state = await setup(page);
+  await page.route("**/api/auth/logout", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { detail: "Déconnexion non confirmée." },
+    }),
+  );
+  await page.goto("/poste-appel");
+  await page.getByRole("button", { name: "Appeler", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
+    .toBe(1);
+  state.rows.values().next().value!.state = "answered";
+  await page
+    .getByRole("button", { name: "Se déconnecter", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Déconnexion non confirmée.",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Poste d’appel", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof.destroyed))
+    .toBe(1);
+  await expect(
+    page.getByRole("button", { name: "Appeler", exact: true }),
+  ).toBeDisabled();
+  expect(state.reservations).toBe(1);
+  expect(state.sdkLoads).toBe(1);
 });

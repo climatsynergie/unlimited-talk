@@ -49,8 +49,10 @@ Les clés API et le numéro ne proviennent jamais du formulaire navigateur :
 mémoire, sans React state, URL, journal ni stockage navigateur. Le SDK est silencieux.
 
 Le contrôleur est monté au niveau de la session : les changements de page internes
-conservent l’appel et sa barre de commandes. Déconnexion, révocation ou sortie de
-page ferment les médias ; une autorisation/connexion tardive est immédiatement
+conservent l’appel et sa barre de commandes. Le clic de déconnexion ferme le
+téléphone avant la réponse HTTP et le démontage React. Si la déconnexion échoue,
+la session reste visible mais le média n’est jamais relancé automatiquement.
+Révocation, reconnexion volontaire et sortie de page ferment aussi les médias ; une autorisation/connexion tardive est immédiatement
 fermée. Une page restaurée ou rechargée relit la réservation et ne recrée jamais
 automatiquement un jeton ou un appel. La lecture d’une archive et les tests du
 casque sont suspendus pendant un appel.
