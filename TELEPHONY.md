@@ -267,6 +267,13 @@ source sera installée lors de la prochaine livraison de l'outil hôte.
 
 ## Ordre de déploiement
 
+La livraison de compatibilité suivante reste au schéma 7 et accepte le futur
+schéma additif `0008_recordings`. Elle doit être déployée avant l'archivage durable
+afin de permettre un retour à cette image sans supprimer les enregistrements.
+Elle ne crée aucune table, ne change aucun appel ni réglage Twilio et conserve
+les appels désactivés. Le schéma 8 et le worker seront livrés séparément après
+validation de cette version sur le serveur.
+
 La version de compatibilité `6e2c3c97a418f3bebde690f0c206e90ccbebfa6c`, puis
 la migration additive du schéma 7 ont déjà été déployées et vérifiées. Cette
 livraison conserve le schéma 7 ; aucun downgrade ni nouvelle migration métier.

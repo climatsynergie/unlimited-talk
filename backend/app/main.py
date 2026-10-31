@@ -30,7 +30,7 @@ logger = logging.getLogger('uvicorn.error')
 
 # Accept the additive Voice schema before its migration is ever deployed.
 # This release remains usable for rollback without removing call history.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0007_voice'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0007_voice', '0008_recordings'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "

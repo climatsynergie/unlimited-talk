@@ -34,6 +34,10 @@ def ready(expected,version=None):
 
 ready(200,'0007_voice')
 try:
+    # Compatibility release: accept the next additive archive schema without
+    # applying that migration or allowing unrelated schema revisions.
+    sql("UPDATE staging.alembic_version SET version_num='0008_recordings'")
+    ready(200,'0008_recordings')
     sql("UPDATE staging.alembic_version SET version_num='0006_callbacks'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0005_calendar'")
