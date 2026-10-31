@@ -11,6 +11,13 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
 class RuntimePreparationTests(unittest.TestCase):
+    def test_firewall_interface_is_bound_to_the_expected_private_network(self):
+        network={'Name':'unlimited-talk-staging-managed_staging','Id':'a'*64,
+                 'IPAM':{'Config':[{'Subnet':'172.30.8.0/24','Gateway':'172.30.8.1'}]}}
+        self.assertEqual(module.private_bridge(network),'br-'+'a'*12)
+        for change in [{'Name':'other'},{'Id':'unsafe;command'},{'IPAM':{'Config':[{'Subnet':'0.0.0.0/0','Gateway':'1.1.1.1'}]}}]:
+            with self.assertRaises(module.PreflightError):module.private_bridge({**network,**change})
+
     def test_gateway_regex_allows_only_scoped_resource_reads_with_canonical_query(self):
         config=dict(account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32)
         rendered=module.render_gateway(config,'d'*64)

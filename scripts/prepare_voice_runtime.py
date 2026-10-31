@@ -116,6 +116,14 @@ def sync_directory(path):
     finally:os.close(fd)
 
 
+def private_bridge(network):
+    if (not isinstance(network, dict) or network.get('Name') != 'unlimited-talk-staging-managed_staging'
+            or network.get('IPAM', {}).get('Config') != [{'Subnet':'172.30.8.0/24','Gateway':'172.30.8.1'}]
+            or not isinstance(network.get('Id'), str) or not re.fullmatch('[0-9a-f]{64}',network['Id'])):
+        raise PreflightError('Réseau Docker privé inattendu ; aucune règle de pare-feu ajoutée.')
+    return 'br-' + network['Id'][:12]
+
+
 def replace_caddy(candidate):
     info = CADDY.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or info.st_nlink != 1:
@@ -192,6 +200,11 @@ def main(argv=None):
             config=voice.validate_credentials(read_private(voice.CREDENTIALS),plan,base)
             prepare(config)
             if args.action=='read-gateway':
+                network=json.loads(subprocess.check_output(['docker','network','inspect','unlimited-talk-staging-managed_staging'],text=True))[0]
+                bridge=private_bridge(network)
+                subprocess.run(['ip','link','show',bridge],capture_output=True,check=True,timeout=5)
+                subprocess.run(['ufw','allow','in','on',bridge,'from','172.30.8.0/24','to','172.30.8.1',
+                    'port','8112','proto','tcp','comment','Unlimited Talks Voice read gateway'],capture_output=True,check=True,timeout=15)
                 original=CADDY.read_text();line='import '+str(FRAGMENT)+'\n'
                 if line not in original:
                     replace_caddy(original.rstrip()+'\n\n'+line)
