@@ -53,4 +53,8 @@ class RuntimePreparationTests(unittest.TestCase):
         self.assertIn('probe|voice|parent-status',rendered)
         self.assertNotIn('/api/telephony/test',rendered)
         self.assertEqual(module.render_hooks(rendered),rendered)
+        documented=original.replace('\t\t\theader_up -Authorization',
+            '\t\t\t# The perimeter credential must never reach the application.\n\t\t\theader_up -Authorization')
+        self.assertEqual(module.render_hooks(documented),rendered)
+        with self.assertRaises(module.PreflightError):module.render_hooks(original.replace('8110','9999'))
         with self.assertRaises(module.PreflightError):module.render_hooks('unreviewed configuration')

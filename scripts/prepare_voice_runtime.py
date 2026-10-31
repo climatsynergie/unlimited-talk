@@ -75,8 +75,12 @@ def render_hooks(original):
         return original
     old = ('\t\timport /etc/caddy/staging-access.caddy\n'
            '\t\treverse_proxy 127.0.0.1:8110 {\n\t\t\theader_up -Authorization\n\t\t}\n')
-    if original.count(old) != 1:
+    documented = old.replace('\t\t\theader_up -Authorization',
+        '\t\t\t# The perimeter credential must never reach the application.\n\t\t\theader_up -Authorization')
+    matches = [block for block in (old, documented) if original.count(block) == 1]
+    if len(matches) != 1:
         raise PreflightError('Structure du proxy inattendue ; aucun remplacement.')
+    old = matches[0]
     uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
     new = f'''\t\t@unlimited_talk_voice {{
 \t\t\tmethod POST

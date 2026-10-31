@@ -201,6 +201,8 @@ PostgreSQL, HTTPS perimeter, individual accounts/MFA, French React interface,
 private CSV imports, canonical contacts, configurable campaigns/pipelines, shared
 notes, the shared calendar and durable agent-owned callbacks. See IDENTITY.md,
 WEB.md, CONTACTS.md, CAMPAIGNS.md, CALENDAR.md and CALLBACKS.md for their contracts.
+The signed callback receiver and dedicated read-only reconciliation worker are
+deployed, healthy and provider-tested; a prefix-only Rule completed propagation.
 Calls, SMS and recordings are not activated. TELEPHONY.md defines the controlled
 integration proof and the responsibilities that must precede live origination.
 

@@ -9,20 +9,22 @@ privés et son image de laboratoire sont conservés comme historique. Ne pas cr�
 les deux serveurs proposés dans cette exploration pour le parcours Twilio direct.
 
 Le CRM, PostgreSQL, les imports, campagnes, notes, calendrier et rappels restent
-le socle. Les communications de l'application déployée sont toujours désactivées.
-L'API de test contrôlé, sa migration additive et la validation des notifications
-signées sont déployées dans la révision `90e3cfc58a7a216cc79307c990e1440e14756fba`,
-schéma 7 et communications désactivées. Cette branche prépare maintenant le
-worker de rapprochement et la connexion signée ; cette livraison n'est pas encore
-déployée. La SharedKey et son Setting sont créés, leur secret est privé et aucune
-Rule n'est appliquée. La passerelle de lecture est installée sur le pont Docker
-privé. Aucun accès
-public aux webhooks, jeton navigateur réel ou numérotation n'est activé. Les identifiants de la nouvelle clé
+le socle. La révision `76f875eacd2f0d0e823a397c3b60141a3a49958f` est déployée,
+schéma 7, API `webhooks_only` et `calling_enabled=false`. Le worker de rapprochement
+est sain en `recovery_only`, avec sa passerelle de lecture privée vérifiée depuis
+son propre conteneur. La SharedKey et son Setting sont créés et leur secret est
+privé. Les exceptions publiques sont limitées aux POST téléphoniques précis ;
+le reste conserve l'authentification du périmètre. Le test Webhooks Tests de
+Twilio a livré une notification signée, acceptée avec une réponse 204. Une Rule
+du seul préfixe téléphonique est appliquée ; son Operation a atteint `COMPLETED`,
+et `twilio_voice_rule.py check` confirme `verified`. Aucun jeton navigateur réel,
+appel ou SMS n'a été émis. Les identifiants de la nouvelle clé
 Voice ont été saisis dans un fichier privé du serveur ; sa lecture du numéro de
 test a réussi. Une nouvelle application TwiML distincte a ensuite été créée et
 vérifiée le 29 octobre 2026. Les trois applications précédentes et les paramètres
 des quatre numéros sont restés identiques après création. Aucun numéro n'a été
-assigné à cette nouvelle application ; son VoiceUrl n'est pas encore accessible.
+assigné à cette nouvelle application. Son VoiceUrl est accessible avec signature ;
+le mode actuel répond Hangup sans autoriser une numérotation.
 Les outils de préparation restent séparés des conteneurs applicatifs.
 
 ## Responsabilités cibles
@@ -188,9 +190,9 @@ dix secondes. Un heartbeat est écrit seulement après un passage sans échec ; 
 contrôle d'exploitation doit tenir compte du temps maximal d'un lot. Ces bornes
 ne prouvent pas une capacité audio ni le délai de connexion de vingt agents.
 
-Le service `voice-reconciler` est ajouté à la prochaine configuration de
-déploiement, avec son image attestée, un profil en lecture seule et une mémoire
-bornée. Il reste inactif sans accès au fournisseur dans la configuration locale.
+Le service `voice-reconciler` est déployé avec son image attestée, un profil en
+lecture seule et une mémoire bornée. Il reste inactif sans accès au fournisseur
+dans la configuration locale.
 Le mode géré `recovery_only` exige la passerelle privée et son secret distinct ;
 aucun repli vers une sortie Internet directe. Il devra être sain avant d'armer
 le premier appel. Les tests métier utilisent des réponses synthétiques et un vrai
@@ -229,11 +231,32 @@ refuse toute ouverture avant une API saine en `webhooks_only`, appels explicitem
 désactivés. Son exception publique est limitée aux routes POST téléphoniques
 précises ; l'import d'authentification humaine est préservé pour le reste.
 
-Après ce déploiement, tester la livraison depuis l'API Webhooks Tests de Twilio,
-vérifier le 204 et la signature, puis appliquer uniquement la Rule du préfixe
-`https://staging.unlimitedtalkapp.com/api/telephony/twilio/`. La Rule DEFAULT et les
-routes de l'ancienne application ne doivent pas être modifiées. Les tests de
-signature et la propagation de Rule restent à vérifier sur le fournisseur.
+`scripts/twilio_voice_delivery_test.py` envoie uniquement un test à `/probe`,
+avec le Setting vérifié. Une réponse API 200 ne suffit pas : le reçu privé doit
+prouver `result.outcome=DELIVERED` et `result.response=204`. La livraison réelle
+du 31 octobre a passé ce contrôle. Aucun appel ni notification métier n'est créé.
+
+`scripts/twilio_voice_rule.py` sépare préparation, création et vérification. Il
+exige ce reçu récent et autorise uniquement la Rule du préfixe
+`https://staging.unlimitedtalkapp.com/api/telephony/twilio/`, avec le Setting dédié
+à 100 %. DEFAULT, PATCH, DELETE et toute autre origine sont refusés. Le POST est
+journalisé et synchronisé avant envoi ; une réponse perdue se rapproche par
+lecture de la Rule et de son Operation, sans deuxième création. `Retry-After`
+est respecté et seule une Operation `COMPLETED` confirme la propagation.
+
+Le reçu privé de la Rule permet au vérificateur de signature de reconnaître
+uniquement cette nouvelle ressource, avec son empreinte et son paramétrage exacts.
+Les empreintes des anciennes Rules restent inchangées et vérifiées ; aucune
+exception globale n'est introduite dans le contrôle d'intégrité.
+
+La première tentative de déploiement avait échoué : une copie root 0600 du
+fichier Nginx empêchait sa lecture par le gateway sans privilèges. Le retour
+automatique a conservé l'application. Les permissions du template et du fichier
+de release ont été corrigées à 0644, sans changement de contenu. Le même fichier
+a passé `nginx -t` dans l'image épinglée, puis le redéploiement de la même image
+attestée a réussi. Le déployeur source impose désormais 0644 pour cette seule
+configuration statique sans secret, avec un test de régression ; cette évolution
+source sera installée lors de la prochaine livraison de l'outil hôte.
 
 ## Ordre de déploiement
 
@@ -332,27 +355,27 @@ Un verrou exclusif protège les exécutions concurrentes ; les journaux sont éc
 par remplacement atomique et synchronisation disque. Le SID AP vérifié reste dans
 `/etc/unlimited-talk-staging/twilio-voice-application.json`, hors du dépôt.
 
-La création du conteneur de configuration TwiML ne prouve pas les webhooks, une
-SharedKey, les jetons SDK ni l'audio. Aucune règle de signature n'a encore été
-appliquée. Le service durable et les routes publiques signées devront être livrés
-avant de distribuer un jeton réel ou de permettre un appel.
+La création du conteneur de configuration TwiML ne prouve pas les jetons SDK ni
+l'audio. La réception signée et le rapprochement ont ensuite été livrés et
+vérifiés séparément. Leur preuve ne permet pas encore de distribuer un jeton réel
+ou d'autoriser un appel sans le parcours navigateur et l'archivage privés prêts.
 
 ## Livraison de bout en bout à réaliser
 
 Le périmètre comprend désormais l'affectation explicite des agents aux appels
 entrants et le suivi des appels non traités dans « Appels entrants ». Le
 [contrat d'exploitation](ARCHITECTURE.md#inbound-operating-contract--scope-added-31-october-2026)
-sépare les exigences confirmées des propositions de distribution, d'attente et
-de messagerie. Cette logique doit partager les réservations d'agent avec le
+décrit les règles acceptées de distribution, d'attente et de messagerie ainsi
+que les intégrations encore nécessaires. Cette logique doit partager les réservations d'agent avec le
 composeur sortant ; elle n'est pas activée par la livraison de signature actuelle.
 
-1. Déployer le schéma et l'API préparés ci-dessus dans l'ordre de compatibilité,
-   puis vérifier le profil et la règle de signature réels.
-2. Déployer le worker dédié via sa passerelle privée, vérifier sa santé et tester
-   les notifications signées avant d'armer le premier appel. Une intention au
-   résultat incertain ne s'expire pas.
-3. Exposer uniquement les POST précis au travers de BasicAuth après test de la
-   signature ; conserver MFA/permissions sur toutes les opérations humaines.
+1. Conserver la réception signée et le rapprochement déjà déployés ; vérifier
+   leur santé après chaque évolution avant d'armer le premier appel. Une
+   intention au résultat incertain ne s'expire pas.
+2. Maintenir l'exception publique limitée aux POST précis et conserver
+   MFA/permissions sur toutes les opérations humaines.
+3. Garder les contrôles de propagation de Rule, de livraison et
+   d'intégrité des configurations existantes dans la procédure d'exploitation.
 4. Interface française : préparation du casque, appel, état réel, raccrochage et
    erreurs lisibles. Mettre à jour CSP et Permissions-Policy selon les domaines
    du SDK et tester depuis les réseaux réels. Ne pas désactiver globalement CSP.

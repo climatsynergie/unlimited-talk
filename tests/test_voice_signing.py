@@ -100,6 +100,21 @@ class SigningTests(unittest.TestCase):
         with self.assertRaises(module.PreflightError):self.run_action('prepare')
         self.assertFalse(self.path.exists())
 
+    def test_later_owned_prefix_rule_is_verified_without_ignoring_legacy_drift(self):
+        self.run_action('prepare');self.run_action('apply')
+        source=module.read_private(self.path)
+        rule={'id':'webhooks_rule_'+'r'*26,**module.route_setting(source['setting_id'])}
+        self.inventory['Rules'][rule['id']]=rule
+        receipt=dict(version=1,binding=source['binding'],state='verified',rule_id=rule['id'],
+            rule_fingerprint=module.fingerprints({rule['id']:rule})[rule['id']])
+        module.save(receipt,self.path.with_name('twilio-voice-rule.json'))
+        self.assertTrue(self.run_action('check')['rule_applied'])
+        self.inventory['Rules'][self.old_rule]['friendlyName']='Changed'
+        with self.assertRaises(module.PreflightError):self.run_action('check')
+        self.inventory['Rules'][self.old_rule]['friendlyName']='Legacy'
+        self.inventory['Rules'][rule['id']]['settings']=[]
+        with self.assertRaises(module.PreflightError):self.run_action('check')
+
     def test_assembled_profile_is_bound_to_verified_key_application_and_original_target(self):
         self.run_action('prepare');self.run_action('apply')
         application=dict(version=1,binding=module.binding(self.config),state='verified',before_applications={},before_numbers={},application_sid='AP'+'1'*32)

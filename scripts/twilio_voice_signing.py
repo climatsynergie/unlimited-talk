@@ -23,6 +23,8 @@ JOURNAL = voice.PLAN.with_name('twilio-voice-signing.json')
 KEY = voice.PLAN.with_name('twilio-voice-signing-key.json')
 PROFILE = voice.PLAN.with_name('twilio-voice-profile.json')
 NAME = 'unlimited-talk-voice-signature'
+RULE_NAME = 'unlimited-talk-voice-route'
+RULE_PREFIX = 'https://staging.unlimitedtalkapp.com/api/telephony/twilio/'
 RESOURCES = {'SharedKeys': ('sharedKeys', 'webhooks_sharedkey_'), 'Settings': ('settings', 'webhooks_setting_'),
              'Rules': ('rules', 'webhooks_rule_')}
 
@@ -86,10 +88,33 @@ def fingerprints(rows):
     return {key: digest({k: v for k, v in row.items() if k not in {'createdAt', 'updatedAt'}}) for key, row in rows.items()}
 
 
-def preserved(journal, inventory):
+def route_setting(setting_id):
+    if not identifier(setting_id, 'webhooks_setting_'):
+        raise PreflightError('Paramétrage de route invalide.')
+    return {'friendlyName': RULE_NAME, 'matchType': 'PREFIX_MATCH', 'prefix': RULE_PREFIX,
+            'settings': [{'settingId': setting_id, 'percentage': 100}]}
+
+
+def owned_rule(journal, inventory, receipt):
+    if receipt is None or receipt.get('state') in {'prepared', 'requested'}:
+        return None
+    if (receipt.get('version') != 1 or receipt.get('binding') != journal['binding']
+            or receipt.get('state') not in {'propagating', 'verified'}
+            or not identifier(receipt.get('rule_id'), 'webhooks_rule_')
+            or receipt['rule_id'] in journal['before']['Rules']):
+        raise PreflightError('Reçu de route invalide.')
+    row = inventory['Rules'].get(receipt['rule_id'])
+    if (not isinstance(row, dict) or any(row.get(k) != v for k,v in route_setting(journal['setting_id']).items())
+            or fingerprints({receipt['rule_id']: row})[receipt['rule_id']] != receipt.get('rule_fingerprint')):
+        raise PreflightError('La route dédiée ne correspond plus au reçu privé.')
+    return receipt['rule_id']
+
+
+def preserved(journal, inventory, rule_receipt=None):
+    rule_id = owned_rule(journal, inventory, rule_receipt)
     for resource in RESOURCES:
         current = {key: row for key, row in inventory[resource].items()
-                   if key not in {journal.get('key_id'), journal.get('setting_id')}}
+                   if key not in {journal.get('key_id'), journal.get('setting_id'), rule_id}}
         if fingerprints(current) != journal['before'][resource]:
             raise PreflightError('La configuration de signature existante a changé ; examen requis.')
 
@@ -125,6 +150,8 @@ def run(action, config, path=JOURNAL, key_path=KEY, provider=None):
                 or type(journal['version']) is not int or journal['version'] != 1 or journal['binding'] != binding(config)
                 or journal['state'] not in {'prepared','key_requested','key_saved','setting_requested','verified'}):
             raise PreflightError('Journal de signature invalide.')
+    receipt_path = path.with_name('twilio-voice-rule.json')
+    rule_receipt = read_private(receipt_path) if receipt_path.exists() else None
     if journal['state'] == 'key_requested':
         # The only copy of the secret is the create response. If it was not
         # persisted, no list/fetch can reconstruct it. Do not create another key.
@@ -136,7 +163,7 @@ def run(action, config, path=JOURNAL, key_path=KEY, provider=None):
         journal.update(state='key_saved', key_id=key['id'])
         save(journal, path, replace=True)
     if journal['state'] != 'setting_requested':
-        preserved(journal, inventory)
+        preserved(journal, inventory, rule_receipt)
     if journal['state'] == 'prepared' and action == 'apply':
         if key_path.exists() or key_path.is_symlink():
             raise PreflightError('Un fichier de clé existe déjà ; aucun remplacement.')
@@ -153,7 +180,7 @@ def run(action, config, path=JOURNAL, key_path=KEY, provider=None):
         journal.update(state='key_saved', key_id=key['id'])
         save(journal, path, replace=True)
         inventory = provider.inventory()
-        preserved(journal, inventory)
+        preserved(journal, inventory, rule_receipt)
     if journal['state'] in {'key_saved','setting_requested','verified'}:
         key = validate_key(read_private(key_path))
         if key['id'] != journal['key_id']:
@@ -181,13 +208,14 @@ def run(action, config, path=JOURNAL, key_path=KEY, provider=None):
         journal.update(state='verified', setting_id=found['id'])
         save(journal, path, replace=True)
     if journal['state'] == 'verified':
-        preserved(journal, inventory)
+        preserved(journal, inventory, rule_receipt)
         fetched = provider.request('GET', '/Settings/' + journal['setting_id'])
         validate_setting(fetched, journal['key_id'])
         if fetched['id'] != journal['setting_id']:
             raise PreflightError('Identité du paramétrage différente du journal.')
     return {'state': journal['state'], 'key_secret_saved': key_path.exists(), 'setting_id': journal['setting_id'],
-            'existing_rules_unchanged': True, 'rule_applied': False, 'calling_enabled': False}
+            'existing_rules_unchanged': True,
+            'rule_applied': bool(rule_receipt and rule_receipt.get('state') == 'verified'), 'calling_enabled': False}
 
 
 def assemble(config, journal, key, application):
