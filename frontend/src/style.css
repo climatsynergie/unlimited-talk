@@ -559,57 +559,41 @@ form > .primary,
   display: flex;
   flex-direction: column;
   position: sticky;
+  align-self: flex-start;
   top: 0;
   height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 28px 19px 15px;
 }
 .sidebar .brand {
   font-size: 18px;
   padding-left: 7px;
+  margin-bottom: 28px;
+  flex-shrink: 0;
 }
 .sidebar .brand-mark {
   height: 32px;
   width: 32px;
   border-radius: 9px;
 }
-.workspace-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 34px 3px 32px;
-  padding: 12px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-.workspace-initial {
-  background: #f1effa;
-  border: 1px solid #e6e2f5;
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #8074b1;
-}
-.workspace-label div {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.workspace-label strong {
-  font-size: 11px;
-}
-.workspace-label div span {
-  font-size: 9px;
-  color: #74687f;
-}
-.workspace-dot {
-  margin-left: auto;
-  width: 5px;
-  height: 5px;
-  background: #a79acb;
-  border-radius: 50%;
+.sidebar nav {
+  flex: 1 1 auto;
+  min-height: 96px;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #89779e #f4f1fa;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 6px;
+  margin-inline: -6px;
+  padding: 6px;
 }
 .nav-label {
+  flex-shrink: 0;
   font-size: 8px;
   font-weight: 700;
   letter-spacing: 1.5px;
@@ -653,31 +637,8 @@ form > .primary,
   margin-left: auto;
 }
 .sidebar-bottom {
-  margin-top: auto;
-  padding-top: 30px;
-}
-.team-note {
-  background: linear-gradient(145deg, #f4f1fc, #faf9fd);
-  border: 1px solid #ede9f6;
-  border-radius: 10px;
-  padding: 17px 14px;
-  margin: 20px 5px;
-  color: #9385b0;
-}
-.team-note > .icon {
-  margin-bottom: 13px;
-  width: 19px;
-  height: 19px;
-}
-.team-note strong {
-  display: block;
-  font-size: 11px;
-  color: #776590;
-  margin-bottom: 8px;
-}
-.team-note p {
-  font-size: 10px;
-  color: #74687f;
+  flex-shrink: 0;
+  padding-top: 16px;
 }
 .avatar {
   width: 38px;
@@ -828,6 +789,7 @@ form > .primary,
   background: #fdfcfe;
 }
 .table-scroll {
+  position: relative;
   overflow-x: auto;
   min-height: 235px;
   border-radius: 0 0 12px 12px;
@@ -1010,7 +972,7 @@ tbody tr:hover {
   font-size: 16px;
   font-weight: 500;
   letter-spacing: -0.4px;
-  color: #887096;
+  color: #776185;
   margin-bottom: 8px;
 }
 .empty p {
@@ -1320,33 +1282,37 @@ dialog::backdrop {
     position: static;
     width: 100%;
     height: auto;
+    overflow: visible;
     padding: 17px 18px 9px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 15px;
   }
   .sidebar .brand {
     font-size: 17px;
     padding: 0;
+    margin-bottom: 0;
   }
-  .workspace-label,
   .nav-label,
-  .team-note,
   .sidebar-person {
     display: none;
   }
   .sidebar nav {
     grid-column: 1/-1;
     grid-row: 2;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 0;
+    max-height: 40dvh;
+    margin: 0;
     gap: 5px;
   }
   .sidebar nav .nav-item {
     width: auto;
     padding: 10px;
-    white-space: nowrap;
+    white-space: normal;
     font-size: 10px;
     margin: 0;
   }
@@ -1516,8 +1482,7 @@ th {
 .sidebar-person > span {
   font-size: 10px;
 }
-.account-security p,
-.team-note p {
+.account-security p {
   font-size: 11px;
   color: #74687f;
 }
@@ -1624,10 +1589,6 @@ th {
   overflow-wrap: anywhere;
 }
 @media (max-width: 700px) {
-  .sidebar nav {
-    flex-wrap: wrap;
-    min-width: 0;
-  }
   .import-panel {
     padding: 16px;
   }

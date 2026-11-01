@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError, message, privateLink } from "./api";
 import type { Identity } from "./api";
@@ -241,6 +241,12 @@ function Workspace({
     ["users", "invitations", "audit", "contacts", "imports"].includes(page)
       ? "home"
       : page;
+  const navigation = useRef<HTMLElement>(null);
+  useEffect(() => {
+    navigation.current
+      ?.querySelector<HTMLElement>('[aria-current="page"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected]);
   useEffect(() => {
     function pop() {
       setPage(currentPage() ?? "home");
@@ -293,18 +299,10 @@ function Workspace({
       </a>
       <aside className="sidebar">
         <Brand />
-        <div className="workspace-label">
-          <span className="workspace-initial">U</span>
-          <div>
-            <strong>Unlimited Talks</strong>
-            <span>Espace de l’équipe</span>
-          </div>
-          <span className="workspace-dot" />
-        </div>
         <span className="nav-label">
           {admin ? "ADMINISTRATION" : "VOTRE ESPACE"}
         </span>
-        <nav aria-label="Navigation principale">
+        <nav ref={navigation} aria-label="Navigation principale">
           {items.map((item) => (
             <a
               key={item.page}
@@ -328,11 +326,6 @@ function Workspace({
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="team-note">
-            <Icon name="shield" />
-            <strong>Un espace de confiance.</strong>
-            <p>Des accès individuels pour avancer ensemble.</p>
-          </div>
           <a
             className={
               selected === "account" ? "nav-item selected" : "nav-item"
