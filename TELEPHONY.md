@@ -567,3 +567,10 @@ et ses seuils devront être mesurés ; aucun objectif de zéro attente n'est pro
 
 La correction d'espacement des boutons du contact est livrée dans la révision
 `90e3cfc58a7a216cc79307c990e1440e14756fba`, avec l'API contrôlée.
+
+## Paramétrage de réception et suivi manuel
+
+Le lot du schéma 9 prépare les files, attributions, horaires et suivis manuels
+décrits dans [INBOUND.md](INBOUND.md). Il ne modifie aucun numéro ni route Twilio.
+La réception et les messages vocaux ne sont pas encore connectés ; la saisie
+explicite du numéro ne change pas les limites du profil de test sortant.

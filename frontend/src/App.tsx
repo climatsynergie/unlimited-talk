@@ -5,6 +5,7 @@ import type { Identity } from "./api";
 import { AuthForm, AuthLayout, Enrollment, Recovery } from "./Auth";
 import type { PrivateEntry } from "./Auth";
 import { Audit, Invitations, InviteForm, ShareLink, Users } from "./Admin";
+import { Inbound } from "./Inbound";
 import { Callbacks } from "./Callbacks";
 import { Calendar } from "./Calendar";
 import { Campaigns } from "./Campaigns";
@@ -24,7 +25,8 @@ type Page =
   | "campaigns"
   | "calendar"
   | "workstation"
-  | "callbacks";
+  | "callbacks"
+  | "inbound";
 const PATHS: Record<Page, string> = {
   home: "/accueil",
   users: "/admin/utilisateurs",
@@ -36,6 +38,7 @@ const PATHS: Record<Page, string> = {
   campaigns: "/campagnes",
   calendar: "/calendrier",
   callbacks: "/rappels",
+  inbound: "/appels-entrants",
   workstation: "/poste-appel",
 };
 function currentPage(): Page | null {
@@ -268,6 +271,7 @@ function Workspace({
         { page: "calendar", title: "Calendrier", icon: "calendar" },
         { page: "callbacks", title: "Rappels", icon: "clock" },
         { page: "workstation", title: "Poste d’appel", icon: "headset" },
+        { page: "inbound", title: "Appels entrants", icon: "headset" },
         { page: "contacts", title: "Contacts", icon: "users" },
         { page: "imports", title: "Imports CSV", icon: "mail" },
         { page: "users", title: "Utilisateurs", icon: "users" },
@@ -279,6 +283,7 @@ function Workspace({
         { page: "calendar", title: "Calendrier", icon: "calendar" },
         { page: "callbacks", title: "Rappels", icon: "clock" },
         { page: "workstation", title: "Poste d’appel", icon: "headset" },
+        { page: "inbound", title: "Appels entrants", icon: "headset" },
         { page: "home", title: "Mon espace", icon: "home" },
       ];
   return (
@@ -398,6 +403,8 @@ function Workspace({
           </div>
           {selected === "campaigns" ? (
             <Campaigns admin={admin} />
+          ) : selected === "inbound" ? (
+            <Inbound admin={admin} userId={identity.user.id} />
           ) : selected === "callbacks" ? (
             <Callbacks admin={admin} userId={identity.user.id} />
           ) : selected === "workstation" ? (

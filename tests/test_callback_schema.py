@@ -1,4 +1,4 @@
-"""The deployed schema-8 app can survive the next additive inbound migration."""
+"""Inbound settings require their own schema; unknown and older schemas fail closed."""
 import unittest
 from types import SimpleNamespace
 from app.main import ready
@@ -41,7 +41,7 @@ class CallbackSchemaTests(unittest.TestCase):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision not in {'0008_recordings', '0009_inbound'}:
+                if revision != '0009_inbound':
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

@@ -95,6 +95,11 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0009_inbound':
+        running=check_health()
+        if running.get('migration') == '0009_inbound': return
+        if running.get('migration') == '0008_recordings' and running.get('revision') == 'acc101c5071beea7fc37553297e3529921e3aef1': return
+        raise ValueError('Deploy the inbound compatibility release first')
     if labels.get('io.unlimitedtalk.schema') == '0008_recordings':
         running=check_health()
         if running.get('migration') == '0008_recordings':
@@ -174,11 +179,13 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings'}:
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings','0009_inbound'}:
             raise ValueError('This deployment template requires a compatible worker image')
+        if labels.get('io.unlimitedtalk.schema') == '0009_inbound' and labels.get('io.unlimitedtalk.inbound-config') != '1':
+            raise ValueError('This deployment template requires inbound settings capability')
         if labels.get('io.unlimitedtalk.schema') == '0007_voice' and labels.get('io.unlimitedtalk.voice-runtime') != '1':
             raise ValueError('This deployment template requires the reviewed Voice worker capability')
-        if labels.get('io.unlimitedtalk.schema') == '0008_recordings' and labels.get('io.unlimitedtalk.voice-archive') != '1':
+        if labels.get('io.unlimitedtalk.schema') in {'0008_recordings','0009_inbound'} and labels.get('io.unlimitedtalk.voice-archive') != '1':
             raise ValueError('This deployment template requires the recording archive capability')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'

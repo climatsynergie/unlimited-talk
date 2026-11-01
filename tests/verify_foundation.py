@@ -30,7 +30,7 @@ def get(path):
 assert get('/api/system')['business_features'] == 'voice_api'
 assert get('/health/live')['status'] == 'alive'
 assert get('/health/ready') == {'status': 'ready', 'environment': 'staging',
-                              'database': 'connected', 'migration': '0008_recordings',
+                              'database': 'connected', 'migration': '0009_inbound',
                               'communications': 'disabled',
                               'calling_enabled': False,
                               'revision': os.environ.get('GITHUB_SHA', 'development')}

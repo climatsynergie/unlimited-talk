@@ -2116,3 +2116,109 @@ th {
   font-size: 1.15rem;
   font-weight: 650;
 }
+
+.inbound-queue-select {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 42rem;
+  margin-bottom: 1rem;
+  color: var(--muted);
+}
+.inbound-queue-select select {
+  width: 100%;
+}
+.inbound-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.inbound-summary h2 {
+  margin: 0 0 0.5rem;
+}
+.inbound-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  min-width: 0;
+}
+.inbound-fieldset legend {
+  font-weight: 700;
+  padding: 0 0.4rem;
+}
+.inbound-hours {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  align-items: end;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+.inbound-member {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.inbound-history {
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1rem;
+}
+.inbound-history li {
+  display: grid;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.8rem;
+}
+.inbound-history li > span {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.inbound-history p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inbound-board .pipeline-card {
+  text-align: left;
+  width: 100%;
+}
+@media (max-width: 600px) {
+  .inbound-hours,
+  .inbound-member {
+    grid-template-columns: 1fr;
+  }
+  .inbound-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+.contact-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+.contact-fields dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+}
+.contact-fields dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.inbound-board .pipeline-column {
+  --stage-color: var(--purple);
+}
+.inbound-board .muted,
+.inbound-queue-select {
+  color: #625c70;
+}

@@ -69,8 +69,9 @@ allowed within the modular backend. Microservices are not a prerequisite.
 
 ## Inbound operating contract — scope added 31 October 2026
 
-This records the requested behavior and implementation boundaries; inbound
-routing and its pipeline automation are not implemented or activated yet.
+Inbound configuration and manual missed-call follow-up are implemented on the
+schema-9 branch; routing/media reception remain unconnected. This contract also
+records the boundaries for their later activation. See [INBOUND.md](INBOUND.md).
 
 Confirmed requirements:
 
@@ -149,10 +150,13 @@ its separate integration checks pass; this scope adds no provider routing change
 The decision component `backend/app/telephony/inbound.py` is now prepared and
 scenario-tested for assigned/available agents, longest-idle ordering, bounded
 offers, verified rejection, uncertain outcomes, overflow and caller abandonment.
-It is deliberately a policy proposal over trusted snapshots, with no provider or
-database effects. Durable queue/agent reservations, follow-up persistence, admin
-settings and the browser receiving flow still need their implementation and
-integration proof before incoming call handling can be considered delivered.
+It remains a policy proposal over trusted snapshots, with no provider or
+database effects. Schema 9 adds queue settings, explicit administrative agent
+assignments and a durable manual follow-up pipeline. A trusted internal terminal
+call adapter groups open follow-up, deduplicates calls, and preserves anonymous
+callers separately; no public ingress invokes it yet. Atomic global media
+reservations, presence, verified offers, browser reception and voicemail still
+need their implementation and integration proof before incoming calls are live.
 
 The schema-8 compatibility delivery accepts the next additive `0009_inbound`
 revision and carries `io.unlimitedtalk.inbound-compatible=1`. Deploy this delivery

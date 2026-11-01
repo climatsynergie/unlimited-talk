@@ -21,7 +21,7 @@ sql("""INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,a
 tables=['identity_users','contacts','campaigns','appointments','callbacks','voice_intents','voice_events','voice_recordings']
 fingerprint='SELECT '+" || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+' t)' for table in tables)
 before=sql(fingerprint)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0008_recordings'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0008_recordings'
 assert sql(fingerprint)==before
 assert sql("SELECT attempts||':'||(lease_token IS NULL)::text FROM staging.voice_archive_jobs WHERE recording_sid='RE'||repeat('8',32)")=='0:true'

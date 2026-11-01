@@ -720,6 +720,9 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "queue.created": "File de réception créée",
+  "queue.updated": "File de réception modifiée",
+  "inbound.followup_updated": "Suivi d’appel entrant modifié",
   "callback.created": "Rappel programmé",
   "callback.updated": "Rappel modifié",
   "callback.completed": "Rappel marqué comme traité",

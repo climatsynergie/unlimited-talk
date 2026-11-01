@@ -20,6 +20,7 @@ from app.callbacks.routes import router as callbacks_router
 from app.scheduling_routes import router as scheduling_router
 from app.telephony.routes import router as telephony_router
 from app.telephony.recording_routes import router as recording_router
+from app.telephony.inbound_routes import router as inbound_router
 from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
@@ -29,9 +30,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Accept the next additive inbound schema before introducing its tables/routes.
-# This delivery remains a real rollback target after that migration commits.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0008_recordings', '0009_inbound'})
+# Inbound configuration requires schema 9; the preceding compatibility image
+# continues serving the existing business features after an application rollback.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0009_inbound'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
@@ -65,6 +66,7 @@ app.include_router(callbacks_router)
 app.include_router(scheduling_router)
 app.include_router(telephony_router)
 app.include_router(recording_router)
+app.include_router(inbound_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -120,6 +122,7 @@ def root():
 @app.get('/admin/journal', include_in_schema=False)
 @app.get('/rappels', include_in_schema=False)
 @app.get('/poste-appel', include_in_schema=False)
+@app.get('/appels-entrants', include_in_schema=False)
 @app.get('/calendrier', include_in_schema=False)
 @app.get('/campagnes', include_in_schema=False)
 @app.get('/admin/contacts', include_in_schema=False)
@@ -146,7 +149,8 @@ def ready(request: Request):
                           'identity_password_resets','identity_recovery_codes','identity_audit','identity_rate_limits',
                           'contacts','contact_imports','contact_import_rows','contact_history',
                           'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events',
-                          'voice_intents','voice_events','voice_recordings','voice_archive_jobs'):
+                          'voice_intents','voice_events','voice_recordings','voice_archive_jobs',
+                          'inbound_queues','inbound_queue_agents','inbound_queue_events','inbound_followups','inbound_interactions','inbound_followup_events'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:
