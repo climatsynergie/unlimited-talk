@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import urllib.error
 import urllib.request
 
@@ -88,6 +89,19 @@ def health(revision):
             or result.get('calling_enabled') is not (result['communications']=='manual')):
         raise ValueError('Unexpected deployed runtime')
     return result
+
+
+def wait_health(revision, enabled):
+    # The gateway briefly caches Docker DNS when the API container is replaced.
+    for attempt in range(20):
+        try:
+            result = health(revision)
+            if result['calling_enabled'] is enabled:
+                return result
+        except Exception:
+            pass
+        time.sleep(1)
+    raise RuntimeError('Runtime mode not confirmed')
 
 
 def status_code(url, *, data=None):
@@ -218,7 +232,7 @@ def operate(action, revision):
                     private_profile_write((json.dumps(candidate)+'\n').encode())
                     run([*command,'up','-d','--no-deps','--no-build','--pull','never','--force-recreate',
                         '--wait','--wait-timeout','120','api','voice-reconciler','voice-archiver'],timeout=160)
-                    health(revision); runtime_probe(command,manual=True)
+                    wait_health(revision,False); runtime_probe(command,manual=True)
                 except Exception:
                     private_profile_write(original)
                     run([*command,'up','-d','--no-deps','--no-build','--pull','never','--force-recreate',
@@ -244,15 +258,13 @@ def operate(action, revision):
                 if not before['calling_enabled']:
                     try:
                         run([*selected,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','api'],timeout=160)
-                        if not health(revision)['calling_enabled']:
-                            raise ValueError('Activation not confirmed')
+                        wait_health(revision,True)
                     except Exception:
                         run([*command,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','api'],timeout=160)
                         raise
         elif action == 'disable':
             run([*command,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','api'],timeout=160)
-            if health(revision)['calling_enabled']:
-                raise ValueError('Closed mode not confirmed')
+            wait_health(revision,False)
         elif action == 'public-access':
             local = 'http://127.0.0.1:8110'
             for path, expected in [('/api/auth/me',401),('/api/telephony/calls',401),

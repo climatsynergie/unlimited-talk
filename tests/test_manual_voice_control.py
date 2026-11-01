@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 scripts = Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0,str(scripts))
@@ -12,6 +13,14 @@ module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 
 
 class ManualControlTests(unittest.TestCase):
+    def test_gateway_dns_delay_cannot_confirm_the_previous_mode(self):
+        with patch.object(module,'health',side_effect=[OSError(),{'calling_enabled':False},{'calling_enabled':True}]), \
+                patch.object(module.time,'sleep'):
+            self.assertTrue(module.wait_health('a'*40,True)['calling_enabled'])
+        with patch.object(module,'health',return_value={'calling_enabled':False}), \
+                patch.object(module.time,'sleep'), self.assertRaises(RuntimeError):
+            module.wait_health('a'*40,True)
+
     def test_only_api_mode_can_change_in_attested_compose(self):
         base = {'name':'unlimited-talk-staging-managed','services':{
             'api':{'image':'pinned-digest','environment':{'COMMUNICATIONS_MODE':'webhooks_only','DB_HOST':'private'}},
