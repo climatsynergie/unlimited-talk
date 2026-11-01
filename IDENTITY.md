@@ -1,8 +1,8 @@
 # Identity backend
 
 The server API is used by the React login/admin screens described in WEB.md.
-Automatic email delivery is not implemented. Public access still passes through the independent staging
-HTTPS password perimeter. Business endpoints must use the shared `authenticate`
+Automatic email delivery is not implemented. Public access uses individual
+application sessions. Business endpoints must use the shared `authenticate`
 or `admin` guard and enforce their own campaign/contact/appointment permissions.
 Having an agent role alone does not grant access to future business records.
 
@@ -36,7 +36,13 @@ The opaque session is a 256-bit random value in a `Secure`, `HttpOnly`,
 `SameSite=Strict`, host-only cookie. CSRF uses a distinct random value. Only
 SHA-256 hashes of these random tokens are stored in PostgreSQL. Session values
 are never returned in JSON or stored in browser localStorage. Lifetimes are
-12 hours absolute and 30 minutes idle, checked by the database on every request.
+7 days absolute and 24 hours idle, checked by the database on every request.
+The same idle policy applies when a signed Voice request redeems an existing
+call reservation. Logging in from another browser cleans up only expired
+sessions; it does not remove sessions still valid under this shared policy.
+Background status polling that uses `touch=False` does not extend inactivity.
+The longer cookie lifetime applies after the next login; existing cookies and
+absolute expiry dates are not silently extended by a deployment.
 Admin MFA enrollment sessions last only 10 minutes and cannot access admin
 operations until confirmation. Login, password changes and MFA confirmation
 rotate cookies. Logout/revocation is durable across application restarts.

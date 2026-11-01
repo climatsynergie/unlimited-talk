@@ -29,7 +29,7 @@ def code(source, payload=None):
 
 
 class Browser:
-    def __init__(self): self.cookies={}
+    def __init__(self): self.cookies={};self.cookie_max_ages={}
 
     def request(self,method,path,data=None,expected=200,*,csrf=True,request_origin=origin):
         headers={'Origin':request_origin,'Content-Type':'application/json'}
@@ -51,7 +51,9 @@ class Browser:
                     assert not value['domain']
                     if name=='__Host-ut_session': assert value['httponly']
                     if value['max-age']=='0': self.cookies.pop(name,None)
-                    else: self.cookies[name]=value.value
+                    else:
+                        self.cookies[name]=value.value
+                        self.cookie_max_ages[name]=int(value['max-age'])
             return json.loads(raw) if raw else {}
 
 
@@ -75,6 +77,8 @@ for email in ['admin@example.invalid','missing@example.invalid']:
     response=anonymous.request('POST','/api/auth/login',{'email':email,'password':'wrong password'},expected=401)
     assert response['detail']=='Identifiants invalides'
 admin.request('POST','/api/auth/login',{'email':'admin@example.invalid','password':fixture['password'],'factor':fixture['factor']})
+assert admin.cookie_max_ages['__Host-ut_session']==7*24*60*60
+assert admin.cookie_max_ages['__Host-ut_csrf']==7*24*60*60
 assert 'session_token' not in admin.request('GET','/api/auth/me')
 # Replaying a previously accepted TOTP must fail even with the correct password.
 anonymous.request('POST','/api/auth/login',{'email':'admin@example.invalid','password':fixture['password'],'factor':fixture['factor']},expected=401)
@@ -132,6 +136,7 @@ with ThreadPoolExecutor(max_workers=2) as pool: assert sorted(pool.map(race,rang
 invitation=admin.request('POST','/api/admin/invitations',{'email':'second-admin@example.invalid','display_name':'Second Admin','role':'admin'},expected=201)
 second=Browser();accepted=second.request('POST','/api/auth/invitations/accept',{'token':invitation['token'],'password':'Second admin passphrase 2026!'})
 assert accepted['mfa_enrollment_required'] is True
+assert second.cookie_max_ages['__Host-ut_session']==10*60
 second.request('GET','/api/admin/users',expected=403)
 secret=second.request('POST','/api/auth/mfa/enroll',{})
 second.request('POST','/api/auth/mfa/confirm',{'code':'abcdef'},expected=400)
@@ -153,10 +158,29 @@ admin.request('POST','/api/auth/password-reset',{'token':admin_reset['token'],'p
 second.request('POST','/api/auth/logout-all',{})
 second.request('GET','/api/auth/me',expected=401)
 
-# An idle session and absolute expiration both fail closed.
+# A session survives a workday/overnight break and another browser's login.
+# Neither reading it nor logging in again extends its absolute expiration.
+returning=Browser();returning.request('POST','/api/auth/login',{'email':'race@example.invalid','password':'Concurrent invitation passphrase 2026!'})
+returning_hash=__import__('hashlib').sha256(returning.cookies['__Host-ut_session'].encode()).hexdigest()
+absolute_expiry=code('''
+with make_engine().begin() as db:
+    row=query(db,"""UPDATE staging.identity_sessions SET created_at=now()-interval '2 days',
+        expires_at=now()+interval '5 days',last_seen_at=now()-interval '23 hours 59 minutes'
+        WHERE token_hash=:hash RETURNING expires_at""",hash=payload).scalar_one()
+print(json.dumps(row.isoformat()))
+''',returning_hash)
+another_browser=Browser();another_browser.request('POST','/api/auth/login',{'email':'race@example.invalid','password':'Concurrent invitation passphrase 2026!'})
+returning.request('GET','/api/auth/me')
+assert code('''
+with make_engine().connect() as db:
+    expiry=query(db,'SELECT expires_at FROM staging.identity_sessions WHERE token_hash=:hash',hash=payload).scalar_one()
+print(json.dumps(expiry.isoformat()))
+''',returning_hash)==absolute_expiry
+# Idle expiration and absolute expiration still fail closed.
 for column in ['last_seen_at','expires_at']:
     agent2=Browser();agent2.request('POST','/api/auth/login',{'email':'race@example.invalid','password':'Concurrent invitation passphrase 2026!'})
-    code("with make_engine().begin() as db: query(db,\"UPDATE staging.identity_sessions SET "+column+"=now()-interval '13 hours' WHERE token_hash=:hash\",hash=payload)\nprint('null')",__import__('hashlib').sha256(agent2.cookies['__Host-ut_session'].encode()).hexdigest())
+    age="25 hours" if column=='last_seen_at' else "1 second"
+    code("with make_engine().begin() as db: query(db,\"UPDATE staging.identity_sessions SET "+column+"=now()-interval '"+age+"' WHERE token_hash=:hash\",hash=payload)\nprint('null')",__import__('hashlib').sha256(agent2.cookies['__Host-ut_session'].encode()).hexdigest())
     agent2.request('GET','/api/auth/me',expected=401)
 
 for _ in range(10): anonymous.request('POST','/api/auth/login',{'email':'throttled@example.invalid','password':'Wrong testing passphrase'},expected=401)

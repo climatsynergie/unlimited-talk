@@ -25,8 +25,8 @@ def hash_password(value):
         return PASSWORDS.hash(value)
 COOKIE = '__Host-ut_session'
 CSRF_COOKIE = '__Host-ut_csrf'
-SESSION_SECONDS = 12 * 60 * 60
-IDLE_SECONDS = 30 * 60
+SESSION_SECONDS = 7 * 24 * 60 * 60
+IDLE_SECONDS = 24 * 60 * 60
 ENROLLMENT_SECONDS = 10 * 60
 
 

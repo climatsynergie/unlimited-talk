@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from app.identity.service import query, audit
+from app.identity.security import IDLE_SECONDS
 from app.telephony.twilio_voice import ManualVoiceProfile, client_identity, sid
 from app.telephony import dialer_policy
 
@@ -158,8 +159,8 @@ def consume(db, profile, params):
     user = query(db, 'SELECT * FROM staging.identity_users WHERE id=:id FOR UPDATE', id=lookup['actor_id']).mappings().first()
     session = query(db, '''SELECT token_hash FROM staging.identity_sessions
         WHERE token_hash=:hash AND user_id=:actor AND mfa_verified AND expires_at>clock_timestamp()
-          AND last_seen_at>clock_timestamp()-interval '30 minutes' FOR UPDATE''',
-        hash=lookup['session_hash'], actor=lookup['actor_id']).first()
+          AND last_seen_at>clock_timestamp()-make_interval(secs=>:idle_seconds) FOR UPDATE''',
+        hash=lookup['session_hash'], actor=lookup['actor_id'],idle_seconds=IDLE_SECONDS).first()
     try:
         allowed_contact = dialer_policy.authorize_context(db,user,lookup,profile) if isinstance(profile,ManualVoiceProfile) and user else unrestricted_contact(db,lookup['destination'])
     except HTTPException:

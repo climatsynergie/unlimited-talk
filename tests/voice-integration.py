@@ -199,6 +199,10 @@ try:
     assert signed('voice',fields={'CallSid':'CA'+uuid4().hex,'Intent':str(identifier),
         'From':'client:'+client_identity(browser.id,identifier)}, expected=403, **{'X-Twilio-Signature':'A'*27+'='})
     assert row(identifier)['state'] == 'reserved'
+    # Voice redemption uses the same extended session policy as normal HTTP.
+    # An overnight break must not silently prevent an otherwise valid call.
+    with engine.begin() as db:
+        query(db,"UPDATE staging.identity_sessions SET last_seen_at=clock_timestamp()-interval '23 hours 59 minutes' WHERE token_hash=:hash",hash=digest(browser.token))
     # Concurrent valid requests can receive at most one Dial, even different CAs.
     with ThreadPoolExecutor(max_workers=2) as pool:
         responses = list(pool.map(lambda _: voice(browser,identifier), range(2)))
@@ -240,12 +244,16 @@ try:
     assert '169.254' not in json.dumps(history) and 'RecordingUrl' not in json.dumps(history)
     # Revoked sessions, changed roles, stale reservations and profile changes
     # cannot redeem a previously minted token. Call history survives revocation.
-    for operation in ['revoke','deactivate','role','expire']:
+    for operation in ['revoke','deactivate','role','expire','idle_session','expired_session']:
         user = Browser()
         pending,_ = user.reserve()
         with engine.begin() as db:
             if operation == 'revoke':
                 query(db,'DELETE FROM staging.identity_sessions WHERE user_id=:id',id=user.id)
+            elif operation == 'idle_session':
+                query(db,"UPDATE staging.identity_sessions SET last_seen_at=clock_timestamp()-interval '25 hours' WHERE user_id=:id",id=user.id)
+            elif operation == 'expired_session':
+                query(db,"UPDATE staging.identity_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE user_id=:id",id=user.id)
             elif operation == 'deactivate':
                 query(db,'UPDATE staging.identity_users SET is_active=false WHERE id=:id',id=user.id)
             elif operation == 'role':

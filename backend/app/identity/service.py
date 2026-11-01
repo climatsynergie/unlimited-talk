@@ -51,7 +51,9 @@ def limited(engine, operation, identity, *, limit=10, seconds=900, global_limit=
 def new_session(db, user, verified, previous=None):
     if previous:
         query(db, 'DELETE FROM staging.identity_sessions WHERE token_hash=:token AND user_id=:id', token=previous, id=user['id'])
-    query(db, 'DELETE FROM staging.identity_sessions WHERE expires_at<now() OR last_seen_at<now()-interval \'30 minutes\'')
+    query(db, '''DELETE FROM staging.identity_sessions
+        WHERE expires_at<now() OR last_seen_at<=now()-make_interval(secs=>:idle_seconds)''',
+        idle_seconds=IDLE_SECONDS)
     # Bound the number of simultaneous browsers per user.
     query(db, '''DELETE FROM staging.identity_sessions WHERE token_hash IN (
         SELECT token_hash FROM staging.identity_sessions WHERE user_id=:id
@@ -73,8 +75,8 @@ def authenticate(db, request, *, enrollment=False, recent=False, touch=True):
         s.created_at AS authenticated_at FROM staging.identity_sessions s
         JOIN staging.identity_users u ON u.id=s.user_id
         WHERE s.token_hash=:token AND u.is_active AND s.expires_at>now()
-          AND s.last_seen_at>now()-interval '30 minutes'
-        FOR UPDATE OF u''', token=digest(token)).mappings().first()
+          AND s.last_seen_at>now()-make_interval(secs=>:idle_seconds)
+        FOR UPDATE OF u''', token=digest(token),idle_seconds=IDLE_SECONDS).mappings().first()
     if row is None:
         raise HTTPException(401, 'Connexion requise')
     if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
