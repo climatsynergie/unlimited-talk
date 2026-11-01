@@ -11,6 +11,7 @@ import urllib.request
 import uuid
 
 root=Path(__file__).resolve().parents[1]
+QUALIFICATION=json.loads((root/"tests/qualification-fixture.json").read_text())
 compose=['sudo','-n','docker','compose','--project-directory',str(root)]
 compose+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*compose,'config','--format','json']))
@@ -154,7 +155,7 @@ assert admin.request('GET','/api/callbacks/'+other['id'])['events'][0]['details'
 # An appointment resolves its pending callback without deleting history.
 meeting_cb,meeting_body=create();meetingcid=meeting_body['contact_id']
 version=admin.request('GET',A+'/contacts/'+meetingcid)['contact']['version']
-admin.request('POST','/api/calendar',{**schedule,'id':str(uuid.uuid4()),'campaign_id':a['id'],'contact_id':meetingcid,'membership_version':version,'duration_minutes':30},expected=201)
+admin.request('POST','/api/calendar',{**schedule,'id':str(uuid.uuid4()),'campaign_id':a['id'],'contact_id':meetingcid,'membership_version':version,'duration_minutes':30,'qualification':QUALIFICATION},expected=201)
 assert admin.request('GET','/api/callbacks/'+meeting_cb['id'])['callback']['status']=='cancelled'
 assert admin.request('GET','/api/callbacks/'+meeting_cb['id'])['events'][0]['details']['reason']=='appointment.booked'
 removed,removedbody=create();removedcid=removedbody['contact_id']

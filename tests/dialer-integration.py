@@ -274,7 +274,7 @@ try:
             agents[i].request('POST','/api/telephony/dialer/heartbeat',dict(browser_id=str(browsers[i]),generation=hold['generation']))
             due_date=(datetime.now(timezone.utc)+timedelta(days=2)).replace(second=0,microsecond=0)
             agents[i].request('POST','/api/calendar',dict(id=str(uuid4()),campaign_id=a['id'],contact_id=str(current['contact_id']),
-                membership_version=before['version'],local_start=due_date.replace(tzinfo=None).isoformat(),timezone='UTC',duration_minutes=30,notes='RDV pendant appel'),201)
+                membership_version=before['version'],local_start=due_date.replace(tzinfo=None).isoformat(),timezone='UTC',duration_minutes=30,notes='RDV pendant appel',qualification=QUALIFICATION),201)
             states[i]=agents[i].request('POST','/api/telephony/dialer/control',dict(action='release',browser_id=str(browsers[i]),generation=hold['generation'],hold_token=str(token)))['dialer']
             completion.process_once(engine,profile)
             with engine.connect() as db:

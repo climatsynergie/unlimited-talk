@@ -2,8 +2,10 @@
 
 Ce lot ajoute le paramétrage des files et le suivi manuel des appels manqués.
 Il ne connecte aucun numéro Twilio et n'active ni réception navigateur, ni appel
-sortant. L'interface affiche « Numéro non connecté » tant que le routage réel
-n'est pas livré et vérifié. Le test réel audio/enregistrement a été reporté.
+sortant. L'interface affiche « Réception inactive » et explique que les appels
+ne sont pas encore acheminés aux agents. Ce statut ne signale pas un numéro
+invalide et ne constitue pas un test de raccordement Twilio. Le test réel
+audio/enregistrement a été reporté.
 
 ## Paramétrage
 
@@ -13,6 +15,17 @@ plages hebdomadaires, attente maximale (60 s par défaut), sonnerie par agent
 indépendantes des campagnes sortantes. Les permissions globales de numérotation
 et la présence média restent du ressort du futur coordinateur de distribution.
 La sélection actuelle n'octroie aucune nouvelle autorisation d'appel.
+
+L'interface propose les lignes vocales déjà présentes dans le répertoire du
+compte Twilio. Le numéro identifie la ligne de l'entreprise appelée par les
+clients. La création d'une file ne commande pas de nouveau numéro. Une ancienne
+ligne enregistrée reste sélectionnable pour modifier son équipe lorsque le
+répertoire est indisponible. L'activation future du routage devra vérifier la
+propriété et la route fournisseur réelle avant tout changement externe.
+
+Les agents et la ligne sont les réglages principaux ; attente, sonnerie et
+horaires sont regroupés dans une section dépliable. La liste des agents propose
+une recherche, une sélection conservée et une limite de 20 comptes.
 
 Les plages sont locales et semi-ouvertes : le début est inclus, la fin exclue.
 Sans plage, la file reste hors horaires. Une ouverture de nuit se représente par
@@ -39,6 +52,12 @@ messagerie vocale ne sont pas encore reliés dans ce lot.
 Le résultat téléphonique est séparé de l'étape du suivi : À traiter, Pris en
 charge, Rappel programmé, Traité. Un changement d'étape n'appelle jamais un
 numéro, ne raccroche pas et ne crée pas de rendez-vous fictif.
+
+La vue Liste regroupe les suivis par statut, affiche le contact, son numéro,
+le responsable et la date du rappel ou du suivi. Les compteurs filtrent les
+statuts, la pagination reste bornée, et la vue Pipeline reste disponible. Une
+file vide affiche un seul état vide. Une erreur de chargement n'est jamais
+présentée comme l'absence de suivis.
 
 Plusieurs appels du même numéro dans une file rejoignent le suivi encore ouvert,
 avec une interaction par appel. Une répétition de la même notification ne crée

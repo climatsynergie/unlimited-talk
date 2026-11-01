@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { spawnSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fillQualification } from "./fixtures/qualification";
 
 function fixture<T>(payload: object): T {
   const result = spawnSync(
@@ -686,6 +687,7 @@ test("calendrier partagé, réservation, modification et annulation", async ({
   await page
     .getByLabel("Notes du rendez-vous", { exact: true })
     .fill("Préparer la rencontre avec le client.");
+  await fillQualification(page.getByRole("dialog"));
   await page
     .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
     .click();

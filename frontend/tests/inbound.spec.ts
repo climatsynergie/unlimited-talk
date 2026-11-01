@@ -55,6 +55,27 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
   const agent = fixture<Credentials>({ op: "agent", name: agentName });
   const queueName = "Réception UI " + crypto.randomUUID().slice(0, 8);
   const number = fixture<{ phone: string }>({ op: "inbound_number" }).phone;
+  // Provider directory only is synthetic; queue/follow-up writes use real HTTP/PG.
+  await page.route("**/api/telephony/numbers", (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        sync: null,
+        items: [
+          {
+            id: crypto.randomUUID(),
+            number,
+            name: "Ligne de l’entreprise",
+            country: "CA",
+            voice_enabled: true,
+            is_present: true,
+            is_active: true,
+            fresh: true,
+          },
+        ],
+      },
+    }),
+  );
   const caller = "+15145550777";
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -64,8 +85,16 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
     .click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("Nom de la file", { exact: true }).fill(queueName);
-  await dialog.getByLabel("Numéro de réception", { exact: true }).fill(number);
+  await dialog
+    .getByRole("combobox", { name: "Numéro de réception", exact: true })
+    .selectOption(number);
+  await expect(
+    dialog.getByRole("textbox", { name: "Numéro de réception", exact: true }),
+  ).toHaveCount(0);
   await dialog.getByLabel(agentName, { exact: true }).check();
+  await dialog
+    .getByText("Attente, sonnerie et horaires", { exact: true })
+    .click();
   await dialog
     .getByRole("button", { name: "Ajouter une plage", exact: true })
     .click();
@@ -78,7 +107,10 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
     page.getByRole("heading", { name: queueName, exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("Numéro non connecté", { exact: true }),
+    page.getByText("Réception inactive", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Aucun appel à suivre", exact: true }),
   ).toBeVisible();
   const queueId = await page
     .getByRole("combobox", { name: "File de réception", exact: true })
@@ -89,6 +121,20 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
     phone: caller,
   });
   await page.getByRole("button", { name: "Actualiser", exact: true }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "À traiter", exact: true })
+      .getByRole("button")
+      .filter({ hasText: caller }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Pipeline", exact: true }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "À traiter", exact: true })
+      .getByRole("button")
+      .filter({ hasText: caller }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Liste", exact: true }).click();
   await page.getByRole("button").filter({ hasText: caller }).click();
   dialog = page.getByRole("dialog");
   await expect(
@@ -192,6 +238,12 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
     ),
   ).toBe(true);
   expect(errors).toEqual([]);
+  await page.screenshot({ path: "/tmp/ut-inbound-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({
+    path: "/tmp/ut-inbound-desktop.png",
+    fullPage: true,
+  });
 });
 
 test("erreur de chargement : aucune fausse liste vide ni création annoncée", async ({
@@ -210,4 +262,7 @@ test("erreur de chargement : aucune fausse liste vide ni création annoncée", a
     page.getByRole("heading", { name: "Organiser la réception", exact: true }),
   ).toHaveCount(0);
   await expect(page.getByText("Aucun suivi.", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Aucun appel à suivre", exact: true }),
+  ).toHaveCount(0);
 });

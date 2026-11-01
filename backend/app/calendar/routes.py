@@ -11,6 +11,7 @@ from app.campaigns import service
 from app.scheduling_time import resolve
 from app.scheduling_routes import local_time as resolve_local_time
 from app.callbacks.service import cancel_for_contact
+from app.qualification import Qualification, SCHEMA, complete_snapshot, contact_snapshot, save_contact_snapshot, appointment_snapshot
 
 router=APIRouter(prefix='/api/calendar',tags=['Calendar'],dependencies=[Depends(same_origin)])
 Status=Literal['booked','completed','cancelled','no_show']
@@ -37,11 +38,26 @@ class Booking(Schedule):
     campaign_id:uuid.UUID
     contact_id:uuid.UUID
     membership_version:int=Field(ge=0)
+    qualification:Qualification
+    qualification_revision:str|None=Field(default=None,pattern=r'^[1-9][0-9]{0,18}$')
+
+    @field_validator('qualification')
+    @classmethod
+    def required_qualification(cls,value):
+        complete_snapshot(value)
+        return value
 
 
 class Update(Schedule):
     version:int=Field(ge=0)
     status:Status
+    qualification:Qualification|None=None
+
+    @field_validator('qualification')
+    @classmethod
+    def valid_qualification(cls,value):
+        if value is not None:complete_snapshot(value)
+        return value
 
 
 SELECT='''SELECT a.*,c.phone,c.profile,ca.name AS campaign_name,u.display_name AS creator_name
@@ -89,7 +105,8 @@ def detail(identifier:uuid.UUID,request:Request,before:int|None=Query(None,ge=1,
             FROM staging.appointment_events e JOIN staging.identity_users u ON u.id=e.actor_id
             WHERE e.appointment_id=:id AND (CAST(:before AS bigint) IS NULL OR e.id<:before)
             ORDER BY e.id DESC LIMIT 51''',id=identifier,before=before).mappings().all()
-        return {'appointment':dict(row),'can_edit':user['role']=='admin' or row['created_by']==user['id'],
+        return {'appointment':dict(row,qualification=appointment_snapshot(db,identifier)),'qualification_schema':SCHEMA,
+                'can_edit':user['role']=='admin' or row['created_by']==user['id'],
                 'events':[dict(e,id=str(e['id'])) for e in events[:50]],'has_more':len(events)>50}
 
 
@@ -105,7 +122,7 @@ def create(body:Booking,request:Request):
         if previous:
             if previous['created_by']!=user['id'] or previous['request_hash']!=digest:
                 raise HTTPException(409,'Cet identifiant de rendez-vous a déjà été utilisé autrement.')
-            return payload(db,body.id)
+            return dict(payload(db,body.id),qualification=appointment_snapshot(db,body.id))
         contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=body.contact_id).mappings().first()
         if contact is None:raise HTTPException(404,'Contact introuvable.')
         if contact['do_not_contact'] or contact['non_interested']:
@@ -113,6 +130,12 @@ def create(body:Booking,request:Request):
         card=service.contact_access(db,body.campaign_id,body.contact_id)
         if card['version']!=body.membership_version:
             raise HTTPException(409,'La fiche a changé. Actualisez-la avant de prendre rendez-vous.')
+        current=contact_snapshot(db,body.campaign_id,body.contact_id)
+        if (current['revision'] if current else None)!=body.qualification_revision:
+            raise HTTPException(409,'La qualification a changé. Actualisez la fiche avant de confirmer ce rendez-vous.')
+        qualification=complete_snapshot(body.qualification)
+        if not current or current['qualification']!=qualification:
+            save_contact_snapshot(db,user,body.campaign_id,body.contact_id,qualification)
         stage=query(db,"SELECT id FROM staging.campaign_stages WHERE campaign_id=:id AND kind='appointment' AND is_active",id=body.campaign_id).scalar_one()
         service.move(db,user,body.campaign_id,body.contact_id,stage,card['version'],uuid.uuid4())
         query(db,'''INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,request_hash,starts_at,ends_at,timezone,notes)
@@ -120,7 +143,8 @@ def create(body:Booking,request:Request):
             actor=user['id'],hash=digest,start=starts,end=starts+timedelta(minutes=body.duration_minutes),zone=body.timezone,notes=body.notes)
         cancel_for_contact(db,user,body.contact_id,'appointment.booked')
         result=payload(db,body.id)
-        record(db,user,body.id,'appointment.created',{'after':dict(starts_at=result['starts_at'],ends_at=result['ends_at'],timezone=result['timezone'],notes=result['notes'],status=result['status'])})
+        record(db,user,body.id,'appointment.created',{'after':dict(starts_at=result['starts_at'],ends_at=result['ends_at'],timezone=result['timezone'],notes=result['notes'],status=result['status'],qualification=qualification)})
+        result['qualification']=qualification
         return result
 
 
@@ -138,8 +162,16 @@ def update(identifier:uuid.UUID,body:Update,request:Request):
         ends=starts+timedelta(minutes=body.duration_minutes)
         fields=('starts_at','ends_at','timezone','notes','status')
         before={k:row[k] for k in fields}
+        previous_qualification=appointment_snapshot(db,identifier)
+        if previous_qualification is not None:before['qualification']=previous_qualification
         after=dict(starts_at=starts,ends_at=ends,timezone=body.timezone,notes=body.notes,status=body.status)
+        if body.qualification is not None:
+            after['qualification']=complete_snapshot(body.qualification)
+        elif previous_qualification is not None:
+            after['qualification']=previous_qualification
+        if row['status']=='cancelled' and body.status=='booked' and 'qualification' not in after:
+            raise HTTPException(422,'Complétez la qualification avant de confirmer à nouveau ce rendez-vous.')
         query(db,'''UPDATE staging.appointments SET starts_at=:starts_at,ends_at=:ends_at,timezone=:timezone,notes=:notes,
-            status=:status,version=version+1,updated_at=clock_timestamp() WHERE id=:id''',id=identifier,**after)
+            status=:status,version=version+1,updated_at=clock_timestamp() WHERE id=:id''',id=identifier,**{k:after[k] for k in fields})
         record(db,user,identifier,'appointment.updated',{'before':before,'after':after})
-        return payload(db,identifier)
+        return dict(payload(db,identifier),qualification=after.get('qualification'))

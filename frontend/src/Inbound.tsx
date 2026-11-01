@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
-import { Field, Modal, Notice, Submit } from "./ui";
+import { Field, Icon, Modal, Notice, Submit } from "./ui";
 import { local, Timezone, when } from "./Scheduling";
+import type { Directory } from "./CallingSettings";
 
 type Stage = "pending" | "claimed" | "callback" | "handled";
 type Member = {
@@ -40,6 +41,7 @@ type Followup = {
   do_not_contact: boolean;
   non_interested: boolean;
   call_count: number;
+  created_at?: string;
 };
 type History = {
   id: string;
@@ -131,8 +133,30 @@ function QueueForm({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [directory, setDirectory] = useState<Directory | null>(null);
+  const [numberLoading, setNumberLoading] = useState(true);
+  const [numberError, setNumberError] = useState("");
+  const [numberRevision, setNumberRevision] = useState(0);
+  const [phone, setPhone] = useState(row?.phone || "");
+  const [agentSearch, setAgentSearch] = useState("");
   const id = useRef(row?.id || crypto.randomUUID());
   const requestId = useRequestId();
+  useEffect(() => {
+    const controller = new AbortController();
+    setNumberLoading(true);
+    setNumberError("");
+    api<Directory>("/telephony/numbers", { signal: controller.signal })
+      .then((result) => {
+        if (!controller.signal.aborted) setDirectory(result);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setNumberError(message(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setNumberLoading(false);
+      });
+    return () => controller.abort();
+  }, [numberRevision]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -154,11 +178,11 @@ function QueueForm({
   }, [offset]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || loading) return;
+    if (busy || loading || numberLoading || !phone) return;
     const form = new FormData(event.currentTarget);
     const values = {
       name: form.get("name"),
-      phone: form.get("phone"),
+      phone,
       timezone: zone,
       max_wait_seconds: Number(form.get("wait")),
       offer_seconds: Number(form.get("ring")),
@@ -194,6 +218,15 @@ function QueueForm({
         display_name: m.display_name || "Compte attribué",
       })),
   ];
+  const lines =
+    directory?.items.filter(
+      (number) => number.voice_enabled && number.is_present && number.is_active,
+    ) || [];
+  const shownAgents = allChoices.filter((agent) =>
+    agent.display_name
+      .toLocaleLowerCase("fr")
+      .includes(agentSearch.trim().toLocaleLowerCase("fr")),
+  );
   return (
     <Modal
       title={row ? "Réglages de la file" : "Créer une file de réception"}
@@ -209,154 +242,216 @@ function QueueForm({
           maxLength={120}
           defaultValue={row?.name}
           disabled={busy}
+          placeholder="Réception principale"
+          hint="Un nom pour votre équipe de réception."
         />
-        <Field
-          label="Numéro de réception"
-          name="phone"
-          type="tel"
-          required
-          maxLength={40}
-          placeholder="+1 514 555 0123"
-          defaultValue={row?.phone}
-          disabled={busy}
-        />
-        <Timezone value={zone} onChange={setZone} disabled={busy} />
-        <div className="form-grid">
-          <Field
-            label="Attente maximale (secondes)"
-            name="wait"
-            type="number"
-            min={10}
-            max={600}
+        <label>
+          Numéro de réception
+          <select
+            name="phone"
             required
-            defaultValue={row?.max_wait_seconds || 60}
-            disabled={busy}
-          />
-          <Field
-            label="Sonnerie par agent (secondes)"
-            name="ring"
-            type="number"
-            min={5}
-            max={60}
-            required
-            defaultValue={row?.offer_seconds || 20}
-            disabled={busy}
-          />
-        </div>
-        <fieldset className="inbound-fieldset" disabled={busy}>
-          <legend>Horaires de réception</legend>
-          <p className="muted">
-            Sans plage horaire, la file reste hors horaires. Pour une ouverture
-            de nuit, utilisez une plage sur chaque journée.
-          </p>
-          {hours.map((h, index) => (
-            <div className="inbound-hours" key={index}>
-              <label>
-                Jour
-                <select
-                  value={h.weekday}
-                  onChange={(e) =>
-                    setHours(
-                      hours.map((v, i) =>
-                        i === index
-                          ? { ...v, weekday: Number(e.target.value) }
-                          : v,
-                      ),
-                    )
-                  }
-                >
-                  {weekdays.map((d, i) => (
-                    <option value={i} key={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Début
-                <input
-                  type="time"
-                  required
-                  value={time(h.start)}
-                  onChange={(e) =>
-                    setHours(
-                      hours.map((v, i) =>
-                        i === index
-                          ? { ...v, start: minutes(e.target.value) }
-                          : v,
-                      ),
-                    )
-                  }
-                />
-              </label>
-              <label>
-                Fin (00:00 = minuit)
-                <input
-                  type="time"
-                  required
-                  value={time(h.end)}
-                  onChange={(e) =>
-                    setHours(
-                      hours.map((v, i) =>
-                        i === index
-                          ? { ...v, end: minutes(e.target.value) || 1440 }
-                          : v,
-                      ),
-                    )
-                  }
-                />
-              </label>
-              <button
-                type="button"
-                className="button secondary"
-                aria-label={`Retirer la plage ${index + 1}`}
-                onClick={() => setHours(hours.filter((_, i) => i !== index))}
-              >
-                Retirer
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="button secondary"
-            disabled={hours.length >= 14}
-            onClick={() =>
-              setHours([...hours, { weekday: 0, start: 540, end: 1020 }])
-            }
+            value={phone}
+            disabled={busy || numberLoading}
+            onChange={(e) => setPhone(e.target.value)}
           >
-            Ajouter une plage
-          </button>
-        </fieldset>
+            <option value="">Choisir une ligne de l’entreprise</option>
+            {lines.map((number) => (
+              <option key={number.id} value={number.number}>
+                {number.number}
+                {number.name ? ` · ${number.name}` : ""}
+              </option>
+            ))}
+            {row && !lines.some((number) => number.number === row.phone) ? (
+              <option value={row.phone}>{row.phone} · Ligne enregistrée</option>
+            ) : null}
+          </select>
+        </label>
+        <p className="muted">
+          C’est le numéro de l’entreprise que les clients appellent. Choisissez
+          une ligne existante de votre compte Twilio, puis les agents qui la
+          recevront.
+        </p>
+        {numberLoading ? (
+          <p role="status">Chargement des lignes de l’entreprise…</p>
+        ) : null}
+        {numberError ? <Notice error>{numberError}</Notice> : null}
+        {!numberLoading && !numberError && directory && !lines.length ? (
+          <Notice>
+            Aucune ligne Twilio n’est disponible dans la liste actuelle.
+            Vérifiez la synchronisation des numéros du compte avant de créer une
+            file.
+          </Notice>
+        ) : null}
+        <button
+          type="button"
+          className="text-button"
+          disabled={busy || numberLoading}
+          onClick={() => setNumberRevision((n) => n + 1)}
+        >
+          Actualiser les lignes disponibles
+        </button>
+        <Timezone value={zone} onChange={setZone} disabled={busy} />
+        <details className="inbound-advanced">
+          <summary>Attente, sonnerie et horaires</summary>
+          <div className="form-grid">
+            <Field
+              label="Attente maximale (secondes)"
+              name="wait"
+              type="number"
+              min={10}
+              max={600}
+              required
+              defaultValue={row?.max_wait_seconds || 60}
+              disabled={busy}
+            />
+            <Field
+              label="Sonnerie par agent (secondes)"
+              name="ring"
+              type="number"
+              min={5}
+              max={60}
+              required
+              defaultValue={row?.offer_seconds || 20}
+              disabled={busy}
+            />
+          </div>
+          <fieldset className="inbound-fieldset" disabled={busy}>
+            <legend>Horaires de réception</legend>
+            <p className="muted">
+              Sans plage horaire, la file reste hors horaires. Pour une
+              ouverture de nuit, utilisez une plage sur chaque journée.
+            </p>
+            {hours.map((h, index) => (
+              <div className="inbound-hours" key={index}>
+                <label>
+                  Jour
+                  <select
+                    value={h.weekday}
+                    onChange={(e) =>
+                      setHours(
+                        hours.map((v, i) =>
+                          i === index
+                            ? { ...v, weekday: Number(e.target.value) }
+                            : v,
+                        ),
+                      )
+                    }
+                  >
+                    {weekdays.map((d, i) => (
+                      <option value={i} key={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Début
+                  <input
+                    type="time"
+                    required
+                    value={time(h.start)}
+                    onChange={(e) =>
+                      setHours(
+                        hours.map((v, i) =>
+                          i === index
+                            ? { ...v, start: minutes(e.target.value) }
+                            : v,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Fin (00:00 = minuit)
+                  <input
+                    type="time"
+                    required
+                    value={time(h.end)}
+                    onChange={(e) =>
+                      setHours(
+                        hours.map((v, i) =>
+                          i === index
+                            ? { ...v, end: minutes(e.target.value) || 1440 }
+                            : v,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="button secondary"
+                  aria-label={`Retirer la plage ${index + 1}`}
+                  onClick={() => setHours(hours.filter((_, i) => i !== index))}
+                >
+                  Retirer
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="button secondary"
+              disabled={hours.length >= 14}
+              onClick={() =>
+                setHours([...hours, { weekday: 0, start: 540, end: 1020 }])
+              }
+            >
+              Ajouter une plage
+            </button>
+          </fieldset>
+        </details>
         <fieldset className="inbound-fieldset" disabled={busy}>
           <legend>Agents autorisés à recevoir les appels</legend>
           <p className="muted">
             Les attributions sont indépendantes des campagnes. Maximum : 20
             agents par file.
           </p>
-          {allChoices.map((c) => {
-            const chosen = members.find((m) => m.user_id === c.id);
-            return (
-              <div className="inbound-member" key={c.id}>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(chosen)}
-                    onChange={(e) =>
-                      setMembers(
-                        e.target.checked
-                          ? [...members, { user_id: c.id, mode: "mixed" }]
-                          : members.filter((m) => m.user_id !== c.id),
-                      )
-                    }
-                  />
-                  {c.display_name}
-                  {chosen?.account_active === false
-                    ? " — compte désactivé"
-                    : ""}
-                </label>
-              </div>
-            );
-          })}
+          <label>
+            Rechercher un agent
+            <input
+              type="search"
+              value={agentSearch}
+              onChange={(e) => setAgentSearch(e.target.value)}
+            />
+          </label>
+          <p className="inbound-agent-count">
+            {members.length} agent(s) sélectionné(s)
+          </p>
+          <div
+            className="inbound-agent-options"
+            tabIndex={0}
+            role="region"
+            aria-label="Agents disponibles"
+          >
+            {shownAgents.map((c) => {
+              const chosen = members.find((m) => m.user_id === c.id);
+              return (
+                <div className="inbound-member" key={c.id}>
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(chosen)}
+                      disabled={!chosen && members.length >= 20}
+                      onChange={(e) =>
+                        setMembers(
+                          e.target.checked
+                            ? [...members, { user_id: c.id, mode: "mixed" }]
+                            : members.filter((m) => m.user_id !== c.id),
+                        )
+                      }
+                    />
+                    {c.display_name}
+                    {chosen?.account_active === false
+                      ? " — compte désactivé"
+                      : ""}
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+          {!loading && !shownAgents.length && allChoices.length ? (
+            <p>Aucun agent ne correspond à la recherche.</p>
+          ) : null}
           {loading ? (
             <p role="status">Chargement des agents…</p>
           ) : !allChoices.length && !error ? (
@@ -386,7 +481,7 @@ function QueueForm({
           L’enregistrement de ces réglages ne connecte pas encore le numéro à la
           réception d’appels.
         </p>
-        <Submit busy={busy} disabled={loading}>
+        <Submit busy={busy} disabled={loading || numberLoading || !phone}>
           Enregistrer les réglages
         </Submit>
       </form>
@@ -844,6 +939,8 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
   const [editing, setEditing] = useState<Queue | "new" | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
   const [moreBusy, setMoreBusy] = useState(false);
+  const [view, setView] = useState<"list" | "pipeline">("list");
+  const [stageFilter, setStageFilter] = useState<Stage | "all">("all");
   useEffect(() => {
     const controller = new AbortController();
     setError("");
@@ -871,7 +968,9 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
     api<NonNullable<typeof board>>(`/inbound/queues/${selected}/board`, {
       signal: controller.signal,
     })
-      .then(setBoard)
+      .then((result) => {
+        if (!controller.signal.aborted) setBoard(result);
+      })
       .catch((e) => {
         if (!controller.signal.aborted) setError(message(e));
       });
@@ -908,13 +1007,22 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
       setMoreBusy(false);
     }
   }
+  const visibleColumns =
+    board?.columns.filter(
+      (column) => stageFilter === "all" || column.stage === stageFilter,
+    ) || [];
+  const total =
+    board?.columns.reduce((sum, column) => sum + column.count, 0) || 0;
+  const empty = visibleColumns.every((column) => column.items.length === 0);
+  const activeAgents =
+    board?.queue.agents.filter((agent) => agent.account_active !== false) || [];
   return (
     <>
       <div className="page-heading">
         <div>
           <span className="eyebrow">RÉCEPTION ET SUIVI</span>
-          <h1>Appels entrants.</h1>
-          <p>Les files de réception et les appels à prendre en charge.</p>
+          <h1>Appels entrants</h1>
+          <p>Vos lignes de réception et les demandes à rappeler.</p>
         </div>
         <div className="audio-actions">
           <button
@@ -956,6 +1064,7 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
               onChange={(e) => {
                 setSelected(e.target.value);
                 setDetail(null);
+                setStageFilter("all");
               }}
             >
               {queues.map((q) => (
@@ -968,86 +1077,294 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
           </label>
           {board ? (
             <>
-              <section className="panel inbound-summary">
-                <div>
-                  <h2>{board.queue.name}</h2>
-                  <p>
-                    {board.queue.phone} · {board.queue.timezone}
-                  </p>
-                  <p className="muted">
-                    {board.queue.agents.length} agent(s) attribué(s) · Attente :{" "}
-                    {board.queue.max_wait_seconds} s · Sonnerie :{" "}
-                    {board.queue.offer_seconds} s
-                  </p>
-                  <span className="badge">
-                    {board.queue.routing_active
-                      ? "Réception connectée"
-                      : "Numéro non connecté"}
+              <section className="panel inbound-summary inbound-line-card">
+                <div className="inbound-line-heading">
+                  <span className="inbound-line-icon">
+                    <Icon name="headset" />
                   </span>
+                  <div>
+                    <span className="eyebrow">LIGNE DE RÉCEPTION</span>
+                    <h2>{board.queue.name}</h2>
+                    <p className="inbound-line-phone">{board.queue.phone}</p>
+                  </div>
                 </div>
-                {admin ? (
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => setEditing(board.queue)}
+                <div className="inbound-line-actions">
+                  <span
+                    className={`inbound-routing-state ${board.queue.routing_active ? "is-connected" : "is-disconnected"}`}
                   >
-                    Modifier les réglages
-                  </button>
+                    {!board.queue.is_active
+                      ? "File archivée"
+                      : board.queue.routing_active
+                        ? "Réception active"
+                        : "Réception inactive"}
+                  </span>
+                  {admin ? (
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => setEditing(board.queue)}
+                    >
+                      Modifier les réglages
+                    </button>
+                  ) : null}
+                </div>
+                <div className="inbound-line-team">
+                  <strong>
+                    {activeAgents.length} agent
+                    {activeAgents.length > 1 ? "s" : ""} attribué
+                    {activeAgents.length > 1 ? "s" : ""}
+                  </strong>
+                  <div className="inbound-team-chips">
+                    {activeAgents.map((agent) => (
+                      <span key={agent.user_id}>
+                        {agent.display_name || "Agent attribué"}
+                      </span>
+                    ))}
+                  </div>
+                  {!activeAgents.length ? (
+                    <p>
+                      Attribuez les agents chargés de cette ligne dans ses
+                      réglages.
+                    </p>
+                  ) : null}
+                </div>
+                {board.queue.is_active && !board.queue.routing_active ? (
+                  <div className="inbound-routing-help" role="status">
+                    <strong>
+                      Les appels de cette ligne ne sont pas encore acheminés aux
+                      agents de l’application.
+                    </strong>
+                    <p>
+                      La file et les agents sont enregistrés. Le raccordement
+                      téléphonique reste à effectuer ; les suivis ci-dessous
+                      restent consultables.
+                    </p>
+                  </div>
                 ) : null}
               </section>
-              <div className="pipeline-board inbound-board">
+              <div
+                className="inbound-stage-filters"
+                aria-label="Filtrer les suivis par statut"
+              >
                 {board.columns.map((column) => (
-                  <section
-                    className="pipeline-column"
+                  <button
+                    type="button"
                     key={column.stage}
-                    aria-label={column.name}
+                    className={`inbound-stage-filter stage-${column.stage}`}
+                    aria-pressed={stageFilter === column.stage}
+                    onClick={() =>
+                      setStageFilter((old) =>
+                        old === column.stage ? "all" : column.stage,
+                      )
+                    }
                   >
-                    <header>
-                      <h2>{column.name}</h2>
-                      <span>{column.count}</span>
-                    </header>
-                    <div className="pipeline-cards">
-                      {column.items.map((row) => (
-                        <button
-                          type="button"
-                          className="pipeline-card"
-                          key={row.id}
-                          onClick={() => setDetail(row.id)}
-                        >
-                          <strong>{contact(row)}</strong>
-                          <span>{row.caller_number || "Numéro masqué"}</span>
-                          <span>
-                            {row.owner_name || "Non attribué"} ·{" "}
-                            {row.call_count} appel(s)
-                          </span>
-                          {row.callback_at ? (
-                            <span>
-                              Rappel :{" "}
-                              {when(
-                                row.callback_at,
-                                row.callback_timezone || board.queue.timezone,
-                              )}
-                            </span>
-                          ) : null}
-                        </button>
-                      ))}
-                      {!column.items.length ? (
-                        <p className="muted">Aucun suivi.</p>
-                      ) : null}
-                      {column.has_more ? (
-                        <button
-                          type="button"
-                          className="button secondary"
-                          disabled={moreBusy}
-                          onClick={() => void more(column)}
-                        >
-                          Voir plus de suivis
-                        </button>
-                      ) : null}
-                    </div>
-                  </section>
+                    <span>{column.name}</span>
+                    <strong>{column.count}</strong>
+                  </button>
                 ))}
               </div>
+              <section
+                className="panel inbound-followups"
+                aria-label="Suivis des appels entrants"
+              >
+                <div className="inbound-followups-heading">
+                  <div>
+                    <h2>Suivis des appels entrants</h2>
+                    <p>
+                      {total} suivi{total > 1 ? "s" : ""} dans cette file
+                    </p>
+                  </div>
+                  <div
+                    className="segmented-control"
+                    aria-label="Affichage des suivis"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      Liste
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={view === "pipeline"}
+                      onClick={() => setView("pipeline")}
+                    >
+                      Pipeline
+                    </button>
+                  </div>
+                </div>
+                {stageFilter !== "all" ? (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setStageFilter("all")}
+                  >
+                    Afficher tous les statuts
+                  </button>
+                ) : null}
+                {empty && view === "list" ? (
+                  <div className="inbound-empty">
+                    <Icon name="headset" />
+                    <h3>
+                      {total
+                        ? "Aucun suivi dans ce statut"
+                        : "Aucun appel à suivre"}
+                    </h3>
+                    <p>
+                      {total
+                        ? "Choisissez un autre statut pour retrouver les autres suivis."
+                        : "Les demandes à traiter, les prises en charge et les rappels apparaissent ici."}
+                    </p>
+                  </div>
+                ) : view === "list" ? (
+                  <div
+                    className="inbound-list"
+                    tabIndex={0}
+                    role="region"
+                    aria-label="Liste des suivis"
+                  >
+                    {visibleColumns
+                      .filter((column) => column.items.length > 0)
+                      .map((column) => (
+                        <section
+                          key={column.stage}
+                          aria-label={column.name}
+                          className={`inbound-list-group stage-${column.stage}`}
+                        >
+                          <h3>
+                            <span className="inbound-stage-dot" />
+                            {column.name}
+                            <span className="inbound-group-count">
+                              {column.count}
+                            </span>
+                          </h3>
+                          <ul>
+                            {column.items.map((row) => (
+                              <li key={row.id}>
+                                <button
+                                  type="button"
+                                  className="inbound-followup-row"
+                                  onClick={() => setDetail(row.id)}
+                                >
+                                  <span
+                                    className="inbound-contact-avatar"
+                                    aria-hidden="true"
+                                  >
+                                    {contact(row)
+                                      .replace(/[^\p{L}]/gu, "")
+                                      .slice(0, 2)
+                                      .toLocaleUpperCase("fr") || "AP"}
+                                  </span>
+                                  <span className="inbound-row-contact">
+                                    <strong>
+                                      {contact(row) === row.caller_number ||
+                                      (!row.caller_number && !row.profile)
+                                        ? "Appelant à identifier"
+                                        : contact(row)}
+                                    </strong>
+                                    <span>
+                                      {row.caller_number || "Numéro masqué"}
+                                    </span>
+                                  </span>
+                                  <span className="inbound-row-owner">
+                                    {row.owner_name || "À attribuer"}
+                                    <small>
+                                      {row.call_count} appel
+                                      {row.call_count > 1 ? "s" : ""}
+                                    </small>
+                                  </span>
+                                  <span className="inbound-row-date">
+                                    {row.callback_at
+                                      ? when(
+                                          row.callback_at,
+                                          row.callback_timezone ||
+                                            board.queue.timezone,
+                                        )
+                                      : row.created_at
+                                        ? when(
+                                            row.created_at,
+                                            board.queue.timezone,
+                                          )
+                                        : "Ouvrir la fiche"}
+                                    <span aria-hidden="true"> →</span>
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                          {column.has_more ? (
+                            <button
+                              type="button"
+                              className="button secondary"
+                              disabled={moreBusy}
+                              onClick={() => void more(column)}
+                            >
+                              Voir plus de suivis — {column.name}
+                            </button>
+                          ) : null}
+                        </section>
+                      ))}
+                  </div>
+                ) : (
+                  <div className="pipeline-board inbound-board">
+                    {visibleColumns.map((column) => (
+                      <section
+                        className={`pipeline-column stage-${column.stage}`}
+                        key={column.stage}
+                        aria-label={column.name}
+                      >
+                        <header>
+                          <h2>{column.name}</h2>
+                          <span>{column.count}</span>
+                        </header>
+                        <div className="pipeline-cards">
+                          {column.items.map((row) => (
+                            <button
+                              type="button"
+                              className="pipeline-card"
+                              key={row.id}
+                              onClick={() => setDetail(row.id)}
+                            >
+                              <strong>{contact(row)}</strong>
+                              <span>
+                                {row.caller_number || "Numéro masqué"}
+                              </span>
+                              <span>
+                                {row.owner_name || "Non attribué"} ·{" "}
+                                {row.call_count} appel(s)
+                              </span>
+                              {row.callback_at ? (
+                                <span>
+                                  Rappel :{" "}
+                                  {when(
+                                    row.callback_at,
+                                    row.callback_timezone ||
+                                      board.queue.timezone,
+                                  )}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                          {!column.items.length ? (
+                            <p className="muted">Aucun suivi.</p>
+                          ) : null}
+                          {column.has_more ? (
+                            <button
+                              type="button"
+                              className="button secondary"
+                              disabled={moreBusy}
+                              onClick={() => void more(column)}
+                            >
+                              Voir plus de suivis
+                            </button>
+                          ) : null}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </section>
             </>
           ) : error ? null : (
             <p role="status">Chargement du pipeline…</p>

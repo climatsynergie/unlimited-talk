@@ -3,6 +3,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
 import { Modal, Notice, Submit } from "./ui";
+import { QualificationFields, QualificationSummary } from "./Qualification";
+import type { QualificationSchema, QualificationValue } from "./Qualification";
 
 export type Status = "booked" | "completed" | "cancelled" | "no_show";
 export type Appointment = {
@@ -20,6 +22,7 @@ export type Appointment = {
   profile: Record<string, string>;
   campaign_name: string;
   creator_name: string;
+  qualification?: QualificationValue | null;
 };
 type Event = {
   id: string;
@@ -33,6 +36,7 @@ type Detail = {
   can_edit: boolean;
   events: Event[];
   has_more: boolean;
+  qualification_schema?: QualificationSchema;
 };
 type Choice = { starts_at: string; utc_offset_minutes: number; label: string };
 export type BookingContact = {
@@ -52,11 +56,19 @@ export function AppointmentForm({
   appointment,
   onSaved,
   onCancel,
+  qualificationSchema,
+  qualification,
+  qualificationRevision,
+  onQualificationChange,
 }: {
   contact?: BookingContact;
   appointment?: Appointment;
   onSaved: () => void;
   onCancel: () => void;
+  qualificationSchema?: QualificationSchema;
+  qualification?: QualificationValue | null;
+  qualificationRevision?: string | null;
+  onQualificationChange?: (value: QualificationValue) => void;
 }) {
   const [zone, setZone] = useState(
     appointment?.timezone || contact?.timezone || "America/Toronto",
@@ -72,6 +84,21 @@ export function AppointmentForm({
   );
   const [notes, setNotes] = useState(appointment?.notes || "");
   const [status, setStatus] = useState<Status>(appointment?.status || "booked");
+  const [ownQualification, setOwnQualification] = useState<QualificationValue>(
+    appointment?.qualification || {
+      schema_version: qualificationSchema?.schema_version || 1,
+      answers: {},
+    },
+  );
+  const [includeQualification, setIncludeQualification] = useState(
+    !!appointment?.qualification,
+  );
+  const qualificationValue = qualification || ownQualification;
+  const needsQualification =
+    !appointment ||
+    (status !== "cancelled" &&
+      (includeQualification ||
+        (appointment.status === "cancelled" && status === "booked")));
   const [choices, setChoices] = useState<Choice[]>([]);
   const [offset, setOffset] = useState("");
   const [resolving, setResolving] = useState(false);
@@ -122,7 +149,14 @@ export function AppointmentForm({
   }, [start, zone, appointment, originalOffset]);
   async function save(e: FormEvent) {
     e.preventDefault();
-    if (resolving || !choices.length || offset === "") return;
+    if (
+      busy ||
+      resolving ||
+      !choices.length ||
+      offset === "" ||
+      (needsQualification && !qualificationSchema)
+    )
+      return;
     setBusy(true);
     setError("");
     try {
@@ -132,12 +166,18 @@ export function AppointmentForm({
         utc_offset_minutes: Number(offset),
         duration_minutes: duration,
         notes,
+        ...(needsQualification ? { qualification: qualificationValue } : {}),
       };
       await api(appointment ? `/calendar/${appointment.id}` : "/calendar", {
         method: appointment ? "PATCH" : "POST",
         body: appointment
           ? { ...schedule, status, version: appointment.version }
-          : { ...contact, ...schedule, id: requestId.current },
+          : {
+              ...contact,
+              ...schedule,
+              qualification_revision: qualificationRevision || null,
+              id: requestId.current,
+            },
       });
       onSaved();
     } catch (e) {
@@ -150,6 +190,38 @@ export function AppointmentForm({
     <form className="campaign-form appointment-form" onSubmit={save}>
       {error ? <Notice error>{error}</Notice> : null}
       <fieldset disabled={busy}>
+        {appointment && !appointment.qualification && qualificationSchema ? (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={includeQualification}
+              onChange={(e) => {
+                setIncludeQualification(e.target.checked);
+                requestId.current = crypto.randomUUID();
+              }}
+            />
+            Compléter la qualification de ce rendez-vous
+          </label>
+        ) : null}
+        {needsQualification ? (
+          qualificationSchema ? (
+            <QualificationFields
+              schema={qualificationSchema}
+              value={qualificationValue}
+              required
+              onChange={(value) => {
+                if (onQualificationChange) onQualificationChange(value);
+                else setOwnQualification(value);
+                requestId.current = crypto.randomUUID();
+              }}
+            />
+          ) : (
+            <Notice error>
+              Rechargez la fiche du contact pour charger le questionnaire
+              obligatoire.
+            </Notice>
+          )
+        ) : null}
         <label>
           Date et heure du rendez-vous
           <input
@@ -238,7 +310,12 @@ export function AppointmentForm({
       <div className="actions">
         <Submit
           busy={busy}
-          disabled={resolving || !choices.length || offset === ""}
+          disabled={
+            resolving ||
+            !choices.length ||
+            offset === "" ||
+            (needsQualification && !qualificationSchema)
+          }
         >
           {appointment
             ? "Enregistrer les modifications"
@@ -374,9 +451,16 @@ export function AppointmentDetail({
               <dd className="appointment-notes">{a.notes || "Aucune note."}</dd>
             </div>
           </dl>
+          {data?.qualification_schema ? (
+            <QualificationSummary
+              schema={data.qualification_schema}
+              value={a.qualification}
+            />
+          ) : null}
           {editing ? (
             <AppointmentForm
               appointment={a}
+              qualificationSchema={data?.qualification_schema}
               onCancel={() => setEditing(false)}
               onSaved={() => {
                 setEditing(false);

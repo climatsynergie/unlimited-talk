@@ -22,7 +22,7 @@ type Settings = {
   hours: Window[];
   rules: Rule[];
 };
-type Directory = {
+export type Directory = {
   items: NumberItem[];
   configured: boolean;
   sync: {

@@ -2,6 +2,12 @@ import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
+import {
+  qualificationSchema,
+  validQualification,
+  fillQualification,
+} from "./fixtures/qualification";
+import type { SavedQualification } from "../src/Qualification";
 
 test.use({
   launchOptions: {
@@ -62,6 +68,8 @@ async function setup(page: Page, role = "agent") {
   const moves: { contact: string; stage: string }[] = [];
   const moveRequests: string[] = [];
   const appliedMoves = new Set<string>();
+  const qualifications = new Map<string, SavedQualification>();
+  const qualificationReplays = new Map<string, SavedQualification>();
   const appointments: Record<string, unknown>[] = [];
   const stages = [
     { id: "stage-new", name: "À appeler", kind: "new" },
@@ -71,7 +79,7 @@ async function setup(page: Page, role = "agent") {
   ];
   const versions = new Map<string, number>();
   const stageByContact = new Map<string, string>();
-  const failures = { note: false, move: false };
+  const failures = { note: false, move: false, qualification: false };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body =
@@ -249,6 +257,29 @@ async function setup(page: Page, role = "agent") {
           actor_name: "Agent composeur",
         });
         result = { id: body.id };
+      } else if (action === "qualification") {
+        if (failures.qualification)
+          return route.fulfill({
+            status: 503,
+            json: { detail: "Qualification non enregistrée. Réessayez." },
+          });
+        if (qualificationReplays.has(body.request_id))
+          result = qualificationReplays.get(body.request_id);
+        else {
+          const current = qualifications.get(contact);
+          if (body.expected_revision !== (current?.revision || null))
+            return route.fulfill({
+              status: 409,
+              json: { detail: "Qualification modifiée par un autre agent." },
+            });
+          const saved = {
+            revision: String(Number(current?.revision || 0) + 1),
+            qualification: body.qualification,
+          };
+          qualifications.set(contact, saved);
+          qualificationReplays.set(body.request_id, saved);
+          result = saved;
+        }
       } else if (action === "move") {
         moveRequests.push(body.request_id);
         if (!appliedMoves.has(body.request_id)) {
@@ -284,6 +315,8 @@ async function setup(page: Page, role = "agent") {
           events: [],
           notes_has_more: false,
           events_has_more: false,
+          qualification_schema: qualificationSchema,
+          qualification: qualifications.get(contact) || null,
         };
       }
     } else if (path === "/api/calendar/resolve") {
@@ -297,7 +330,16 @@ async function setup(page: Page, role = "agent") {
         ],
       };
     } else if (path === "/api/calendar" && body) {
+      expect(body.qualification_revision).toBe(
+        qualifications.get(body.contact_id)?.revision || null,
+      );
       appointments.push(body);
+      qualifications.set(body.contact_id, {
+        revision: String(
+          Number(qualifications.get(body.contact_id)?.revision || 0) + 1,
+        ),
+        qualification: body.qualification,
+      });
       stageByContact.set(body.contact_id, "stage-appointment");
       versions.set(body.contact_id, (versions.get(body.contact_id) || 0) + 1);
       result = { id: body.id };
@@ -323,6 +365,7 @@ async function setup(page: Page, role = "agent") {
     notes,
     moves,
     moveRequests,
+    qualifications,
     appointments,
     failures,
     get nextCount() {
@@ -505,6 +548,134 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   await expect.poll(() => f.moves.length).toBe(2);
 });
 
+test("qualification : conditions, sauvegarde partielle et saisie conservée sur le bon client", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const field = (key: string) =>
+    qualificationSchema.fields.find((field) => field.key === key)!;
+  await sheet
+    .getByRole("combobox", { name: field("owner").label, exact: true })
+    .selectOption("Oui");
+  await expect(
+    sheet.getByRole("combobox", { name: field("owners").label, exact: true }),
+  ).toBeVisible();
+  await sheet
+    .getByRole("combobox", { name: field("heat_pump").label, exact: true })
+    .selectOption("Oui, murale");
+  await expect(
+    sheet.getByRole("textbox", {
+      name: field("wall_pump_floors").label,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await sheet
+    .getByRole("combobox", { name: field("heat_pump").label, exact: true })
+    .selectOption("Non");
+  await expect(
+    sheet.getByRole("textbox", {
+      name: field("wall_pump_floors").label,
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await sheet
+    .getByRole("textbox", { name: field("city").label, exact: true })
+    .fill("Laval");
+  const first = [...f.rows.values()][0];
+  first.state = "finished";
+  first.outcome = "completed";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  await expect.poll(() => f.nextCount).toBe(2);
+  await expect(
+    sheet.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  f.failures.qualification = true;
+  await sheet
+    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .click();
+  await expect(sheet.getByRole("alert")).toContainText(
+    "Qualification non enregistrée",
+  );
+  await expect(
+    sheet.getByRole("textbox", { name: field("city").label, exact: true }),
+  ).toHaveValue("Laval");
+  f.failures.qualification = false;
+  await sheet
+    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .click();
+  await expect.poll(() => f.qualifications.has(first.contact_id)).toBe(true);
+  expect(
+    f.qualifications.get(first.contact_id)?.qualification.answers.city,
+  ).toBe("Laval");
+  await expect(
+    sheet.getByRole("heading", { name: "Client 2", exact: true }),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("combobox", { name: field("owner").label, exact: true }),
+  ).toHaveValue("");
+  expect(f.appointments).toHaveLength(0);
+});
+
+test("qualification : conflit entre agents sans écrasement des réponses locales", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const city = qualificationSchema.fields.find(
+    (field) => field.key === "city",
+  )!.label;
+  const first = [...f.rows.values()][0];
+  await sheet.getByRole("textbox", { name: city, exact: true }).fill("Laval");
+  f.qualifications.set(first.contact_id, {
+    revision: "99",
+    qualification: {
+      schema_version: 1,
+      answers: { owner: "Non", city: "Québec" },
+    },
+  });
+  await sheet
+    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .click();
+  await expect(sheet.getByRole("alert")).toContainText(
+    "modifiée par un autre agent",
+  );
+  await expect(
+    sheet.getByRole("textbox", { name: city, exact: true }),
+  ).toHaveValue("Laval");
+  await sheet
+    .getByRole("button", {
+      name: "Abandonner mes modifications et recharger",
+      exact: true,
+    })
+    .click();
+  await expect(
+    sheet.getByRole("textbox", { name: city, exact: true }),
+  ).toHaveValue("Québec");
+  await sheet
+    .getByRole("textbox", { name: city, exact: true })
+    .fill("Montréal");
+  await sheet
+    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .click();
+  await expect
+    .poll(() => f.qualifications.get(first.contact_id)?.revision)
+    .toBe("100");
+  await expect(
+    sheet.getByText("Qualification enregistrée sur la fiche du contact.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
 test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage à RDV booké", async ({
   page,
 }) => {
@@ -549,6 +720,11 @@ test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage 
   await sheet
     .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
     .click();
+  expect(f.appointments).toHaveLength(0);
+  await fillQualification(sheet);
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
   await expect.poll(() => f.appointments.length).toBe(1);
   expect(f.appointments[0]).toMatchObject({
     campaign_id: campaign,
@@ -557,6 +733,7 @@ test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage 
     timezone: "America/Toronto",
     duration_minutes: 30,
     notes: "Détails de la demande du client.",
+    qualification: validQualification,
   });
   await expect(
     sheet.getByRole("combobox", { name: "Étape du pipeline", exact: true }),

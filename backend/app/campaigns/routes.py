@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.identity.routes import same_origin
 from app.identity.service import query, audit, authenticate
 from app.campaigns import service
+from app.qualification import Qualification, SCHEMA, contact_snapshot, save_contact_snapshot
 
 router=APIRouter(prefix='/api/campaigns',tags=['Campaigns'],dependencies=[Depends(same_origin)])
 Color=Literal['violet','blue','amber','green','rose','slate']
@@ -86,6 +87,12 @@ class Move(Body):
     request_id:uuid.UUID
     stage_id:uuid.UUID
     version:int=Field(ge=0)
+
+
+class QualificationSave(Body):
+    request_id:uuid.UUID
+    expected_revision:str|None=Field(default=None,pattern=r'^[1-9][0-9]{0,18}$')
+    qualification:Qualification
 
 
 class Remove(Body):
@@ -359,7 +366,27 @@ def detail(identifier:uuid.UUID,contact_id:uuid.UUID,request:Request):
         events=query(db,'''SELECT e.id,e.action,e.details,e.created_at,u.display_name AS actor_name FROM staging.campaign_events e
             JOIN staging.identity_users u ON u.id=e.actor_id WHERE campaign_id=:campaign AND contact_id=:contact
             ORDER BY e.id DESC LIMIT 51''',campaign=identifier,contact=contact_id).mappings().all()
-        return {'contact':card_payload(card),'notes':[dict(n) for n in notes[:50]],'events':[{**dict(e),'id':str(e['id'])} for e in events[:50]],'notes_has_more':len(notes)>50,'events_has_more':len(events)>50}
+        return {'contact':card_payload(card),'notes':[dict(n) for n in notes[:50]],'events':[{**dict(e),'id':str(e['id'])} for e in events[:50]],'notes_has_more':len(notes)>50,'events_has_more':len(events)>50,
+                'qualification_schema':SCHEMA,'qualification':contact_snapshot(db,identifier,contact_id)}
+
+
+@router.put('/{identifier}/contacts/{contact_id}/qualification')
+def save_qualification(identifier:uuid.UUID,contact_id:uuid.UUID,body:QualificationSave,request:Request):
+    value=dict(action='contact.qualification_saved',contact=str(contact_id),**body.model_dump(mode='json',exclude={'request_id'}))
+    with request.app.state.engine.begin() as db:
+        user=authenticate(db,request);service.access(db,user,identifier)
+        previous=service.replay(db,user,identifier,body.request_id,value)
+        # Access is checked even on a replay after membership revocation.
+        query(db,'SELECT id FROM staging.contacts WHERE id=:id FOR UPDATE',id=contact_id)
+        service.contact_access(db,identifier,contact_id)
+        if previous is not None:
+            revision=query(db,'SELECT id FROM staging.campaign_events WHERE request_id=:id',id=body.request_id).scalar_one()
+            return {'revision':str(revision),'qualification':previous['qualification']}
+        current=contact_snapshot(db,identifier,contact_id)
+        if (current['revision'] if current else None)!=body.expected_revision:
+            raise HTTPException(409,'La qualification a été modifiée par un autre agent. Vos réponses sont conservées ; rechargez la version enregistrée avant de recommencer.')
+        return save_contact_snapshot(db,user,identifier,contact_id,body.qualification.model_dump(),
+                                     request_id=body.request_id,request_hash=service.fingerprint(value))
 
 
 @router.post('/{identifier}/contacts/{contact_id}/notes',status_code=201)

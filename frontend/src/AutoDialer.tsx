@@ -302,8 +302,8 @@ export function AutoDialerPanel({
       {previousContact ? (
         <Notice>
           Vous complétez encore la fiche du contact précédent. Enregistrez la
-          note ou terminez le formulaire pour afficher le contact de l’appel en
-          cours.
+          note, enregistrez la qualification ou terminez le formulaire pour
+          afficher le contact de l’appel en cours.
         </Notice>
       ) : null}
       {shownCampaign && shownContact ? (

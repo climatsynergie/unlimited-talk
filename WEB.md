@@ -205,6 +205,11 @@ An unfinished note, appointment/callback form or pending mutation keeps that
 sheet attached to its original contact if the next call starts. A notice explains
 why the previous sheet remains visible; finishing or cancelling the edit follows
 the current call again. Drafts live only in the mounted page, and notes require
-an explicit save. Imported profile fields remain read-only; this is not yet a
-structured qualification questionnaire. Appointment notes are saved with the
-appointment, and booking uses the existing atomic appointment/pipeline update.
+an explicit save. Imported profile fields remain read-only. The legacy structured
+qualification is visible during the call and can be saved incomplete. Booking
+requires all visible mandatory answers in both the browser and the API. The
+appointment keeps its own immutable qualification snapshot; subsequent client
+qualification edits cannot change that earlier snapshot. See
+[QUALIFICATION.md](QUALIFICATION.md) for the exact questionnaire and concurrency
+contract. Appointment notes are saved with the appointment, and booking uses the
+existing atomic appointment/pipeline update.

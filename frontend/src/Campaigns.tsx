@@ -7,6 +7,12 @@ import { Field, Modal, Notice, Submit } from "./ui";
 import { usePhone } from "./Phone";
 import { CampaignTeam } from "./CampaignTeam";
 import { CallingSettingsDialog } from "./CallingSettings";
+import { QualificationFields, initialQualification } from "./Qualification";
+import type {
+  QualificationSchema,
+  QualificationValue,
+  SavedQualification,
+} from "./Qualification";
 
 type Campaign = {
   id: string;
@@ -57,6 +63,8 @@ type Detail = {
   events: Event[];
   notes_has_more: boolean;
   events_has_more: boolean;
+  qualification_schema?: QualificationSchema;
+  qualification?: SavedQualification | null;
 };
 const zones = [
   ["America/Toronto", "Toronto / Montréal"],
@@ -86,6 +94,7 @@ const actions: Record<string, string> = {
   "call.finished": "Appel terminé",
   "call.pipeline_updated": "Étape mise à jour après l’appel",
   "calling.settings_changed": "Réglages téléphoniques modifiés",
+  "contact.qualification_saved": "Qualification du client enregistrée",
 };
 function name(card: Card) {
   return (
@@ -1172,11 +1181,24 @@ function CardDetail({
   const [callback, setCallback] = useState(false);
   const [target, setTarget] = useState("");
   const [revision, setRevision] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [mutationBusy, setBusy] = useState(false);
+  const [qualificationReloading, setQualificationReloading] = useState(false);
+  const busy = mutationBusy || qualificationReloading;
   const [error, setError] = useState("");
   const [restore, setRestore] = useState(false);
   const [remove, setRemove] = useState(false);
   const [note, setNote] = useState("");
+  const [qualification, setQualification] = useState<QualificationValue | null>(
+    null,
+  );
+  const [qualificationRevision, setQualificationRevision] = useState<
+    string | null
+  >(null);
+  const [qualificationDirty, setQualificationDirty] = useState(false);
+  const [qualificationSaved, setQualificationSaved] = useState(false);
+  const [qualificationConflict, setQualificationConflict] = useState(false);
+  const qualificationLoaded = useRef(false);
+  const qualificationRequest = useRef(crypto.randomUUID());
   const [pendingStage, setPendingStage] = useState<Stage | null>(null);
   const noteId = useRef(crypto.randomUUID());
   const actionId = useRef(crypto.randomUUID());
@@ -1189,18 +1211,82 @@ function CardDetail({
         if (!abort.signal.aborted) {
           setData(r);
           setTarget(r.contact.stage_id);
+          if (!qualificationLoaded.current && r.qualification_schema) {
+            setQualification(
+              r.qualification?.qualification ||
+                initialQualification(r.qualification_schema, r.contact.profile),
+            );
+            setQualificationRevision(r.qualification?.revision || null);
+            setQualificationDirty(false);
+            qualificationLoaded.current = true;
+          }
         }
       })
       .catch((e) => {
         if (!abort.signal.aborted) setError(message(e));
+      })
+      .finally(() => {
+        if (!abort.signal.aborted) setQualificationReloading(false);
       });
     return () => abort.abort();
   }, [campaign.id, identifier, revision, reloadKey]);
   useEffect(() => {
     onEditingChange?.(
-      !!note.trim() || booking || callback || busy || !!pendingStage,
+      !!note.trim() ||
+        qualificationDirty ||
+        booking ||
+        callback ||
+        busy ||
+        !!pendingStage,
     );
-  }, [note, booking, callback, busy, pendingStage, onEditingChange]);
+  }, [
+    note,
+    qualificationDirty,
+    booking,
+    callback,
+    busy,
+    pendingStage,
+    onEditingChange,
+  ]);
+  function changeQualification(value: QualificationValue) {
+    qualificationLoaded.current = true;
+    setQualification(value);
+    setQualificationDirty(true);
+    setQualificationSaved(false);
+    qualificationRequest.current = crypto.randomUUID();
+  }
+  async function saveQualification() {
+    if (busy || !qualification) return;
+    setBusy(true);
+    setError("");
+    setQualificationSaved(false);
+    try {
+      const result = await api<SavedQualification>(
+        `/campaigns/${campaign.id}/contacts/${identifier}/qualification`,
+        {
+          method: "PUT",
+          body: {
+            request_id: qualificationRequest.current,
+            expected_revision: qualificationRevision,
+            qualification,
+          },
+        },
+      );
+      setQualification(result.qualification);
+      setQualificationRevision(result.revision);
+      setQualificationDirty(false);
+      setQualificationConflict(false);
+      setQualificationSaved(true);
+      qualificationRequest.current = crypto.randomUUID();
+      setRevision((n) => n + 1);
+    } catch (e) {
+      setError(message(e));
+      if (e instanceof ApiError && e.status === 409)
+        setQualificationConflict(true);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function moveTo(stage: Stage) {
     if (!data || busy) return;
     setBusy(true);
@@ -1309,6 +1395,7 @@ function CardDetail({
           actionId.current = crypto.randomUUID();
           setRestore(false);
           setRemove(false);
+          if (!qualificationDirty) qualificationLoaded.current = false;
           setRevision((n) => n + 1);
         }}
       >
@@ -1408,6 +1495,10 @@ function CardDetail({
               <section>
                 <h3>Prendre rendez-vous — Unlimited Talks</h3>
                 <AppointmentForm
+                  qualificationSchema={data.qualification_schema}
+                  qualification={qualification}
+                  qualificationRevision={qualificationRevision}
+                  onQualificationChange={changeQualification}
                   contact={{
                     campaign_id: campaign.id,
                     contact_id: identifier,
@@ -1421,6 +1512,8 @@ function CardDetail({
                   }}
                   onSaved={() => {
                     setBooking(false);
+                    qualificationLoaded.current = false;
+                    setQualificationDirty(false);
                     void controller.endBooking(bookingHold.current);
                     bookingHold.current = null;
                     setRevision((n) => n + 1);
@@ -1452,6 +1545,60 @@ function CardDetail({
               </button>
             ) : null}
           </div>
+          {!booking && data.qualification_schema && qualification ? (
+            <section
+              className="contact-qualification"
+              aria-label="Qualification du client"
+            >
+              <QualificationFields
+                schema={data.qualification_schema}
+                value={qualification}
+                onChange={changeQualification}
+                disabled={busy || !campaign.is_active}
+              />
+              {campaign.is_active ? (
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={busy || !qualificationDirty}
+                    onClick={() => void saveQualification()}
+                  >
+                    Enregistrer la qualification
+                  </button>
+                  {qualificationDirty ? (
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        qualificationLoaded.current = false;
+                        setQualificationReloading(true);
+                        setError("");
+                        setQualificationConflict(false);
+                        setQualificationSaved(false);
+                        setRevision((n) => n + 1);
+                      }}
+                    >
+                      Abandonner mes modifications et recharger
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {qualificationSaved ? (
+                <p role="status">
+                  Qualification enregistrée sur la fiche du contact.
+                </p>
+              ) : null}
+              {qualificationConflict ? (
+                <Notice>
+                  Une autre version a été enregistrée. Vos réponses restent
+                  affichées ; rechargez les réponses enregistrées pour résoudre
+                  le conflit.
+                </Notice>
+              ) : null}
+            </section>
+          ) : null}
           <label className="campaign-stage-picker">
             Étape du pipeline
             <select
@@ -1469,7 +1616,11 @@ function CardDetail({
           <button
             className="button secondary"
             disabled={
-              busy || target === data.contact.stage_id || !campaign.is_active
+              busy ||
+              booking ||
+              callback ||
+              target === data.contact.stage_id ||
+              !campaign.is_active
             }
             onClick={() => {
               const stage = stages.find((s) => s.id === target);

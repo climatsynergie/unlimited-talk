@@ -11,6 +11,7 @@ import urllib.request
 import uuid
 
 root=Path(__file__).resolve().parents[1]
+QUALIFICATION=json.loads((root/"tests/qualification-fixture.json").read_text())
 compose=['sudo','-n','docker','compose','--project-directory',str(root)]
 compose+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*compose,'config','--format','json']))
@@ -72,10 +73,16 @@ with make_engine().begin() as db:
 print(json.dumps(str(identifier)))
 ''')
 admin.request('POST',A+'/contacts',dict(request_id=str(uuid.uuid4()),contact_ids=[contact]))
-body=dict(id=str(uuid.uuid4()),campaign_id=a['id'],contact_id=contact,membership_version=0,local_start='2026-11-01T01:30',timezone='America/Toronto',duration_minutes=30,notes='Premier RDV')
+body=dict(id=str(uuid.uuid4()),campaign_id=a['id'],contact_id=contact,membership_version=0,local_start='2026-11-01T01:30',timezone='America/Toronto',duration_minutes=30,notes='Premier RDV',qualification=QUALIFICATION)
 agent_b.request('POST','/api/calendar',body,expected=403)
 agent_a.request('POST','/api/calendar',body,expected=422) # DST overlap needs explicit offset
 body['utc_offset_minutes']=-300
+missing={k:v for k,v in body.items() if k!='qualification'}
+agent_a.request('POST','/api/calendar',missing,expected=422)
+agent_a.request('POST','/api/calendar',{**body,'qualification':dict(schema_version=1,answers={'owner':'Oui'})},expected=422)
+before_qualification=agent_a.request('GET',A+'/contacts/'+contact)
+assert before_qualification['qualification'] is None
+assert next(s for s in agent_a.request('GET',A+'/board')['stages'] if s['kind']=='appointment')['total']==0
 agent_a.request('POST','/api/calendar',{**body,'created_by':id_b},expected=422)
 booked=agent_a.request('POST','/api/calendar',body,expected=201)
 assert booked['starts_at'].startswith('2026-11-01T06:30')
@@ -85,6 +92,30 @@ path='/api/calendar/'+booked['id']
 assert agent_b.request('GET',path)['can_edit'] is False
 assert agent_a.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['can_edit'] is True
+assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
+saved=agent_a.request('GET',A+'/contacts/'+contact)['qualification']
+assert saved['qualification']['answers']['postal_code']=='H2X 1Y4'
+draft=dict(request_id=str(uuid.uuid4()),expected_revision=saved['revision'],qualification=dict(schema_version=1,answers={'owner':'Non','city':'Laval'}))
+draft_path=A+'/contacts/'+contact+'/qualification'
+agent_b.request('PUT',draft_path,draft,expected=403)
+draft_result=agent_a.request('PUT',draft_path,draft)
+assert agent_a.request('PUT',draft_path,draft)==draft_result
+agent_a.request('PUT',draft_path,{**draft,'qualification':QUALIFICATION},expected=409)
+agent_a.request('PUT',draft_path,{**draft,'request_id':str(uuid.uuid4())},expected=409)
+assert agent_a.request('GET',A+'/contacts/'+contact)['qualification']['qualification']['answers']['owner']=='Non'
+assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
+# Two agents editing the same qualification get one commit and one conflict.
+competing,competing_id=agent();admin.request('PUT',A+'/agents/'+competing_id,dict(is_active=True))
+with ThreadPoolExecutor(max_workers=2) as pool:
+    def save_race(pair):
+        actor,city=pair
+        try:
+            actor.request('PUT',draft_path,dict(request_id=str(uuid.uuid4()),expected_revision=draft_result['revision'],qualification=dict(schema_version=1,answers={'owner':'Non','city':city})))
+            return 200
+        except AssertionError as error:
+            assert 409 in error.args[0]
+            return 409
+    assert sorted(pool.map(save_race,[(agent_a,'Montréal'),(competing,'Québec')]))==[200,409]
 stage=next(s for s in admin.request('GET',A+'/board')['stages'] if s['kind']=='appointment')
 assert stage['total']==1
 patch={k:v for k,v in body.items() if k not in ['id','campaign_id','contact_id','membership_version']}
@@ -95,7 +126,7 @@ assert agent_a.request('PATCH',path,patch)['version']==1
 agent_a.request('PATCH',path,patch,expected=409)
 # Overlapping meetings are allowed, with distinct ids and the current membership version.
 version=admin.request('GET',A+'/contacts/'+contact)['contact']['version']
-second=agent_a.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),'membership_version':version},expected=201)
+second=agent_a.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),'membership_version':version,'qualification_revision':admin.request('GET',A+'/contacts/'+contact)['qualification']['revision']},expected=201)
 # The shared calendar exposes the appointment, not the source campaign board.
 agent_b.request('GET',A+'/board',expected=403)
 params=urlencode(dict(start='2026-11-01T00:00:00Z',end='2026-11-02T00:00:00Z'))
@@ -118,6 +149,20 @@ cancel=admin.request('PATCH',path,{**patch,'version':current['version'],'status'
 assert cancel['status']=='cancelled'
 assert len(admin.request('GET',path)['events'])==4
 assert admin.request('GET',A+'/contacts/'+contact)['contact']['stage_id']==stage['id']
+legacy=code('''identifier=uuid.uuid4()
+with make_engine().begin() as db:
+    query(db,"""INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,request_hash,starts_at,ends_at,timezone)
+        VALUES (:id,:campaign,:contact,:actor,'legacy-qualification-proof','2026-11-03T15:00:00Z','2026-11-03T15:30:00Z','America/Toronto')""",
+        id=identifier,campaign=payload['campaign'],contact=payload['contact'],actor=payload['actor'])
+print(json.dumps(str(identifier)))
+''',dict(campaign=a['id'],contact=contact,actor=booked['created_by']))
+legacy_path='/api/calendar/'+legacy
+assert admin.request('GET',legacy_path)['appointment']['qualification'] is None
+legacy_patch=dict(local_start='2026-11-03T10:00',timezone='America/Toronto',utc_offset_minutes=-300,duration_minutes=30,notes='Ancien RDV conservé',status='booked',version=0)
+assert admin.request('PATCH',legacy_path,legacy_patch)['version']==1
+assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':1,'status':'cancelled'})['version']==2
+admin.request('PATCH',legacy_path,{**legacy_patch,'version':2},expected=422)
+assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':2,'qualification':QUALIFICATION})['qualification']['answers']['owner']=='Oui'
 # Reassignment revocation blocks creation while retaining creator ownership on existing meetings.
 admin.request('PUT',A+'/agents/'+id_a,dict(is_active=False))
 agent_a.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),'membership_version':version},expected=403)
