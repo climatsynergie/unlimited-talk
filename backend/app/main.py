@@ -32,7 +32,7 @@ logger = logging.getLogger('uvicorn.error')
 
 # Inbound configuration requires schema 9; the preceding compatibility image
 # continues serving the existing business features after an application rollback.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0009_inbound'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0009_inbound', '0010_dialer'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
@@ -53,6 +53,11 @@ async def lifespan(app):
     app.state.voice_profile = load_profile()
     app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') in {'controlled_test', 'manual'}
     app.state.engine = make_engine()
+    # A rollback keeps the CRM readable on the expanded schema. Only the new
+    # dialer understands its claims/policies, so this predecessor cannot dial.
+    with app.state.engine.connect() as connection:
+        if connection.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one() == '0010_dialer':
+            app.state.voice_calling_enabled = False
     yield
     app.state.engine.dispose()
 
