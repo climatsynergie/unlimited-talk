@@ -189,14 +189,20 @@ print(json.dumps({'gateway':True,'numbers':True}))
         provider_read_gateway=True,private_storage_access=True))+'\n').encode())
 
 
-def operate(action, revision):
+def operate(action, revision, *, deployment_lock_held=False):
+    """The installed deployer may reuse its already-held exclusive host lock.
+
+    The CLI never exposes this option. Both callers must run as root; deployment
+    keeps the same lock held through pause, migration, rollback and resumption.
+    """
     valid_revision(revision)
     if os.geteuid() != 0:
         raise ValueError('Root required')
     os.umask(0o077)
     fd = os.open('/run/lock/unlimited-talk-staging-deploy.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'r+') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if not deployment_lock_held:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         release = (BASE/'current').resolve(strict=True)
         if release.parent != BASE/'releases' or release.name != 'git-'+revision:
             raise ValueError('Unexpected current release')

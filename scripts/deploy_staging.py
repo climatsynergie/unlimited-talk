@@ -5,6 +5,8 @@ This file is installed by an administrator, never executed from a checkout by CI
 The deployment key cannot choose a shell command, host path or database target.
 """
 import fcntl
+from contextlib import contextmanager
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +23,15 @@ REGISTRY_IMAGE = 'ghcr.io/climatsynergie/unlimited-talk-api'
 ROOT = Path('/etc/unlimited-talk-staging')
 BASE = Path('/srv/unlimited-talk-staging')
 TEMPLATE = ROOT / 'deployment-template'
+VOICE_OPERATOR = Path('/root/unlimited-talk-voice-tools/control_manual_voice.py')
+
+
+class ActiveCallsError(RuntimeError):
+    pass
+
+
+class CallingResumeError(RuntimeError):
+    pass
 
 
 def parse_request(raw):
@@ -91,6 +102,98 @@ def check_health(revision=None):
     if revision and result.get('revision') != revision:
         raise RuntimeError('Running revision differs from approved commit')
     return result
+
+
+def calling_state(release):
+    """Read an exact deployed revision, including its persisted calling mode."""
+    if release.parent != BASE / 'releases' or not re.fullmatch(r'git-[a-f0-9]{40}', release.name):
+        raise ValueError('Unexpected current release')
+    with urllib.request.urlopen('http://127.0.0.1:8110/health/ready', timeout=8) as response:
+        state = json.load(response)
+    mode = state.get('communications')
+    if (state.get('status') != 'ready' or state.get('environment') != 'staging'
+            or state.get('revision') != release.name[4:]
+            or mode not in {'webhooks_only', 'manual'}
+            or state.get('calling_enabled') is not (mode == 'manual')):
+        raise RuntimeError('Unexpected calling state')
+    return state
+
+
+def require_idle_calls(release, *, env=None):
+    code = """from app.database import make_engine
+from sqlalchemy import text
+engine=make_engine()
+try:
+ with engine.connect() as db:
+  db.execute(text('SET TRANSACTION READ ONLY'))
+  active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
+ print(active)
+finally:engine.dispose()
+"""
+    result = compose(release, 'exec', '-T', 'api', 'python', '-', data=code, env=env)
+    if not result.isdigit():
+        raise RuntimeError('Call activity could not be verified')
+    if int(result) != 0:
+        raise ActiveCallsError('Finish active calls before deployment')
+
+
+def calling_action(action, revision):
+    """Reuse the installed, root-owned operator; never run code from an image."""
+    if action not in {'disable', 'enable'} or not re.fullmatch(r'[a-f0-9]{40}', revision):
+        raise ValueError('Unexpected calling operation')
+    import stat
+    info = VOICE_OPERATOR.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022:
+        raise ValueError('Protected installed calling operator required')
+    original_path = sys.path[:]
+    try:
+        sys.path.insert(0, str(VOICE_OPERATOR.parent))
+        spec = importlib.util.spec_from_file_location('installed_voice_operator', VOICE_OPERATOR)
+        operator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(operator)
+        result = operator.operate(action, revision, deployment_lock_held=True)
+        if result.get('revision') != revision or result.get('calling_enabled') is not (action == 'enable'):
+            raise RuntimeError('Calling operation was not confirmed')
+    finally:
+        sys.path[:] = original_path
+
+
+@contextmanager
+def preserve_calling(labels, previous, release, *, env=None):
+    """Briefly close admission and restore only a previously enabled service.
+
+    Used after main/CI/provenance and template validation, under the deploy lock.
+    Explicitly disabled calling stays disabled. Failed deployments may resume
+    only the healthy previous release, never an unhealthy replacement.
+    """
+    if labels.get('io.unlimitedtalk.schema') != '0010_dialer':
+        yield
+        return
+    state = calling_state(previous)
+    if not state['calling_enabled']:
+        yield
+        return
+    if state.get('migration') != '0010_dialer':
+        raise ValueError('Calling restoration requires a compatible dialer release')
+    require_idle_calls(previous, env=env)
+    try:
+        calling_action('disable', state['revision'])
+        # An authorization racing with the first check must finish before any
+        # migration or replacement; failure restores the original calling mode.
+        require_idle_calls(previous, env=env)
+        yield
+    finally:
+        current = (BASE / 'current').resolve(strict=True)
+        try:
+            if current not in {previous, release}:
+                raise ValueError('Unexpected restored release')
+            restored = calling_state(current)
+            if restored.get('migration') != '0010_dialer':
+                raise ValueError('Calling schema changed')
+            if not restored['calling_enabled']:
+                calling_action('enable', restored['revision'])
+        except Exception:
+            raise CallingResumeError('Calling could not be restored; operator verification required') from None
 
 
 
@@ -223,42 +326,35 @@ def deploy(request):
             raise ValueError('Unexpected root-owned deployment template')
         if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler','voice-archiver')):
             raise ValueError('Migration and API must use the same tested image')
-        require_identity_rollback_target(labels)
-        if labels.get('io.unlimitedtalk.schema')=='0010_dialer' and previous is not None:
-            code="""from app.database import make_engine
-from sqlalchemy import text
-engine=make_engine()
-try:
- with engine.connect() as db:
-  db.execute(text('SET TRANSACTION READ ONLY'))
-  active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
- assert active==0
-finally:engine.dispose()
-"""
-            compose(previous,'exec','-T','api','python','-',data=code,env=env)
-        # Migrations must follow expand/contract compatibility. Never downgrade
-        # data automatically, including when application health checks fail.
-        compose(release, 'up', '-d', '--no-deps', '--wait', 'broker', env=env)
-        compose(release, 'run', '--rm', '--no-deps', 'migrate', env=env)
-        switch_current(release)
-        try:
-            compose(release, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                    '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher','voice-reconciler','voice-archiver', env=env)
-            check_health(revision)
-        except Exception:
-            compose(release,'stop','worker','dispatcher','voice-reconciler','voice-archiver',env=env)
-            switch_current(previous)
+        with preserve_calling(labels, previous, release, env=env):
+            require_identity_rollback_target(labels)
+            if labels.get('io.unlimitedtalk.schema')=='0010_dialer':
+                require_idle_calls(previous, env=env)
+            # Migrations must follow expand/contract compatibility. Never
+            # downgrade data automatically when application health checks fail.
+            compose(release, 'up', '-d', '--no-deps', '--wait', 'broker', env=env)
+            compose(release, 'run', '--rm', '--no-deps', 'migrate', env=env)
+            switch_current(release)
             try:
-                previous_config=json.loads(compose(previous,'config','--format','json',env=env))
-                previous_workers=[name for name in ('worker','dispatcher','voice-reconciler','voice-archiver') if name in previous_config['services']]
-                compose(previous, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
-                        '--wait', '--wait-timeout', '120', 'api', 'gateway', *previous_workers, env=env)
-                check_health()
+                compose(release, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
+                        '--wait', '--wait-timeout', '120', 'api', 'gateway', 'worker','dispatcher','voice-reconciler','voice-archiver', env=env)
+                check_health(revision)
             except Exception:
-                raise RuntimeError('Deployment failed; previous application could not be restored. Database was not downgraded.') from None
-            raise RuntimeError('Deployment failed; previous application restored. Database was not downgraded.') from None
+                compose(release,'stop','worker','dispatcher','voice-reconciler','voice-archiver',env=env)
+                switch_current(previous)
+                try:
+                    previous_config=json.loads(compose(previous,'config','--format','json',env=env))
+                    previous_workers=[name for name in ('worker','dispatcher','voice-reconciler','voice-archiver') if name in previous_config['services']]
+                    compose(previous, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
+                            '--wait', '--wait-timeout', '120', 'api', 'gateway', *previous_workers, env=env)
+                    check_health()
+                except Exception:
+                    raise RuntimeError('Deployment failed; previous application could not be restored. Database was not downgraded.') from None
+                raise RuntimeError('Deployment failed; previous application restored. Database was not downgraded.') from None
     result = {**metadata, 'status': 'ready', 'previous_release': previous.name,
               'deployed_at_epoch': int(time.time())}
+    if labels.get('io.unlimitedtalk.schema') == '0010_dialer':
+        result['calling_enabled'] = calling_state(release)['calling_enabled']
     (ROOT / 'last-deployment.json').write_text(json.dumps(result, indent=2) + '\n')
     return result
 
@@ -280,5 +376,10 @@ if __name__ == '__main__':
     except Exception as error:
         # Messages from these layers may contain server output. Keep CI output
         # bounded and omit the request/token. Details require operator inspection.
-        print('Staging deployment stopped: ' + type(error).__name__, file=sys.stderr)
+        if isinstance(error, ActiveCallsError):
+            print('Deployment stopped: finish active calls and pause the dialers, then retry. Calling remains available.', file=sys.stderr)
+        elif isinstance(error, CallingResumeError):
+            print('Deployment stopped: calling could not be restored; operator verification is required.', file=sys.stderr)
+        else:
+            print('Staging deployment stopped: ' + type(error).__name__, file=sys.stderr)
         raise SystemExit(1)

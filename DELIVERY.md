@@ -82,10 +82,19 @@ and the image digest, not database passwords. No database container is started.
 2. Validate the exact commit, successful CI and allowed digest.
 3. Pull the immutable image and verify its commit/source labels.
 4. Create a release directory with the audited server template.
-5. Run migrations with the migration identity while the previous API remains.
-6. Switch the current release, start API/gateway and wait for readiness.
-7. Check that readiness reports the expected application commit.
-8. Record the release and preceding release in a private operator state file.
+5. For an enabled dialer, refuse active calls, briefly close new call admission,
+   and recheck for calls before migrations. Explicitly disabled calling stays off.
+6. Run migrations with the migration identity while the previous API remains.
+7. Switch the current release, start API/gateway and wait for readiness.
+8. Check the expected commit, then automatically restore previously enabled
+   calling using the installed root operator and its provider/storage checks.
+9. Record the release, preceding release and verified calling state.
+
+The deployer and calling operator share one exclusive deployment lock. The
+operator CLI cannot bypass that lock. The deployer uses the installed root-owned
+operator, not a script supplied by the application image. Rollback restores
+calling only on a healthy compatible release. If calling cannot be verified,
+the workflow fails and requires operator attention instead of reporting success.
 
 Staging may have a short application interruption during container replacement.
 No production deployment target is configured in this repository.
