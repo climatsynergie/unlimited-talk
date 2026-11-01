@@ -98,13 +98,11 @@ test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", a
   ).toHaveAttribute("aria-current", "page");
   expect(await page.evaluate(() => window.audioProof.requests.length)).toBe(0);
   await expect(
-    page.getByText(
-      "Les appels seront disponibles après leur activation pour votre compte.",
-      {
-        exact: false,
-      },
-    ),
+    page.getByText("Les appels ne sont pas encore activés.", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Appeler", exact: true }),
+  ).toBeDisabled();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
