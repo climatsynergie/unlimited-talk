@@ -10,6 +10,7 @@ import { Callbacks } from "./Callbacks";
 import { Calendar } from "./Calendar";
 import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
+import { Conversations } from "./Conversations";
 import { Workstation } from "./Workstation";
 import { PhoneBar, PhoneProvider, usePhoneController } from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
@@ -24,6 +25,7 @@ type Page =
   | "imports"
   | "campaigns"
   | "calendar"
+  | "conversations"
   | "workstation"
   | "callbacks"
   | "inbound";
@@ -40,6 +42,7 @@ const PATHS: Record<Page, string> = {
   callbacks: "/rappels",
   inbound: "/appels-entrants",
   workstation: "/poste-appel",
+  conversations: "/conversations",
 };
 function currentPage(): Page | null {
   return (
@@ -270,13 +273,15 @@ function Workspace({
       | "campaign"
       | "calendar"
       | "clock"
-      | "headset";
+      | "headset"
+      | "conversation";
   }[] = admin
     ? [
         { page: "campaigns", title: "Campagnes", icon: "campaign" },
         { page: "calendar", title: "Calendrier", icon: "calendar" },
         { page: "callbacks", title: "Rappels", icon: "clock" },
         { page: "workstation", title: "Poste d’appel", icon: "headset" },
+        { page: "conversations", title: "Conversations", icon: "conversation" },
         { page: "inbound", title: "Appels entrants", icon: "headset" },
         { page: "contacts", title: "Contacts", icon: "users" },
         { page: "imports", title: "Imports CSV", icon: "mail" },
@@ -289,6 +294,7 @@ function Workspace({
         { page: "calendar", title: "Calendrier", icon: "calendar" },
         { page: "callbacks", title: "Rappels", icon: "clock" },
         { page: "workstation", title: "Poste d’appel", icon: "headset" },
+        { page: "conversations", title: "Conversations", icon: "conversation" },
         { page: "inbound", title: "Appels entrants", icon: "headset" },
         { page: "home", title: "Mon espace", icon: "home" },
       ];
@@ -382,18 +388,22 @@ function Workspace({
         <PhoneBar />
         <main id="main" className="workspace-main">
           {error ? <Notice error>{error}</Notice> : null}
-          <div className="reauth-note">
-            <span>
-              Besoin de confirmer votre identité pour une action sensible ?
-            </span>
-            <button
-              type="button"
-              className="text-button"
-              onClick={reauthenticate}
-            >
-              Se reconnecter
-            </button>
-          </div>
+          {selected === "account" ||
+          (admin &&
+            ["users", "invitations", "audit", "inbound"].includes(selected)) ? (
+            <div className="reauth-note">
+              <span>
+                Besoin de confirmer votre identité pour une action sensible ?
+              </span>
+              <button
+                type="button"
+                className="text-button"
+                onClick={reauthenticate}
+              >
+                Se reconnecter
+              </button>
+            </div>
+          ) : null}
           {selected === "campaigns" ? (
             <Campaigns admin={admin} />
           ) : selected === "inbound" ? (
@@ -401,7 +411,12 @@ function Workspace({
           ) : selected === "callbacks" ? (
             <Callbacks admin={admin} userId={identity.user.id} />
           ) : selected === "workstation" ? (
-            <Workstation admin={admin} />
+            <Workstation
+              admin={admin}
+              onConversations={() => navigate("conversations")}
+            />
+          ) : selected === "conversations" ? (
+            <Conversations admin={admin} />
           ) : selected === "calendar" ? (
             <Calendar userId={identity.user.id} />
           ) : selected === "contacts" ? (

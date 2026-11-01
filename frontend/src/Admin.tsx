@@ -732,6 +732,7 @@ const ACTIONS: Record<string, string> = {
   "campaign.updated": "Réglages de campagne modifiés",
   "campaign.agent_assigned": "Agent attribué à une campagne",
   "campaign.agent_unassigned": "Agent retiré d’une campagne",
+  "campaign.team_updated": "Équipe de campagne mise à jour",
   "campaign.stage_created": "Étape de pipeline créée",
   "campaign.stage_updated": "Étape de pipeline modifiée",
   "campaign.stages_reordered": "Ordre du pipeline modifié",

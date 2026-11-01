@@ -30,9 +30,11 @@ export function Icon({
     | "campaign"
     | "calendar"
     | "clock"
-    | "headset";
+    | "headset"
+    | "conversation";
 }) {
   const paths = {
+    conversation: "M4 4h16v12H9l-5 4V4zM8 8h8M8 12h5",
     headset:
       "M4 14v-2a8 8 0 0 1 16 0v2M4 13h3v7H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1zM17 13h3a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-3z",
     clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 7v5l3 2",

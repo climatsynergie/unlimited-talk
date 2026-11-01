@@ -72,7 +72,7 @@ test("archive en attente, actualisation et lecture privée sans préchargement",
       headers: { "Cache-Control": "no-store" },
     });
   });
-  await page.goto("/poste-appel");
+  await page.goto("/conversations");
   await expect(
     page.getByText("Enregistrement : sauvegarde privée en cours.", {
       exact: true,
@@ -149,7 +149,7 @@ test("échec de lecture et reprise explicite avec la même archive", async ({
       });
     else await route.fulfill({ contentType: "audio/wav", body: wav() });
   });
-  await page.goto("/poste-appel");
+  await page.goto("/conversations");
   await expect(page.locator("audio")).toBeVisible();
   await page
     .getByRole("button", { name: "Actualiser les appels", exact: true })
@@ -220,7 +220,7 @@ test("plus de 200 appels : pages bornées, recherche et accès à la conversatio
       },
     });
   });
-  await page.goto("/poste-appel");
+  await page.goto("/conversations");
   await expect(
     page.getByRole("heading", { name: "1. Tester le microphone", exact: true }),
   ).not.toBeVisible();

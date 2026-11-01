@@ -167,6 +167,10 @@ test("un compte agent dispose du téléphone et garde la conversation pendant la
   await expect(
     page.getByRole("heading", { name: "Appels en cours", exact: true }),
   ).toHaveCount(0);
+  await page.getByRole("link", { name: "Conversations", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Historique des appels", exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "Calendrier", exact: true }).click();
   await expect(
     page.getByRole("complementary", { name: "Appel en cours", exact: true }),
@@ -405,12 +409,13 @@ test("la lecture d’une archive est arrêtée avant de connecter l’appel", as
   await page.route("**" + audio, (route) =>
     route.fulfill({ contentType: "audio/wav", body: silentWav() }),
   );
-  await page.goto("/poste-appel");
+  await page.goto("/conversations");
   const player = await page.locator("audio").elementHandle();
   await player!.evaluate((node: HTMLAudioElement) => {
     node.loop = true;
     return node.play();
   });
+  await page.getByRole("link", { name: "Poste d’appel", exact: true }).click();
   await page
     .getByLabel("Numéro à appeler", { exact: true })
     .fill("+1 (416) 555-0101");

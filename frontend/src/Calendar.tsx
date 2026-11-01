@@ -1,11 +1,11 @@
-import { day, local, shift, when, Timezone } from "./Scheduling";
-import { useEffect, useRef, useState } from "react";
+import { local, when, Timezone } from "./Scheduling";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
 import { Modal, Notice, Submit } from "./ui";
 
-type Status = "booked" | "completed" | "cancelled" | "no_show";
-type Appointment = {
+export type Status = "booked" | "completed" | "cancelled" | "no_show";
+export type Appointment = {
   id: string;
   campaign_id: string;
   contact_id: string;
@@ -47,14 +47,6 @@ const statuses: Record<Status, string> = {
   cancelled: "Annulé",
   no_show: "Absent",
 };
-function occursOn(appointment: Appointment, value: string, zone: string) {
-  const lastInstant = new Date(
-    Date.parse(appointment.ends_at) - 1,
-  ).toISOString();
-  return (
-    day(appointment.starts_at, zone) <= value && day(lastInstant, zone) >= value
-  );
-}
 export function AppointmentForm({
   contact,
   appointment,
@@ -265,7 +257,7 @@ export function AppointmentForm({
   );
 }
 
-function AppointmentDetail({
+export function AppointmentDetail({
   id,
   onClose,
   onChanged,
@@ -464,249 +456,11 @@ function AppointmentDetail({
   );
 }
 
+const VisualCalendar = lazy(() => import("./VisualCalendar"));
 export function Calendar({ userId }: { userId: string }) {
-  const [start, setStart] = useState(() => {
-    const today = day(new Date().toISOString(), "America/Toronto");
-    return shift(
-      today,
-      -((new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7),
-    );
-  });
-  const [zone, setZone] = useState("America/Toronto");
-  const [mine, setMine] = useState(false);
-  const [status, setStatus] = useState("upcoming");
-  const [view, setView] = useState("agenda");
-  const [items, setItems] = useState<Appointment[]>([]);
-  const [more, setMore] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [revision, setRevision] = useState(0);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    async function load() {
-      const dates = await Promise.all(
-        [start, shift(start, 7)].map((d) =>
-          api<{ options: Choice[] }>(
-            `/calendar/resolve?${new URLSearchParams({ local_start: d + "T00:00", timezone: zone })}`,
-            { signal: controller.signal },
-          ),
-        ),
-      );
-      if (dates.some((d) => !d.options.length))
-        throw new Error(
-          "Le début de cette période n’existe pas dans ce fuseau. Choisissez un autre fuseau.",
-        );
-      const params = new URLSearchParams({
-        start: dates[0].options[0].starts_at,
-        end: dates[1].options[0].starts_at,
-        offset: String(offset),
-      });
-      if (mine) params.set("creator", userId);
-      if (status === "upcoming") params.set("exclude_cancelled", "true");
-      if (status !== "upcoming" && status !== "all")
-        params.set("status", status);
-      const r = await api<{ items: Appointment[]; has_more: boolean }>(
-        `/calendar?${params}`,
-        { signal: controller.signal },
-      );
-      setItems(r.items);
-      setMore(r.has_more);
-    }
-    load()
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(message(e));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [start, zone, mine, status, offset, revision, userId]);
-  const visible = items.filter(
-    (a) => status !== "upcoming" || a.status !== "cancelled",
-  );
   return (
-    <section>
-      <div className="page-heading">
-        <div>
-          <h1>Calendrier</h1>
-          <p>Unlimited Talks — rendez-vous partagés de l’équipe.</p>
-        </div>
-      </div>
-      <div className="calendar-controls">
-        <label>
-          Semaine à partir du
-          <input
-            type="date"
-            required
-            value={start}
-            min="2000-01-01"
-            max="2100-12-24"
-            onChange={(e) => {
-              if (e.target.value) {
-                setStart(e.target.value);
-                setOffset(0);
-              }
-            }}
-          />
-        </label>
-        <Timezone
-          value={zone}
-          onChange={(v) => {
-            setZone(v);
-            setOffset(0);
-          }}
-        />
-        <label>
-          Agent
-          <select
-            value={mine ? "mine" : "all"}
-            onChange={(e) => {
-              setMine(e.target.value === "mine");
-              setOffset(0);
-            }}
-          >
-            <option value="all">Tous les agents</option>
-            <option value="mine">Mes rendez-vous</option>
-          </select>
-        </label>
-        <label>
-          Statut
-          <select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setOffset(0);
-            }}
-          >
-            <option value="upcoming">Tous sauf annulés</option>
-            <option value="all">Tous les statuts</option>
-            {Object.entries(statuses).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Affichage
-          <select value={view} onChange={(e) => setView(e.target.value)}>
-            <option value="agenda">Agenda</option>
-            <option value="week">Semaine</option>
-          </select>
-        </label>
-      </div>
-      <div className="actions">
-        <button
-          className="button secondary"
-          onClick={() => {
-            setStart(shift(start, -7));
-            setOffset(0);
-          }}
-        >
-          Semaine précédente
-        </button>
-        <button
-          className="button secondary"
-          onClick={() => {
-            setStart(shift(start, 7));
-            setOffset(0);
-          }}
-        >
-          Semaine suivante
-        </button>
-        <button
-          className="button secondary"
-          onClick={() => setRevision((n) => n + 1)}
-        >
-          Actualiser
-        </button>
-      </div>
-      <p>
-        Pour prendre rendez-vous, ouvrez un contact dans sa campagne et
-        choisissez « Prendre rendez-vous ».
-      </p>
-      {error ? <Notice error>{error}</Notice> : null}
-      {loading ? (
-        <p role="status">Chargement des rendez-vous…</p>
-      ) : error ? null : (
-        <>
-          <div
-            className={view === "week" ? "calendar-week" : "calendar-agenda"}
-          >
-            {Array.from({ length: 7 }, (_, i) => shift(start, i)).map((d) => (
-              <section key={d} className="calendar-day">
-                <h2>
-                  {new Intl.DateTimeFormat("fr-CA", {
-                    dateStyle: "full",
-                    timeZone: "UTC",
-                  }).format(new Date(d + "T12:00:00Z"))}
-                </h2>
-                {visible
-                  .filter((a) => occursOn(a, d, zone))
-                  .map((a) => (
-                    <button
-                      className={`appointment-card status-${a.status}`}
-                      key={a.id}
-                      onClick={() => setSelected(a.id)}
-                    >
-                      <strong>
-                        {when(a.starts_at, zone)} —{" "}
-                        {new Intl.DateTimeFormat("fr-CA", {
-                          timeZone: zone,
-                          timeStyle: "short",
-                        }).format(new Date(a.ends_at))}
-                      </strong>
-                      <span>
-                        {a.profile.display_name ||
-                          [a.profile.first_name, a.profile.last_name]
-                            .filter(Boolean)
-                            .join(" ") ||
-                          a.phone}
-                      </span>
-                      <span>
-                        {a.campaign_name} · {a.creator_name}
-                      </span>
-                      <small>{statuses[a.status]}</small>
-                    </button>
-                  ))}
-                {!visible.some((a) => occursOn(a, d, zone)) ? (
-                  <p className="subtle">Aucun rendez-vous.</p>
-                ) : null}
-              </section>
-            ))}
-          </div>
-          <div className="actions">
-            <button
-              className="button secondary"
-              disabled={!offset || loading}
-              onClick={() => setOffset((n) => Math.max(0, n - 100))}
-            >
-              Résultats précédents
-            </button>
-            <button
-              className="button secondary"
-              disabled={!more || loading}
-              onClick={() => setOffset((n) => n + 100)}
-            >
-              Résultats suivants
-            </button>
-          </div>
-          {more ? (
-            <p>D’autres rendez-vous sont disponibles sur la page suivante.</p>
-          ) : null}
-        </>
-      )}
-      {selected ? (
-        <AppointmentDetail
-          id={selected}
-          onClose={() => setSelected(null)}
-          onChanged={() => setRevision((n) => n + 1)}
-        />
-      ) : null}
-    </section>
+    <Suspense fallback={<p role="status">Ouverture du calendrier…</p>}>
+      <VisualCalendar userId={userId} />
+    </Suspense>
   );
 }

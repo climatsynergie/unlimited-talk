@@ -1874,41 +1874,602 @@ th {
   margin: 0 0 14px;
   color: #302647;
 }
-.appointment-card {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  text-align: left;
-  width: 100%;
-  border: 1px solid #d7d2ef;
-  border-left: 4px solid #5145cd;
-  border-radius: 8px;
-  background: #f8f7ff;
-  color: #302647;
-  padding: 14px;
-  margin: 10px 0;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.appointment-card span,
-.appointment-card small {
-  color: #665b75;
-}
-.appointment-card:hover {
-  background: #efecff;
-}
-.appointment-card.status-cancelled {
-  border-left-color: #b23555;
-  background: #fff4f6;
-}
-.appointment-card.status-completed {
-  border-left-color: #237650;
-}
-.appointment-card.status-no_show {
-  border-left-color: #966000;
-}
 .appointment-notes {
   white-space: pre-wrap;
+}
+
+/* Team settings */
+dialog:has(.campaign-settings-shell) {
+  max-width: 940px;
+}
+dialog[open]:has(.campaign-settings-shell) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+dialog:has(.campaign-settings-shell) > .modal-heading {
+  flex-shrink: 0;
+}
+.campaign-settings-shell {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.campaign-settings-shell > [hidden] {
+  display: none;
+}
+.campaign-settings-shell > section {
+  min-height: 0;
+  overflow-y: auto;
+}
+.campaign-team-panel,
+.campaign-team {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.campaign-settings-summary,
+.settings-tabs,
+.team-summary,
+.team-search,
+.team-filter-row,
+.team-pagination,
+.team-savebar {
+  flex-shrink: 0;
+}
+.campaign-team .team-agent-grid {
+  flex: 1 1 auto;
+  min-height: 80px;
+}
+.campaign-settings-summary {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 4px 0 22px;
+}
+.campaign-settings-summary h3 {
+  margin: 0 0 5px;
+  color: #302647;
+  font-size: 20px;
+}
+.campaign-settings-summary p {
+  margin: 0;
+  font-size: 13px;
+  color: #6b6079;
+}
+.campaign-settings-mark {
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+  background: #eee8ff;
+  color: #6943c0;
+  display: grid;
+  place-items: center;
+  font-size: 21px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.segmented-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: #f3f1f8;
+  border: 1px solid #e8e3ef;
+  border-radius: 10px;
+  padding: 4px;
+}
+.segmented-control button {
+  color: #665773;
+  padding: 8px 13px;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  min-height: 36px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.segmented-control button[aria-pressed="true"] {
+  background: #fff;
+  color: #59359a;
+  font-weight: 700;
+  box-shadow: 0 1px 5px #38225112;
+}
+.segmented-control button:focus-visible {
+  outline: 2px solid #7145b6;
+  outline-offset: 1px;
+}
+.settings-tabs {
+  display: flex;
+  margin-bottom: 24px;
+}
+.settings-tabs button {
+  flex: 1;
+}
+.team-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.team-summary h3 {
+  margin: 5px 0 7px;
+  color: #302647;
+  font-size: 18px;
+}
+.team-summary p {
+  font-size: 12px;
+  color: #6b6079;
+  margin: 0;
+}
+.team-count {
+  background: #eee8ff;
+  color: #59359a;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.team-search {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  color: #62556f;
+  font-weight: 600;
+}
+.team-search input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #dfd7e9;
+  border-radius: 9px;
+  min-height: 44px;
+  padding: 11px 13px;
+  font: inherit;
+  color: #302647;
+  background: #fff;
+}
+.team-filter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.team-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 410px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  margin: -3px;
+  scrollbar-width: thin;
+}
+.team-agent {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid #e6e0ec;
+  border-radius: 11px;
+  padding: 15px 12px;
+  min-width: 0;
+  cursor: pointer;
+  background: #fff;
+}
+.team-agent:hover {
+  border-color: #b69bdc;
+}
+.team-agent.is-selected {
+  border-color: #a98bd5;
+  background: #f8f5ff;
+}
+.team-agent:has(input:focus-visible) {
+  outline: 2px solid #7145b6;
+  outline-offset: 1px;
+}
+.team-agent input {
+  accent-color: #7145b6;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+.team-agent-avatar {
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border-radius: 50%;
+  background: #eee8f7;
+  color: #6c4c8e;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.team-agent-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.team-agent-info strong {
+  font-size: 13px;
+  color: #302647;
+}
+.team-agent-info small {
+  font-size: 11px;
+  color: #665773;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-agent-state {
+  font-size: 10px;
+  color: #5c4976;
+}
+.team-agent-state.inactive {
+  color: #a92e4a;
+}
+.team-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 32px 12px;
+  font-size: 13px;
+}
+.team-savebar,
+.team-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-top: 18px;
+  margin-top: 20px;
+  border-top: 1px solid #ebe5f1;
+}
+.team-savebar > span {
+  font-size: 12px;
+  color: #635471;
+}
+.team-savebar .actions,
+.team-pagination .actions {
+  margin: 0;
+}
+.campaign-general-settings,
+.campaign-pipeline-settings {
+  color: #62556f;
+}
+.campaign-general-settings h3,
+.campaign-pipeline-settings h3 {
+  color: #302647;
+}
+.workstation-history-link {
+  margin-block: 20px;
+}
+
+/* Shared visual calendar */
+.calendar-workspace {
+  display: grid;
+  grid-template-columns: 225px minmax(0, 1fr);
+  border: 1px solid #e5dfef;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 4px 24px #3e255908;
+  overflow: hidden;
+}
+.calendar-sidebar {
+  background: #fbfaff;
+  border-right: 1px solid #ebe5f1;
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 21px;
+  min-width: 0;
+}
+.calendar-owner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e9e2f0;
+}
+.calendar-owner > span {
+  background: #7350bc;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 11px;
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.calendar-owner div {
+  display: grid;
+  gap: 5px;
+}
+.calendar-owner strong {
+  font-size: 13px;
+  color: #302647;
+}
+.calendar-owner small {
+  color: #6b6079;
+  font-size: 11px;
+}
+.calendar-sidebar label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #63556f;
+  font-weight: 600;
+  min-width: 0;
+}
+.calendar-sidebar input,
+.calendar-sidebar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #e1d9eb;
+  border-radius: 8px;
+  padding: 9px;
+  font: inherit;
+  font-weight: 400;
+  color: #453451;
+  background: #fff;
+}
+.calendar-legend {
+  display: grid;
+  gap: 13px;
+  padding-top: 7px;
+}
+.calendar-legend h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #776987;
+  margin: 0 0 4px;
+}
+.calendar-legend > span {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: #62556f;
+}
+.calendar-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: #7953cc;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.calendar-dot.status-completed {
+  background: #198664;
+}
+.calendar-dot.status-cancelled {
+  background: #7b8799;
+}
+.calendar-dot.status-no_show {
+  background: #c73966;
+}
+.calendar-booking-help {
+  font-size: 11px;
+  color: #6b6079;
+  line-height: 1.7;
+  margin: auto 0 0;
+  padding-top: 15px;
+}
+.calendar-main {
+  min-width: 0;
+  padding: 20px;
+}
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.calendar-period {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 230px;
+  min-width: 0;
+}
+.calendar-period h2 {
+  margin: 0;
+  font-size: 17px;
+  color: #302647;
+  line-height: 1.5;
+}
+.calendar-navigation {
+  display: flex;
+  flex-shrink: 0;
+  gap: 5px;
+}
+.calendar-navigation button {
+  display: grid;
+  place-items: center;
+  min-width: 33px;
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 24px;
+  border: 1px solid #e5deed;
+  border-radius: 8px;
+  background: #fff;
+  color: #655171;
+  cursor: pointer;
+}
+.calendar-toolbar .button {
+  min-height: 36px;
+  padding: 9px 13px;
+  font-size: 11px;
+}
+.calendar-views {
+  margin-left: auto;
+}
+.calendar-load-status {
+  min-height: 39px;
+  padding-top: 13px;
+  color: #6b6079;
+  font-size: 11px;
+}
+.calendar-canvas {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid #e8e1ef;
+  border-radius: 10px;
+  --fc-monarch-primary: #7350bc;
+  --fc-monarch-primary-foreground: #fff;
+  --fc-monarch-background: #fff;
+  --fc-monarch-foreground: #44344f;
+  --fc-monarch-muted-foreground: #6b6079;
+  --fc-monarch-faint-foreground: #71667f;
+  --fc-monarch-outline: #7350bc;
+}
+.calendar-canvas.view-week {
+  overflow-x: auto;
+}
+.calendar-canvas.view-week > div {
+  min-width: 680px;
+}
+.calendar-canvas .calendar-appointment {
+  border-radius: 6px;
+  border-left: 3px solid #7953cc;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  font-family: inherit;
+}
+.calendar-canvas .calendar-appointment.status-completed {
+  border-left-color: #198664;
+}
+.calendar-canvas .calendar-appointment.status-cancelled {
+  border-left-color: #7b8799;
+}
+.calendar-canvas .calendar-appointment.status-no_show {
+  border-left-color: #c73966;
+}
+.calendar-event-content {
+  min-width: 0;
+  max-height: 100%;
+  padding: 3px 4px;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+  line-height: 1.25;
+}
+.calendar-event-content strong {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calendar-event-content small,
+.calendar-event-time,
+.calendar-event-status {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-event-status {
+  font-weight: 600;
+}
+@media (max-width: 1150px) {
+  .calendar-workspace {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .calendar-sidebar {
+    padding: 20px 13px;
+  }
+  .calendar-main {
+    padding: 15px;
+  }
+  .calendar-views {
+    margin-left: 0;
+  }
+}
+@media (max-width: 760px) {
+  .team-agent-grid {
+    grid-template-columns: 1fr;
+    max-height: 390px;
+  }
+  .team-summary {
+    align-items: flex-start;
+  }
+  .team-savebar .actions {
+    width: 100%;
+  }
+  .team-savebar .button {
+    flex: 1;
+  }
+  .calendar-workspace {
+    grid-template-columns: 1fr;
+  }
+  .calendar-sidebar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-right: 0;
+    border-bottom: 1px solid #e7dfef;
+    gap: 14px;
+    padding: 17px;
+  }
+  .calendar-owner {
+    grid-column: 1 / -1;
+    padding-bottom: 12px;
+  }
+  .calendar-legend {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 11px;
+  }
+  .calendar-legend h2 {
+    width: 100%;
+  }
+  .calendar-legend > span {
+    font-size: 11px;
+  }
+  .calendar-booking-help {
+    grid-column: 1 / -1;
+    padding-top: 0;
+    margin: 0;
+  }
+  .calendar-main {
+    padding: 13px 9px;
+  }
+  .calendar-period h2 {
+    font-size: 15px;
+  }
+  .calendar-period {
+    flex-basis: calc(100% - 100px);
+    gap: 7px;
+  }
+  .calendar-toolbar > .button {
+    margin-left: auto;
+  }
+  .calendar-views {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .calendar-views button {
+    flex: 1;
+  }
+}
+@media (max-height: 650px) {
+  dialog[open]:has(.campaign-settings-shell) {
+    display: block;
+    overflow-y: auto;
+  }
+  .campaign-team .team-agent-grid {
+    max-height: 240px;
+    flex: none;
+  }
 }
 .appointment-form fieldset {
   display: grid;

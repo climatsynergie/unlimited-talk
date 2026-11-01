@@ -65,28 +65,13 @@ test("une fin à minuit appartient seulement au jour précédent", async ({
     await route.fulfill({ json: body });
   });
   await page.goto("/calendrier");
-  await page
-    .getByLabel("Semaine à partir du", { exact: true })
-    .fill("2026-11-02");
-  const monday = page.locator(".calendar-day").filter({
-    has: page.getByRole("heading", {
-      name: "lundi 2 novembre 2026",
-      exact: true,
-    }),
-  });
-  const tuesday = page.locator(".calendar-day").filter({
-    has: page.getByRole("heading", {
-      name: "mardi 3 novembre 2026",
-      exact: true,
-    }),
-  });
+  await page.getByLabel("Aller à la date", { exact: true }).fill("2026-11-02");
   await expect(
-    monday.getByRole("button").filter({ hasText: "Fin de journée" }),
+    page.locator(".appointment-card").filter({ hasText: "Fin de journée" }),
   ).toHaveCount(1);
-  await expect(tuesday.getByRole("button")).toHaveCount(0);
   end = "2026-11-03T05:30:00Z";
   await page.getByRole("button", { name: "Actualiser", exact: true }).click();
   await expect(
-    tuesday.getByRole("button").filter({ hasText: "Fin de journée" }),
-  ).toHaveCount(1);
+    page.locator(".appointment-card").filter({ hasText: "Fin de journée" }),
+  ).toHaveCount(2);
 });

@@ -5,6 +5,7 @@ import { CallbackForm } from "./Callbacks";
 import { AppointmentForm } from "./Calendar";
 import { Field, Modal, Notice, Submit } from "./ui";
 import { usePhone } from "./Phone";
+import { CampaignTeam } from "./CampaignTeam";
 import { CallingSettingsDialog } from "./CallingSettings";
 
 type Campaign = {
@@ -37,13 +38,6 @@ type Stage = {
   items: Card[];
 };
 type Board = { campaign: Campaign; stages: Stage[] };
-type Agent = {
-  id: string;
-  display_name: string;
-  email: string;
-  is_active: boolean;
-  assigned: boolean;
-};
 type Note = {
   id: string;
   content: string;
@@ -627,38 +621,19 @@ function Settings({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [offset, setOffset] = useState(0);
-  const [more, setMore] = useState(false);
+  const [tab, setTab] = useState("team");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [edit, setEdit] = useState(false);
   const [editingStage, setEditingStage] = useState<Stage | null | undefined>(
     undefined,
   );
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    const abort = new AbortController();
-    api<{ items: Agent[]; has_more: boolean }>(
-      `/campaigns/${campaign.id}/agents?offset=${offset}`,
-      { signal: abort.signal },
-    )
-      .then((r) => {
-        setAgents(r.items);
-        setMore(r.has_more);
-      })
-      .catch((e) => {
-        if (!abort.signal.aborted) setError(message(e));
-      });
-    return () => abort.abort();
-  }, [campaign.id, offset, revision]);
   async function mutate(path: string, method: string, body?: unknown) {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
       await api(`/campaigns/${campaign.id}${path}`, { method, body });
-      setRevision((n) => n + 1);
       onChanged();
       return true;
     } catch (e) {
@@ -676,130 +651,121 @@ function Settings({
   return (
     <Modal title="Réglages de la campagne" onClose={onClose} busy={busy}>
       {error ? <Notice error>{error}</Notice> : null}
-      <p>
-        {campaign.name} · {campaign.timezone}
-      </p>
-      <button
-        className="button secondary"
-        onClick={() => setEdit(true)}
-        disabled={busy}
-      >
-        Modifier le nom, le fuseau ou l’état
-      </button>
-      <h3>Agents attribués</h3>
-      <div className="campaign-agent-list">
-        {agents.map((agent) => (
-          <label key={agent.id}>
-            <input
-              type="checkbox"
-              checked={agent.assigned}
-              disabled={
-                busy ||
-                (!agent.is_active && !agent.assigned) ||
-                !campaign.is_active
-              }
-              onChange={async (e) => {
-                const checked = e.target.checked;
-                setAgents((list) =>
-                  list.map((item) =>
-                    item.id === agent.id
-                      ? { ...item, assigned: checked }
-                      : item,
-                  ),
-                );
-                const saved = await mutate(`/agents/${agent.id}`, "PUT", {
-                  is_active: checked,
-                });
-                if (!saved) {
-                  setAgents((list) =>
-                    list.map((item) =>
-                      item.id === agent.id
-                        ? { ...item, assigned: agent.assigned }
-                        : item,
-                    ),
-                  );
-                  setRevision((n) => n + 1);
-                }
-              }}
-            />
-            <span>
-              {agent.display_name}
-              <small>
-                {agent.email}
-                {!agent.is_active ? " · Compte désactivé" : ""}
-              </small>
-            </span>
-          </label>
-        ))}
-      </div>
-      {!agents.length ? <p>Aucun compte agent disponible.</p> : null}
-      <div className="actions">
-        <button
-          className="button secondary"
-          disabled={busy || !offset}
-          onClick={() => setOffset((n) => Math.max(0, n - 50))}
+      <div className="campaign-settings-shell">
+        <div className="campaign-settings-summary">
+          <span className="campaign-settings-mark" aria-hidden="true">
+            {campaign.name.slice(0, 1).toUpperCase()}
+          </span>
+          <div>
+            <h3>{campaign.name}</h3>
+            <p>
+              {campaign.timezone.replace("America/", "").replaceAll("_", " ")} ·{" "}
+              {campaign.is_active ? "Campagne active" : "Campagne archivée"}
+            </p>
+          </div>
+        </div>
+        <div
+          className="segmented-control settings-tabs"
+          aria-label="Rubriques des réglages"
         >
-          Agents précédents
-        </button>
-        <button
-          className="button secondary"
-          disabled={busy || !more}
-          onClick={() => setOffset((n) => n + 50)}
+          {[
+            ["team", "Équipe"],
+            ["pipeline", "Pipeline"],
+            ["general", "Général"],
+          ].map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              disabled={busy}
+              aria-pressed={tab === value}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div hidden={tab !== "team"} className="campaign-team-panel">
+          <CampaignTeam
+            campaignId={campaign.id}
+            active={campaign.is_active}
+            onChanged={onChanged}
+            onBusyChange={setBusy}
+          />
+        </div>
+        <section
+          hidden={tab !== "general"}
+          className="campaign-general-settings"
         >
-          Agents suivants
-        </button>
+          <h3>Informations de la campagne</h3>
+          <p>
+            {campaign.description ||
+              "Ajoutez une description pour présenter cette campagne à votre équipe."}
+          </p>
+          <button
+            className="button secondary"
+            onClick={() => setEdit(true)}
+            disabled={busy}
+          >
+            Modifier le nom, le fuseau ou l’état
+          </button>
+        </section>
+        <section
+          hidden={tab !== "pipeline"}
+          className="campaign-pipeline-settings"
+        >
+          <h3>Étapes du pipeline</h3>
+          <ol className="stage-settings">
+            {stages.map((stage, index) => (
+              <li key={stage.id}>
+                <span>{stage.name}</span>
+                <div>
+                  <button
+                    className="text-button"
+                    disabled={busy || !campaign.is_active}
+                    onClick={() => setEditingStage(stage)}
+                  >
+                    Modifier
+                  </button>
+                  <button
+                    className="text-button"
+                    aria-label={`Monter ${stage.name}`}
+                    disabled={busy || index === 0 || !campaign.is_active}
+                    onClick={() => reorder(index, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="text-button"
+                    aria-label={`Descendre ${stage.name}`}
+                    disabled={
+                      busy || index === stages.length - 1 || !campaign.is_active
+                    }
+                    onClick={() => reorder(index, 1)}
+                  >
+                    ↓
+                  </button>
+                  {stage.kind === "custom" ? (
+                    <button
+                      className="text-button"
+                      disabled={busy || stage.total > 0 || !campaign.is_active}
+                      onClick={() => mutate(`/stages/${stage.id}`, "DELETE")}
+                    >
+                      Archiver
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <button
+            className="button secondary"
+            disabled={busy || !campaign.is_active}
+            onClick={() => setEditingStage(null)}
+          >
+            Ajouter une étape
+          </button>
+        </section>
       </div>
-      <h3>Étapes du pipeline</h3>
-      <ol className="stage-settings">
-        {stages.map((stage, index) => (
-          <li key={stage.id}>
-            <span>{stage.name}</span>
-            <div>
-              <button
-                className="text-button"
-                disabled={busy || !campaign.is_active}
-                onClick={() => setEditingStage(stage)}
-              >
-                Modifier
-              </button>
-              <button
-                className="text-button"
-                aria-label={`Monter ${stage.name}`}
-                disabled={busy || index === 0 || !campaign.is_active}
-                onClick={() => reorder(index, -1)}
-              >
-                ↑
-              </button>
-              <button
-                className="text-button"
-                aria-label={`Descendre ${stage.name}`}
-                disabled={
-                  busy || index === stages.length - 1 || !campaign.is_active
-                }
-                onClick={() => reorder(index, 1)}
-              >
-                ↓
-              </button>
-              {stage.kind === "custom" ? (
-                <button
-                  className="text-button"
-                  disabled={busy || stage.total > 0 || !campaign.is_active}
-                  onClick={() => mutate(`/stages/${stage.id}`, "DELETE")}
-                >
-                  Archiver
-                </button>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <button
-        className="button secondary"
-        disabled={busy || !campaign.is_active}
-        onClick={() => setEditingStage(null)}
-      >
-        Ajouter une étape
-      </button>
       {edit ? (
         <CampaignForm
           campaign={campaign}

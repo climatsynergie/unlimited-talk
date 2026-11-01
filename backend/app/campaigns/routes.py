@@ -59,6 +59,23 @@ class Assignment(Body):
     is_active:StrictBool
 
 
+class AgentChange(Assignment):
+    user_id:uuid.UUID
+    expected_assigned:StrictBool
+
+
+class TeamUpdate(Body):
+    request_id:uuid.UUID
+    changes:list[AgentChange]=Field(min_length=1,max_length=100)
+
+    @field_validator('changes')
+    @classmethod
+    def unique_agents(cls,value):
+        if len({c.user_id for c in value})!=len(value):
+            raise ValueError('Chaque agent doit figurer une seule fois.')
+        return value
+
+
 class Enroll(Body):
     request_id:uuid.UUID
     contact_ids:list[uuid.UUID]=Field(default_factory=list,max_length=500)
@@ -181,13 +198,60 @@ def cards(identifier:uuid.UUID,stage_id:uuid.UUID,request:Request,after:int=Quer
 
 
 @router.get('/{identifier}/agents')
-def agents(identifier:uuid.UUID,request:Request,offset:int=Query(0,ge=0,le=100000)):
+def agents(identifier:uuid.UUID,request:Request,offset:int=Query(0,ge=0,le=100000),
+           q:str=Query('',max_length=120),assigned:bool|None=None,active_only:bool=False):
     with request.app.state.engine.begin() as db:
         user=authenticate(db,request);service.administrator(user);service.access(db,user,identifier,allow_archived=True)
-        rows=query(db,'''SELECT u.id,u.display_name,u.email,u.is_active,coalesce(a.is_active,false) AS assigned
-            FROM staging.identity_users u LEFT JOIN staging.campaign_agents a ON a.user_id=u.id AND a.campaign_id=:id
-            WHERE u.role='agent' ORDER BY lower(u.display_name),u.id LIMIT 51 OFFSET :offset''',id=identifier,offset=offset).mappings().all()
-        return {'items':[dict(r) for r in rows[:50]],'has_more':len(rows)>50}
+        pattern='%'+q.strip().replace('!','!!').replace('%','!%').replace('_','!_')+'%'
+        source=''' FROM staging.identity_users u LEFT JOIN staging.campaign_agents a ON a.user_id=u.id AND a.campaign_id=:id
+            WHERE u.role='agent' AND (u.display_name ILIKE :pattern ESCAPE '!' OR u.email ILIKE :pattern ESCAPE '!')
+            AND (CAST(:assigned AS boolean) IS NULL OR coalesce(a.is_active,false)=:assigned)
+            AND (NOT :active_only OR u.is_active)'''
+        values=dict(id=identifier,pattern=pattern,assigned=assigned,active_only=active_only)
+        rows=query(db,'SELECT u.id,u.display_name,u.email,u.is_active,coalesce(a.is_active,false) AS assigned'+source+
+            ' ORDER BY lower(u.display_name),u.id LIMIT 51 OFFSET :offset',offset=offset,**values).mappings().all()
+        total=query(db,'SELECT count(*)'+source,**values).scalar_one()
+        count=query(db,"SELECT count(*) FROM staging.campaign_agents a JOIN staging.identity_users u ON u.id=a.user_id WHERE a.campaign_id=:id AND a.is_active AND u.role='agent'",id=identifier).scalar_one()
+        return {'items':[dict(r) for r in rows[:50]],'has_more':len(rows)>50,'total':total,'assigned_count':count}
+
+
+@router.put('/{identifier}/agents')
+def update_team(identifier:uuid.UUID,body:TeamUpdate,request:Request):
+    payload=dict(action='team.updated',**body.model_dump(mode='json'))
+    with request.app.state.engine.begin() as db:
+        user=authenticate(db,request);service.administrator(user)
+        # Calls authenticate their agent before taking the campaign lock. Lock
+        # every target user first too, so a running agent cannot deadlock with
+        # an administrator who is editing that campaign's team.
+        targets={change.user_id:query(db,"SELECT is_active FROM staging.identity_users WHERE id=:id AND role='agent' FOR SHARE",id=change.user_id).mappings().first()
+            for change in sorted(body.changes,key=lambda c:str(c.user_id))}
+        service.access(db,user,identifier,edit=True)
+        previous=service.replay(db,user,identifier,body.request_id,payload)
+        if previous is not None:return previous['result']
+        for change in body.changes:
+            target=targets[change.user_id]
+            if target is None or (change.is_active and not target['is_active']):
+                raise HTTPException(400,'Choisissez uniquement des comptes agents actifs pour les nouvelles attributions.')
+            assigned=bool(query(db,'SELECT is_active FROM staging.campaign_agents WHERE campaign_id=:campaign AND user_id=:id',
+                campaign=identifier,id=change.user_id).scalar_one_or_none())
+            if assigned!=change.expected_assigned:
+                raise HTTPException(409,'L’équipe a changé. Actualisez les agents avant d’enregistrer.')
+        for change in body.changes:
+            if change.is_active==change.expected_assigned:continue
+            if change.is_active:
+                query(db,'''INSERT INTO staging.campaign_agents(campaign_id,user_id,assigned_by) VALUES (:campaign,:target,:actor)
+                    ON CONFLICT(campaign_id,user_id) DO UPDATE SET is_active=true,assigned_by=excluded.assigned_by,assigned_at=now()''',
+                    campaign=identifier,target=change.user_id,actor=user['id'])
+            else:
+                query(db,'UPDATE staging.campaign_agents SET is_active=false WHERE campaign_id=:campaign AND user_id=:target',
+                    campaign=identifier,target=change.user_id)
+            service.event(db,user,identifier,'agent.assigned' if change.is_active else 'agent.unassigned',{'user_id':str(change.user_id)})
+        count=query(db,"SELECT count(*) FROM staging.campaign_agents a JOIN staging.identity_users u ON u.id=a.user_id WHERE a.campaign_id=:id AND a.is_active AND u.role='agent'",id=identifier).scalar_one()
+        result=dict(assigned_count=count)
+        service.event(db,user,identifier,'team.updated',dict(changes=payload['changes'],result=result),
+            request_id=body.request_id,request_hash=service.fingerprint(payload))
+        audit(db,user['id'],'campaign.team_updated',identifier)
+        return result
 
 
 @router.put('/{identifier}/agents/{user_id}')

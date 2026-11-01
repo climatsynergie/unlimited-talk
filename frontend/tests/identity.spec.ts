@@ -562,6 +562,15 @@ test("campagne, pipeline, agent attribué et notes partagées", async ({
       .getByRole("checkbox"),
   ).toBeChecked();
   await page
+    .getByRole("button", { name: "Enregistrer l’équipe", exact: true })
+    .click();
+  await expect(
+    page.getByText("L’équipe de la campagne a été enregistrée.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Pipeline", exact: true }).click();
+  await page
     .getByRole("button", { name: "Ajouter une étape", exact: true })
     .click();
   await page
@@ -685,9 +694,7 @@ test("calendrier partagé, réservation, modification et annulation", async ({
     page.getByRole("region", { name: "Étape RDV booké", exact: true }),
   ).toContainText("Émilie");
   await page.getByRole("link", { name: "Calendrier", exact: true }).click();
-  await page
-    .getByLabel("Semaine à partir du", { exact: true })
-    .fill("2026-11-02");
+  await page.getByLabel("Aller à la date", { exact: true }).fill("2026-11-02");
   const card = page
     .locator(".appointment-card")
     .filter({ hasText: "Émilie" })
@@ -739,9 +746,7 @@ test("calendrier partagé, réservation, modification et annulation", async ({
     .getByRole("combobox", { name: "Statut", exact: true })
     .selectOption("all");
   await expect(card).toBeVisible();
-  await page
-    .getByRole("combobox", { name: "Affichage", exact: true })
-    .selectOption("week");
+  await page.getByRole("button", { name: "Semaine", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await accessible(page);
   expect(

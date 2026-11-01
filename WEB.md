@@ -44,8 +44,8 @@ No Voice SDK token, call intent or provider request is issued by the equipment
 check. Calling remains disabled in the managed template until the operator
 explicitly enables the approved controlled test after browser delivery.
 
-The deployed archive delivery adds cursor-based call history and audio players to
-this workstation. It lists only calls authorized by the API, waits for a verified
+The Conversations page (`/conversations`) provides cursor-based call history and
+private audio players separately from the workstation. It lists only calls authorized by the API, waits for a verified
 private archive and fetches audio on user playback with `preload="none"`. A failed
 playback offers an explicit retry. It does not expose a provider/object-store URL
 or enable telephone calling. Its schema-8 runtime and private storage access are
@@ -175,3 +175,26 @@ image. The preceding identity backend image is used to verify rollback preserves
 accounts and migration state. A successful build is not proof of managed staging
 activation; verify the deployed revision and real HTTPS screens after dispatching
 the manual deployment. Business workflows remain separate milestones.
+
+
+## Team and calendar workspace
+
+Conversations has its own navigation entry. The global phone controller stays
+mounted during navigation; entering history recovers the server call state
+before allowing playback. Leaving the page releases its private audio player.
+
+Campaign settings separate Team, Pipeline and General sections. Team search and
+filters run on the server, with bounded 50-agent pages. A draft can span pages;
+up to 100 changes commit in one administrator-only, audited transaction. The
+request ID supports retry after an uncertain response. Expected assignment
+values reject concurrent edits rather than overwriting another administrator.
+
+The shared calendar lazily loads the MIT-licensed FullCalendar React component
+(7.1.3) with native named-timezone support. Month, week, day and agenda views
+share the existing appointment APIs and edit permissions. Status colors have
+text labels and accessible contrast. Events retain absolute start/end instants;
+calendar boundaries carry timezone offsets, including DST transitions. A
+midnight end is exclusive. Calendar pages fetch automatically up to 1,000 events;
+if more exist, the UI explicitly offers the next batch instead of silently
+hiding appointments. Visible calendars refresh every 30 seconds, preserving
+the existing view while background data loads.

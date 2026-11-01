@@ -180,6 +180,85 @@ remaining=admin.request('GET',A+'/cards?stage_id='+new_stage['id']+'&after='+new
 assert len({r['contact_id'] for r in [*new_stage['items'],*remaining['items']]})==new_stage['total']
 admin.request('POST',A+'/contacts',dict(request_id=str(uuid.uuid4()),contact_ids=[page_contacts[-1],str(uuid.uuid4())]),expected=400)
 admin.request('GET',A+'/contacts/'+page_contacts[-1],expected=404)
+# Team updates are atomic, idempotent and compare the displayed assignment.
+team=admin.request('POST','/api/campaigns',dict(name=prefix+' Équipe'),expected=201)
+T='/api/campaigns/'+team['id']
+batch=dict(request_id=str(uuid.uuid4()),changes=[dict(user_id=i,expected_assigned=False,is_active=True) for i in (id_a,id_b)])
+agent_a.request('PUT',T+'/agents',batch,expected=403)
+anonymous.request('PUT',T+'/agents',batch,expected=401)
+assert admin.request('PUT',T+'/agents',batch)['assigned_count']==2
+assert admin.request('PUT',T+'/agents',batch)['assigned_count']==2
+listed=admin.request('GET',T+'/agents?assigned=true')
+assert listed['total']==2 and listed['assigned_count']==2 and {r['id'] for r in listed['items']}=={id_a,id_b}
+agent_a.request('GET',T+'/agents',expected=403)
+email=agent_a.request('GET','/api/auth/me')['user']['email']
+from urllib.parse import urlencode
+found=admin.request('GET',T+'/agents?'+urlencode({'q':email}))
+assert found['total']==1 and found['items'][0]['id']==id_a
+for search in ('%', "' OR 1=1 --"):
+    assert admin.request('GET',T+'/agents?'+urlencode({'q':search}))['total']==0
+admin.request('PUT',T+'/agents',{**batch,'changes':batch['changes'][:1]},expected=409)
+admin.request('PUT',T+'/agents',dict(request_id=str(uuid.uuid4()),changes=[batch['changes'][0],batch['changes'][0]]),expected=422)
+bad=dict(request_id=str(uuid.uuid4()),changes=[dict(user_id=id_a,expected_assigned=True,is_active=False),dict(user_id=str(uuid.uuid4()),expected_assigned=False,is_active=True)])
+admin.request('PUT',T+'/agents',bad,expected=400)
+assert admin.request('GET',T+'/agents?assigned=true')['total']==2
+admin.request('PUT',T+'/agents',dict(request_id=str(uuid.uuid4()),changes=batch['changes']),expected=409)
+# An agent request holds its user row before entering the campaign. The team
+# editor must wait for that row without holding the campaign lock in reverse.
+assert code('''
+import threading,time,urllib.request,urllib.error
+engine=make_engine();result={}
+def change_team():
+    headers={'Origin':payload['origin'],'Content-Type':'application/json',
+        'Cookie':'; '.join(k+'='+v for k,v in payload['cookies'].items()),
+        'X-CSRF-Token':payload['cookies']['__Host-ut_csrf']}
+    request=urllib.request.Request('http://127.0.0.1:8000/api/campaigns/'+payload['campaign']+'/agents',
+        method='PUT',headers=headers,data=json.dumps(payload['body']).encode())
+    try:response=urllib.request.urlopen(request,timeout=8)
+    except urllib.error.HTTPError as error:response=error
+    with response:result['status']=response.status;response.read()
+try:
+    with engine.begin() as agent_request:
+        query(agent_request,'SELECT id FROM staging.identity_users WHERE id=:id FOR UPDATE',id=payload['agent'])
+        thread=threading.Thread(target=change_team,daemon=True);thread.start()
+        for attempt in range(100):
+            with engine.connect() as observer:
+                waiting=query(observer,"""SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                    WHERE usename=current_user AND pid<>pg_backend_pid() AND wait_event_type='Lock'
+                    AND query LIKE '%identity_users%' AND query LIKE '%FOR SHARE%')""").scalar_one()
+            if waiting:break
+            time.sleep(.02)
+        else:raise AssertionError('Team request did not reach the user lock')
+        query(agent_request,"SET LOCAL lock_timeout='2s'")
+        query(agent_request,'SELECT id FROM staging.campaigns WHERE id=:id FOR SHARE',id=payload['campaign'])
+    thread.join(8)
+    assert result.get('status')==200,'Team update failed while an agent was using the campaign'
+    print('true')
+finally:engine.dispose()
+''',dict(agent=id_b,campaign=team['id'],cookies=admin.cookies,origin=origin,
+    body=dict(request_id=str(uuid.uuid4()),changes=[dict(user_id=id_b,expected_assigned=True,is_active=True)])))
+second_admin=Browser();second_admin.cookies=code('''
+from app.identity.security import COOKIE,CSRF_COOKIE,new_token,digest,encryption_key
+identifier=uuid.uuid4();token=new_token();csrf=new_token()
+cipher=encryption_key(os.environ['IDENTITY_KEY_FILE'])
+with make_engine().begin() as db:
+    query(db,"INSERT INTO staging.identity_users(id,email,display_name,role,password_hash,mfa_secret) VALUES (:id,:email,'Second admin équipe','admin','unused',:secret)",id=identifier,email=str(identifier)+'@example.invalid',secret=cipher.encrypt(b'JBSWY3DPEHPK3PXP').decode())
+    query(db,"INSERT INTO staging.identity_sessions(token_hash,csrf_hash,user_id,mfa_verified,expires_at) VALUES (:token,:csrf,:id,true,now()+interval '1 hour')",token=digest(token),csrf=digest(csrf),id=identifier)
+print(json.dumps({COOKIE:token,CSRF_COOKIE:csrf}))
+''')
+def racing_team(browser):
+    try:
+        browser.request('PUT',T+'/agents',dict(request_id=str(uuid.uuid4()),changes=[dict(user_id=id_a,expected_assigned=True,is_active=False)]))
+        return 200
+    except AssertionError as error:
+        assert error.args[0][2]==409,error
+        return 409
+with ThreadPoolExecutor(max_workers=2) as pool:assert sorted(pool.map(racing_team,[admin,second_admin]))==[200,409]
+assert admin.request('GET',T+'/agents?assigned=true')['assigned_count']==1
+assert code('''with make_engine().connect() as db:
+    count=query(db,"SELECT count(*) FROM staging.campaign_events WHERE request_id=:id",id=payload).scalar_one()
+print(json.dumps(count))
+''',batch['request_id'])==1
 # Notes/events must remain append-only even for runtime SQL.
 code('''from sqlalchemy.exc import DBAPIError
 for table in ['contact_notes','campaign_events']:

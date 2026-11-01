@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, Notice } from "./ui";
-import { CallHistory } from "./CallHistory";
 import { PhonePanel, usePhone } from "./Phone";
 import { LiveCalls } from "./LiveCalls";
 import { AutoDialerPanel } from "./AutoDialer";
@@ -26,7 +25,13 @@ function audioError(error: unknown): string {
   return "Le test audio n’a pas pu démarrer. Vérifiez votre équipement et réessayez.";
 }
 
-export function Workstation({ admin }: { admin: boolean }) {
+export function Workstation({
+  admin,
+  onConversations,
+}: {
+  admin: boolean;
+  onConversations: () => void;
+}) {
   const { busy: mediaBusy, state: phone, controller } = usePhone();
   const calling = mediaBusy || phone.automaticRunning;
   const [microState, setMicroState] = useState<MicroState>("idle");
@@ -410,7 +415,12 @@ export function Workstation({ admin }: { admin: boolean }) {
           {heard ? <p className="audio-result">Écoute confirmée.</p> : null}
         </section>
       </div>
-      <CallHistory disabled={calling} admin={admin} />
+      <button
+        className="button secondary workstation-history-link"
+        onClick={onConversations}
+      >
+        Voir les conversations et les enregistrements
+      </button>
       {admin ? <LiveCalls /> : null}
     </>
   );
