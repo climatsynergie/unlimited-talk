@@ -31,8 +31,10 @@ engine = make_engine()
 with engine.connect() as db:
     assert query(db, "SELECT value FROM staging.environment_metadata WHERE key='data_policy'").scalar_one() == 'synthetic_only'
 
+# The migration sentinel at +14165550101 deliberately remains opted out. Do not
+# reuse that contact as the recipient for unrelated successful-call fixtures.
 profile = ControlledVoiceProfile('AC'+'a'*32, 'SK'+'b'*32, 'c'*32, 'AP'+'d'*32,
-    'webhooks_sharedkey_'+'e'*26, 'f'*32, 'https://voice.example.invalid', '+14165550100', '+14165550101')
+    'webhooks_sharedkey_'+'e'*26, 'f'*32, 'https://voice.example.invalid', '+14165550100', '+14165550901')
 base = 'http://127.0.0.1:18001'
 origin = os.environ['APP_ORIGIN']
 
