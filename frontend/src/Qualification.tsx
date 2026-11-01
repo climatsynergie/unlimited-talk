@@ -54,12 +54,14 @@ export function QualificationFields({
   onChange,
   required = false,
   disabled = false,
+  draftSaveAvailable = true,
 }: {
   schema: QualificationSchema;
   value: QualificationValue;
   onChange: (value: QualificationValue) => void;
   required?: boolean;
   disabled?: boolean;
+  draftSaveAvailable?: boolean;
 }) {
   function change(key: string, answer: string) {
     const answers = { ...value.answers, [key]: answer };
@@ -72,8 +74,10 @@ export function QualificationFields({
       <legend>Qualification du client</legend>
       <p className="subtle">
         Les champs marqués d’un astérisque sont obligatoires pour confirmer un
-        rendez-vous. Vous pouvez enregistrer une fiche incomplète pendant
-        l’appel.
+        rendez-vous.{" "}
+        {draftSaveAvailable
+          ? "Vous pouvez enregistrer une fiche incomplète pendant l’appel."
+          : "Les réponses sont enregistrées avec le rendez-vous."}
       </p>
       {Object.entries({
         logement: "Le logement",

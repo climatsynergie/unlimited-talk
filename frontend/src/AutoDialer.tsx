@@ -28,6 +28,7 @@ export function AutoDialerPanel({
   const [contact, setContact] = useState<{
     campaign: string;
     id: string;
+    call: string;
   } | null>(null);
   const [revision, setRevision] = useState(0);
   const lifetime = useRef(0);
@@ -110,25 +111,29 @@ export function AutoDialerPanel({
   const active = state.intent || state.lastIntent;
   const shownCampaign = contact?.campaign || active?.campaign_id;
   const shownContact = contact?.id || active?.contact_id;
+  const shownCall = contact?.call || active?.id;
   const editingContact = useCallback(
     (editing: boolean) => {
       setContact((previous) => {
-        if (!editing || !shownCampaign || !shownContact) return null;
+        if (!editing || !shownCampaign || !shownContact || !shownCall)
+          return null;
         if (
           previous?.campaign === shownCampaign &&
-          previous.id === shownContact
+          previous.id === shownContact &&
+          previous.call === shownCall
         )
           return previous;
-        return { campaign: shownCampaign, id: shownContact };
+        return { campaign: shownCampaign, id: shownContact, call: shownCall };
       });
     },
-    [shownCampaign, shownContact],
+    [shownCampaign, shownContact, shownCall],
   );
   const previousContact =
     !!contact &&
     !!active &&
     (contact.campaign !== active.campaign_id ||
-      contact.id !== active.contact_id);
+      contact.id !== active.contact_id ||
+      contact.call !== active.id);
   const selectedCampaign = campaigns.find(
     (campaign) => campaign.id === state.campaignId,
   );
@@ -301,14 +306,14 @@ export function AutoDialerPanel({
       ) : null}
       {previousContact ? (
         <Notice>
-          Vous complétez encore la fiche du contact précédent. Enregistrez la
-          note, enregistrez la qualification ou terminez le formulaire pour
+          Vous complétez encore la fiche de l’appel précédent. Enregistrez la
+          note ou terminez le formulaire de rendez-vous ou de rappel pour
           afficher le contact de l’appel en cours.
         </Notice>
       ) : null}
       {shownCampaign && shownContact ? (
         <CallContactDialog
-          key={`${shownCampaign}-${shownContact}`}
+          key={`${shownCampaign}-${shownContact}-${shownCall}`}
           campaignId={shownCampaign}
           contactId={shownContact}
           admin={admin}

@@ -151,7 +151,7 @@
     },
     {
       "key": "insulation",
-      "label": "10. L’isolation, notamment celle de l’entretoit, a-t-elle déjà été refaite ou améliorée ?",
+      "label": "10. L’isolation de la propriété, notamment celle de l’entretoit, a-t-elle déjà été refaite ou améliorée ?",
       "options": null,
       "required": true,
       "condition": null,

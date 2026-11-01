@@ -82,8 +82,10 @@ agent_a.request('POST','/api/calendar',missing,expected=422)
 agent_a.request('POST','/api/calendar',{**body,'qualification':dict(schema_version=1,answers={'owner':'Oui'})},expected=422)
 before_qualification=agent_a.request('GET',A+'/contacts/'+contact)
 assert before_qualification['qualification'] is None
+assert before_qualification['booker_name']=='Agent campagne'
 assert next(s for s in agent_a.request('GET',A+'/board')['stages'] if s['kind']=='appointment')['total']==0
 agent_a.request('POST','/api/calendar',{**body,'created_by':id_b},expected=422)
+agent_a.request('POST','/api/calendar',{**body,'booker_name':'Autre agent'},expected=422)
 booked=agent_a.request('POST','/api/calendar',body,expected=201)
 assert booked['starts_at'].startswith('2026-11-01T06:30')
 assert agent_a.request('POST','/api/calendar',body,expected=201)['id']==booked['id']

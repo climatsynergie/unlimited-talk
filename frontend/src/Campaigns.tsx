@@ -65,6 +65,7 @@ type Detail = {
   events_has_more: boolean;
   qualification_schema?: QualificationSchema;
   qualification?: SavedQualification | null;
+  booker_name?: string;
 };
 const zones = [
   ["America/Toronto", "Toronto / Montréal"],
@@ -1232,22 +1233,9 @@ function CardDetail({
   }, [campaign.id, identifier, revision, reloadKey]);
   useEffect(() => {
     onEditingChange?.(
-      !!note.trim() ||
-        qualificationDirty ||
-        booking ||
-        callback ||
-        busy ||
-        !!pendingStage,
+      !!note.trim() || booking || callback || busy || !!pendingStage,
     );
-  }, [
-    note,
-    qualificationDirty,
-    booking,
-    callback,
-    busy,
-    pendingStage,
-    onEditingChange,
-  ]);
+  }, [note, booking, callback, busy, pendingStage, onEditingChange]);
   function changeQualification(value: QualificationValue) {
     qualificationLoaded.current = true;
     setQualification(value);
@@ -1495,6 +1483,7 @@ function CardDetail({
               <section>
                 <h3>Prendre rendez-vous — Unlimited Talks</h3>
                 <AppointmentForm
+                  bookerName={data.booker_name}
                   qualificationSchema={data.qualification_schema}
                   qualification={qualification}
                   qualificationRevision={qualificationRevision}
@@ -1555,17 +1544,31 @@ function CardDetail({
                 value={qualification}
                 onChange={changeQualification}
                 disabled={busy || !campaign.is_active}
+                draftSaveAvailable={!inline}
               />
+              {inline ? (
+                <p className="audio-hint">
+                  Sans RDV, la fiche est réinitialisée pour le contact suivant.
+                </p>
+              ) : null}
+              {data.booker_name ? (
+                <p className="booking-booker">
+                  <span>15. Booker par</span>
+                  <strong>{data.booker_name}</strong>
+                </p>
+              ) : null}
               {campaign.is_active ? (
                 <div className="actions">
-                  <button
-                    type="button"
-                    className="button primary"
-                    disabled={busy || !qualificationDirty}
-                    onClick={() => void saveQualification()}
-                  >
-                    Enregistrer la qualification
-                  </button>
+                  {!inline ? (
+                    <button
+                      type="button"
+                      className="button primary"
+                      disabled={busy || !qualificationDirty}
+                      onClick={() => void saveQualification()}
+                    >
+                      Enregistrer la qualification
+                    </button>
+                  ) : null}
                   {qualificationDirty ? (
                     <button
                       type="button"

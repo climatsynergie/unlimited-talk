@@ -40,7 +40,7 @@ type Dialer = {
   browser_id: string | null;
   hold_token: string | null;
 };
-async function setup(page: Page, role = "agent") {
+async function setup(page: Page, role = "agent", sameContact = false) {
   const rows = new Map<string, Row>();
   let dialer: Dialer = {
     mode: "stopped",
@@ -156,7 +156,7 @@ async function setup(page: Page, role = "agent") {
         destination: nextCount === 1 ? "+14165550111" : "+14165550112",
         caller_number: "+14165550200",
         campaign_id: campaign,
-        contact_id: `00000000-0000-0000-0000-${String(50 + nextCount).padStart(12, "0")}`,
+        contact_id: `00000000-0000-0000-0000-${String(50 + (sameContact ? 1 : nextCount)).padStart(12, "0")}`,
         callback_id:
           nextCount === 1 ? "00000000-0000-0000-0000-000000000061" : null,
         automatic: true,
@@ -316,6 +316,7 @@ async function setup(page: Page, role = "agent") {
           notes_has_more: false,
           events_has_more: false,
           qualification_schema: qualificationSchema,
+          booker_name: "Agent composeur",
           qualification: qualifications.get(contact) || null,
         };
       }
@@ -330,9 +331,17 @@ async function setup(page: Page, role = "agent") {
         ],
       };
     } else if (path === "/api/calendar" && body) {
-      expect(body.qualification_revision).toBe(
-        qualifications.get(body.contact_id)?.revision || null,
-      );
+      if (
+        body.qualification_revision !==
+        (qualifications.get(body.contact_id)?.revision || null)
+      )
+        return route.fulfill({
+          status: 409,
+          json: {
+            detail:
+              "La qualification a changé. Actualisez la fiche avant de confirmer ce rendez-vous.",
+          },
+        });
       appointments.push(body);
       qualifications.set(body.contact_id, {
         revision: String(
@@ -474,7 +483,7 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
   await expect.poll(() => f.nextCount).toBe(2);
   await expect(
-    page.getByText(/Vous complétez encore la fiche du contact précédent/),
+    page.getByText(/Vous complétez encore la fiche de l’appel précédent/),
   ).toBeVisible();
   await expect(
     sheet.getByRole("heading", { name: "Client 1", exact: true }),
@@ -548,7 +557,7 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   await expect.poll(() => f.moves.length).toBe(2);
 });
 
-test("qualification : conditions, sauvegarde partielle et saisie conservée sur le bon client", async ({
+test("qualification : sans RDV, la fiche passe directement au prochain contact", async ({
   page,
 }) => {
   const f = await setup(page);
@@ -559,6 +568,9 @@ test("qualification : conditions, sauvegarde partielle et saisie conservée sur 
   });
   const field = (key: string) =>
     qualificationSchema.fields.find((field) => field.key === key)!;
+  await expect(sheet.locator(".booking-booker")).toContainText(
+    "Agent composeur",
+  );
   await sheet
     .getByRole("combobox", { name: field("owner").label, exact: true })
     .selectOption("Oui");
@@ -586,42 +598,59 @@ test("qualification : conditions, sauvegarde partielle et saisie conservée sur 
   await sheet
     .getByRole("textbox", { name: field("city").label, exact: true })
     .fill("Laval");
+  await expect(
+    sheet.getByRole("button", {
+      name: "Enregistrer la qualification",
+      exact: true,
+    }),
+  ).toHaveCount(0);
   const first = [...f.rows.values()][0];
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
   await expect.poll(() => f.nextCount).toBe(2);
   await expect(
-    sheet.getByRole("heading", { name: "Client 1", exact: true }),
-  ).toBeVisible();
-  f.failures.qualification = true;
-  await sheet
-    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
-    .click();
-  await expect(sheet.getByRole("alert")).toContainText(
-    "Qualification non enregistrée",
-  );
-  await expect(
-    sheet.getByRole("textbox", { name: field("city").label, exact: true }),
-  ).toHaveValue("Laval");
-  f.failures.qualification = false;
-  await sheet
-    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
-    .click();
-  await expect.poll(() => f.qualifications.has(first.contact_id)).toBe(true);
-  expect(
-    f.qualifications.get(first.contact_id)?.qualification.answers.city,
-  ).toBe("Laval");
-  await expect(
     sheet.getByRole("heading", { name: "Client 2", exact: true }),
   ).toBeVisible();
   await expect(
     sheet.getByRole("combobox", { name: field("owner").label, exact: true }),
   ).toHaveValue("");
+  await expect(
+    sheet.getByRole("textbox", { name: field("city").label, exact: true }),
+  ).toHaveValue("Montréal");
+  expect(f.controls).not.toContain("hold");
+  expect(f.qualifications.has(first.contact_id)).toBe(false);
   expect(f.appointments).toHaveLength(0);
 });
 
-test("qualification : conflit entre agents sans écrasement des réponses locales", async ({
+test("qualification : une nouvelle tentative sur le même contact repart de sa fiche enregistrée", async ({
+  page,
+}) => {
+  const f = await setup(page, "agent", true);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const field = qualificationSchema.fields.find(
+    (field) => field.key === "owner",
+  )!;
+  await sheet
+    .getByRole("combobox", { name: field.label, exact: true })
+    .selectOption("Oui");
+  const first = [...f.rows.values()][0];
+  first.state = "finished";
+  first.outcome = "completed";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  await expect.poll(() => f.nextCount).toBe(2);
+  await expect(
+    sheet.getByRole("combobox", { name: field.label, exact: true }),
+  ).toHaveValue("");
+  expect(f.qualifications.size).toBe(0);
+  expect(f.appointments).toHaveLength(0);
+});
+
+test("qualification : conflit de réservation conserve les réponses jusqu’au rechargement explicite", async ({
   page,
 }) => {
   const f = await setup(page);
@@ -634,23 +663,33 @@ test("qualification : conflit entre agents sans écrasement des réponses locale
     (field) => field.key === "city",
   )!.label;
   const first = [...f.rows.values()][0];
-  await sheet.getByRole("textbox", { name: city, exact: true }).fill("Laval");
+  await fillQualification(sheet);
   f.qualifications.set(first.contact_id, {
     revision: "99",
     qualification: {
-      schema_version: 1,
-      answers: { owner: "Non", city: "Québec" },
+      ...validQualification,
+      answers: { ...validQualification.answers, city: "Québec" },
     },
   });
   await sheet
-    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-03T10:00");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
     .click();
   await expect(sheet.getByRole("alert")).toContainText(
-    "modifiée par un autre agent",
+    "La qualification a changé",
   );
   await expect(
     sheet.getByRole("textbox", { name: city, exact: true }),
-  ).toHaveValue("Laval");
+  ).toHaveValue("Montréal");
+  expect(f.appointments).toHaveLength(0);
+  await sheet
+    .getByRole("button", { name: "Annuler la saisie", exact: true })
+    .click();
   await sheet
     .getByRole("button", {
       name: "Abandonner mes modifications et recharger",
@@ -661,19 +700,18 @@ test("qualification : conflit entre agents sans écrasement des réponses locale
     sheet.getByRole("textbox", { name: city, exact: true }),
   ).toHaveValue("Québec");
   await sheet
-    .getByRole("textbox", { name: city, exact: true })
-    .fill("Montréal");
-  await sheet
-    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
     .click();
-  await expect
-    .poll(() => f.qualifications.get(first.contact_id)?.revision)
-    .toBe("100");
-  await expect(
-    sheet.getByText("Qualification enregistrée sur la fiche du contact.", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-03T10:00");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  expect(
+    f.qualifications.get(first.contact_id)?.qualification.answers.city,
+  ).toBe("Québec");
 });
 
 test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage à RDV booké", async ({

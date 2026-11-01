@@ -39,10 +39,14 @@ a conflict. Request IDs make an uncertain save retry idempotent. Campaign and
 contact access are checked on every write, including replay.
 
 `PUT /api/campaigns/{campaign}/contacts/{contact}/qualification` saves a partial
-or complete snapshot independently of scheduling. Saving does not change the
-pipeline or pause the dialer. Unsaved answers stay attached to the original
-contact if automatic calling moves on. A conflicting save preserves the draft
-and requires an explicit reload; notes and background refreshes never replace it.
+or complete snapshot independently of scheduling from the campaign contact view.
+Saving does not change the pipeline or pause the dialer. The live call sheet has
+one booking path: qualification alone never pins the previous contact and needs
+no separate save. Without a booking, automatic calling displays the next contact
+and discards that unsaved qualification. Clicking the booking action holds the
+dialer for date/time confirmation; only confirmation persists the responses with
+the appointment. Notes, callbacks and in-flight operations retain their existing
+draft protection. A conflicting booking preserves answers until explicit reload.
 
 `POST /api/calendar` requires a complete qualification and the expected contact
 qualification revision. It atomically records the qualification, appointment,
@@ -50,6 +54,8 @@ callback cancellation and pipeline move. The appointment's event stream retains
 its own snapshot, independently of later client edits. The existing per-appointment
 index selects the newest qualification-bearing create/update event. Scheduling
 edits preserve that snapshot unless a complete replacement is explicitly supplied.
+The booking form defaults to Quebec time (`America/Toronto`) and displays the
+authenticated booker. The actor is assigned by the API, never by an editable field.
 
 Existing appointments without qualification remain readable and can be rescheduled
 or cancelled. Reconfirming a cancelled, unqualified appointment requires the form.

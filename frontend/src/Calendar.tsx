@@ -60,6 +60,7 @@ export function AppointmentForm({
   qualification,
   qualificationRevision,
   onQualificationChange,
+  bookerName,
 }: {
   contact?: BookingContact;
   appointment?: Appointment;
@@ -69,10 +70,9 @@ export function AppointmentForm({
   qualification?: QualificationValue | null;
   qualificationRevision?: string | null;
   onQualificationChange?: (value: QualificationValue) => void;
+  bookerName?: string;
 }) {
-  const [zone, setZone] = useState(
-    appointment?.timezone || contact?.timezone || "America/Toronto",
-  );
+  const [zone, setZone] = useState(appointment?.timezone || "America/Toronto");
   const [start, setStart] = useState(
     appointment ? local(appointment.starts_at, appointment.timezone) : "",
   );
@@ -209,6 +209,7 @@ export function AppointmentForm({
               schema={qualificationSchema}
               value={qualificationValue}
               required
+              draftSaveAvailable={false}
               onChange={(value) => {
                 if (onQualificationChange) onQualificationChange(value);
                 else setOwnQualification(value);
@@ -221,6 +222,10 @@ export function AppointmentForm({
               obligatoire.
             </Notice>
           )
+        ) : null}
+        <h3 className="booking-date-title">13. Date du rendez-vous</h3>
+        {zone === "America/Toronto" ? (
+          <p className="subtle">JJ/MM/AAAA · HH:MM — heure du Québec.</p>
         ) : null}
         <label>
           Date et heure du rendez-vous
@@ -307,6 +312,12 @@ export function AppointmentForm({
           </label>
         ) : null}
       </fieldset>
+      {bookerName ? (
+        <p className="booking-booker">
+          <span>15. Booker par</span>
+          <strong>{bookerName}</strong>
+        </p>
+      ) : null}
       <div className="actions">
         <Submit
           busy={busy}
@@ -460,6 +471,7 @@ export function AppointmentDetail({
           {editing ? (
             <AppointmentForm
               appointment={a}
+              bookerName={a.creator_name}
               qualificationSchema={data?.qualification_schema}
               onCancel={() => setEditing(false)}
               onSaved={() => {

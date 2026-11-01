@@ -367,7 +367,7 @@ def detail(identifier:uuid.UUID,contact_id:uuid.UUID,request:Request):
             JOIN staging.identity_users u ON u.id=e.actor_id WHERE campaign_id=:campaign AND contact_id=:contact
             ORDER BY e.id DESC LIMIT 51''',campaign=identifier,contact=contact_id).mappings().all()
         return {'contact':card_payload(card),'notes':[dict(n) for n in notes[:50]],'events':[{**dict(e),'id':str(e['id'])} for e in events[:50]],'notes_has_more':len(notes)>50,'events_has_more':len(events)>50,
-                'qualification_schema':SCHEMA,'qualification':contact_snapshot(db,identifier,contact_id)}
+                'qualification_schema':SCHEMA,'qualification':contact_snapshot(db,identifier,contact_id),'booker_name':user['display_name']}
 
 
 @router.put('/{identifier}/contacts/{contact_id}/qualification')
