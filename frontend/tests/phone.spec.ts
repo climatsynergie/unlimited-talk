@@ -127,6 +127,18 @@ test("un compte agent dispose du téléphone et garde la conversation pendant la
   page,
 }) => {
   const state = await setup(page, true, "agent");
+  await page.route("**/api/calendar/resolve?*", (route) => {
+    const start = new URL(route.request().url()).searchParams.get(
+      "local_start",
+    );
+    return route.fulfill({
+      json: {
+        options: [
+          { starts_at: start + ":00Z", utc_offset_minutes: 0, label: "UTC" },
+        ],
+      },
+    });
+  });
   await page.route("**/api/calendar?*", (route) =>
     route.fulfill({
       json: {
@@ -145,6 +157,11 @@ test("un compte agent dispose du téléphone et garde la conversation pendant la
   await expect
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
     .toBe(1);
+  state.rows.values().next().value!.state = "answered";
+  await page.evaluate(() => window.phoneProof.call!.emit("accept"));
+  await expect(
+    page.getByRole("complementary", { name: "Appel en cours", exact: true }),
+  ).toContainText("En conversation");
   await expect(
     page.getByRole("heading", { name: "Appels en cours", exact: true }),
   ).toHaveCount(0);
