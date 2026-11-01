@@ -1180,6 +1180,7 @@ function CardDetail({
   const [booking, setBooking] = useState(false);
   const bookingHold = useRef<string | null>(null);
   const [callback, setCallback] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(true);
   const [target, setTarget] = useState("");
   const [revision, setRevision] = useState(0);
   const [mutationBusy, setBusy] = useState(false);
@@ -1205,6 +1206,7 @@ function CardDetail({
   const actionId = useRef(crypto.randomUUID());
   useEffect(() => {
     const abort = new AbortController();
+    setDetailLoading(true);
     api<Detail>(`/campaigns/${campaign.id}/contacts/${identifier}`, {
       signal: abort.signal,
     })
@@ -1227,7 +1229,10 @@ function CardDetail({
         if (!abort.signal.aborted) setError(message(e));
       })
       .finally(() => {
-        if (!abort.signal.aborted) setQualificationReloading(false);
+        if (!abort.signal.aborted) {
+          setQualificationReloading(false);
+          setDetailLoading(false);
+        }
       });
     return () => abort.abort();
   }, [campaign.id, identifier, revision, reloadKey]);
@@ -1378,7 +1383,7 @@ function CardDetail({
       {loadError ? <Notice error>{loadError}</Notice> : null}
       <button
         className="button secondary"
-        disabled={busy}
+        disabled={busy || detailLoading}
         onClick={() => {
           actionId.current = crypto.randomUUID();
           setRestore(false);
@@ -1436,6 +1441,7 @@ function CardDetail({
                 !phone.enabled ||
                 calling ||
                 phone.automaticRunning ||
+                detailLoading ||
                 busy ||
                 data.contact.do_not_contact ||
                 data.contact.non_interested
@@ -1473,7 +1479,7 @@ function CardDetail({
               !data.contact.non_interested ? (
               <button
                 className="button secondary"
-                disabled={busy}
+                disabled={busy || detailLoading}
                 onClick={() => setCallback(true)}
               >
                 Programmer un rappel
@@ -1516,7 +1522,7 @@ function CardDetail({
               !data.contact.non_interested ? (
               <button
                 className="button primary"
-                disabled={busy}
+                disabled={busy || detailLoading}
                 onClick={() => {
                   setBusy(true);
                   setError("");
@@ -1606,7 +1612,13 @@ function CardDetail({
             Étape du pipeline
             <select
               value={target}
-              disabled={busy || booking || callback || !campaign.is_active}
+              disabled={
+                busy ||
+                detailLoading ||
+                booking ||
+                callback ||
+                !campaign.is_active
+              }
               onChange={(e) => setTarget(e.target.value)}
             >
               {stages.map((s) => (
@@ -1620,6 +1632,7 @@ function CardDetail({
             className="button secondary"
             disabled={
               busy ||
+              detailLoading ||
               booking ||
               callback ||
               target === data.contact.stage_id ||
@@ -1658,7 +1671,7 @@ function CardDetail({
                 </button>
                 <button
                   className="button danger"
-                  disabled={busy}
+                  disabled={busy || detailLoading}
                   onClick={() => void moveTo(pendingStage)}
                 >
                   Confirmer pour toutes les campagnes

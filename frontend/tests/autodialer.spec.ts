@@ -80,6 +80,11 @@ async function setup(page: Page, role = "agent", sameContact = false) {
   const versions = new Map<string, number>();
   const stageByContact = new Map<string, string>();
   const failures = { note: false, move: false, qualification: false };
+  const detailReads = {
+    block: false,
+    pending: 0,
+    release: null as (() => void) | null,
+  };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body =
@@ -296,6 +301,14 @@ async function setup(page: Page, role = "agent", sameContact = false) {
           });
         result = {};
       } else {
+        if (detailReads.block) {
+          detailReads.pending += 1;
+          await new Promise<void>((resolve) => {
+            detailReads.release = resolve;
+          });
+          detailReads.pending -= 1;
+          detailReads.block = false;
+        }
         result = {
           contact: {
             contact_id: contact,
@@ -377,6 +390,7 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     qualifications,
     appointments,
     failures,
+    detailReads,
     get nextCount() {
       return nextCount;
     },
@@ -522,11 +536,17 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
     .click();
   await expect(sheet.getByRole("alert")).toContainText("Réponse interrompue");
   f.failures.move = false;
+  f.detailReads.block = true;
   await sheet
     .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
     .click();
   await expect.poll(() => f.moveRequests.length).toBe(2);
   expect(f.moveRequests[0]).toBe(f.moveRequests[1]);
+  await expect.poll(() => f.detailReads.pending).toBe(1);
+  await expect(
+    sheet.getByRole("combobox", { name: "Étape du pipeline", exact: true }),
+  ).toBeDisabled();
+  f.detailReads.release!();
   await expect.poll(() => f.moves.length).toBe(1);
   expect(f.moves[0]).toEqual({
     contact: [...f.rows.values()][1].contact_id,
