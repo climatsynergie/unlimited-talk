@@ -127,6 +127,7 @@ def root():
 @app.get('/admin/journal', include_in_schema=False)
 @app.get('/rappels', include_in_schema=False)
 @app.get('/poste-appel', include_in_schema=False)
+@app.get('/conversations', include_in_schema=False)
 @app.get('/appels-entrants', include_in_schema=False)
 @app.get('/calendrier', include_in_schema=False)
 @app.get('/campagnes', include_in_schema=False)
