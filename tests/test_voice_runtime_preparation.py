@@ -11,6 +11,24 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
 class RuntimePreparationTests(unittest.TestCase):
+    def test_directory_gateway_adds_only_owned_number_list_gets(self):
+        import json
+        config=dict(account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32)
+        rendered=module.render_gateway(config,'d'*64,True,True)
+        expression=next(line for line in rendered.splitlines() if 'expression' in line)
+        regex=json.loads(expression.split('.matches(',1)[1].rsplit(')',1)[0])
+        self.assertTrue(all(int(n)<=1000 for n in re.findall(r'\{[0-9]+,([0-9]+)\}',regex)))
+        base='/2010-04-01/Accounts/'+config['account_sid']+'/IncomingPhoneNumbers.json'
+        self.assertIn('method GET',rendered)
+        for suffix in ['?PageSize=100&Page=0','?PageSize=100&Page=1&PageToken=a%2Bb%3D',
+                       '?PageSize=100&Page=1&PageToken='+'%2B'*1024]:
+            self.assertIsNotNone(re.fullmatch(regex,base+suffix))
+        for invalid in [base,base+'?PageSize=1000&Page=0',base+'?PageSize=100&Page=0&PhoneNumber=%2B1555',
+            base+'?PageSize=100&Page=0&PageToken=x&CallbackUrl=untrusted',
+            base.replace(config['account_sid'],'AC'+'b'*32)+'?PageSize=100&Page=0',
+            base.replace('IncomingPhoneNumbers','AvailablePhoneNumbers')+'?PageSize=100&Page=0']:
+            self.assertIsNone(re.fullmatch(regex,invalid))
+
     def test_recording_gateway_adds_only_two_scoped_get_resources(self):
         import json
         config=dict(account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32)

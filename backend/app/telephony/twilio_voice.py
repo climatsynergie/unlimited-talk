@@ -221,18 +221,23 @@ def authenticate_probe(profile, body, content_type, signature, signing_settings,
     authenticate_webhook(profile, 'probe', None, body, content_type, signature, signing_settings)
 
 
-def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None):
+def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None, caller_number=None):
     """Render only AFTER the durable intent gate; no client-supplied To exists."""
+    caller_number = caller_number or profile.caller_number
+    if not isinstance(caller_number,str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}',caller_number):
+        raise VoiceConfigurationError('Numéro émetteur invalide.')
     if isinstance(profile, ManualVoiceProfile):
         if (not isinstance(destination, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', destination)
-                or destination == profile.caller_number):
+                or destination == caller_number):
             raise VoiceConfigurationError('Destinataire de la réservation invalide.')
     else:
+        if caller_number != profile.caller_number:
+            raise VoiceConfigurationError('Numéro émetteur invalide.')
         if destination is not None and destination != profile.approved_destination:
             raise VoiceConfigurationError('Destinataire de la réservation invalide.')
         destination = profile.approved_destination
     response = VoiceResponse()
-    dial = response.dial(caller_id=profile.caller_number, timeout=20,
+    dial = response.dial(caller_id=caller_number, timeout=20,
                          time_limit=call_duration(profile), answer_on_bridge=True,
                          record='record-from-answer-dual',
                          recording_status_callback=webhook_url(profile, 'recording', intent_id),

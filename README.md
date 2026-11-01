@@ -18,7 +18,9 @@ Private contact imports, campaigns/pipelines, the shared calendar and agent-owne
 callbacks are implemented. Agent calls support explicit international numbers,
 one active call per agent, shared destination exclusion, private recordings and
 administrator supervision. Incoming queue settings and manual missed-call follow-up
-are implemented; incoming media routing and automatic dialling remain unfinished.
+are implemented. Automatic progressive dialling, agent pause/resume, due callbacks
+and verified campaign/regional caller IDs are implemented; see [AUTO_DIALER.md](AUTO_DIALER.md)
+for configuration, rollout and acceptance. Incoming media routing remains unfinished.
 See [TELEPHONY.md](TELEPHONY.md) for activation and the acceptance-test boundary.
 
 ## Local development

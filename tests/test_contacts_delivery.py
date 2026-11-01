@@ -10,6 +10,13 @@ spec.loader.exec_module(module)
 
 
 class ContactsDeploymentTests(unittest.TestCase):
+    def test_dialer_requires_the_actual_deployed_compatibility_release(self):
+        labels={'io.unlimitedtalk.schema':'0010_dialer'}
+        for running in [dict(migration='0010_dialer',revision='a'*40,calling_enabled=False),dict(migration='0009_inbound',revision='c59c839937eaa96b2d42c055c0efd82027d26070',calling_enabled=False)]:
+            with patch.object(module,'check_health',return_value=running):module.require_identity_rollback_target(labels)
+        for running in [{},dict(migration='0010_dialer',calling_enabled=True),dict(migration='0009_inbound',revision='478c462b9dac9f81a064041f6cfc6b171dab5df1',calling_enabled=False),dict(migration='0008_recordings',calling_enabled=False)]:
+            with patch.object(module,'check_health',return_value=running),self.assertRaises(ValueError):module.require_identity_rollback_target(labels)
+
     def test_inbound_requires_the_deployed_compatible_predecessor(self):
         labels={'io.unlimitedtalk.schema':'0009_inbound'}
         for running in [dict(migration='0009_inbound',revision='a'*40),dict(migration='0008_recordings',revision='acc101c5071beea7fc37553297e3529921e3aef1')]:

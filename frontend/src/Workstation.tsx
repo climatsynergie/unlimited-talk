@@ -3,6 +3,7 @@ import { Icon, Notice } from "./ui";
 import { CallHistory } from "./CallHistory";
 import { PhonePanel, usePhone } from "./Phone";
 import { LiveCalls } from "./LiveCalls";
+import { AutoDialerPanel } from "./AutoDialer";
 
 type Microphone = {
   context?: AudioContext;
@@ -26,7 +27,8 @@ function audioError(error: unknown): string {
 }
 
 export function Workstation({ admin }: { admin: boolean }) {
-  const { busy: calling, state: phone, controller } = usePhone();
+  const { busy: mediaBusy, state: phone, controller } = usePhone();
+  const calling = mediaBusy || phone.automaticRunning;
   const [microState, setMicroState] = useState<MicroState>("idle");
   const [level, setLevel] = useState(0);
   const [detected, setDetected] = useState(false);
@@ -374,6 +376,13 @@ export function Workstation({ admin }: { admin: boolean }) {
       </div>
       <PhonePanel
         input={deviceId}
+        beforeStart={() => {
+          stopMicrophone();
+          stopOutput();
+        }}
+      />
+      <AutoDialerPanel
+        admin={admin}
         beforeStart={() => {
           stopMicrophone();
           stopOutput();

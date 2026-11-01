@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { disabledDialer } from "./fixtures/dialer-disabled";
 
 declare global {
   interface Window {
@@ -26,6 +27,7 @@ test.use({
 });
 
 test.beforeEach(async ({ page }) => {
+  await disabledDialer(page);
   await page.route("**/api/telephony/calls*", (route) =>
     route.fulfill({ json: { items: [], next_cursor: null } }),
   );
@@ -272,6 +274,8 @@ test("écran mobile accessible et accès avec une vraie session d’agent", asyn
   page,
 }) => {
   await page.unroute("**/api/auth/me");
+  await page.unroute("**/api/telephony/dialer/campaigns");
+  await page.unroute("**/api/telephony/dialer/session");
   await page.unroute("**/api/telephony/calls*");
   const result = spawnSync(
     "python3",

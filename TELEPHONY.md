@@ -614,7 +614,7 @@ python3 /root/unlimited-talk-voice-tools/control_manual_voice.py enable --revisi
 
 Ces commandes ne lancent aucun appel, ne migrent aucune base et ne changent aucun
 numéro ni routage Twilio existant. Elles vérifient l'image immuable de la livraison,
-le schéma 9, les workers, le rôle PostgreSQL et TLS, le stockage privé, la passerelle
+le schéma 10, les workers, le rôle PostgreSQL et TLS, le stockage privé, la passerelle
 de récupération et la configuration fournisseur. La conversion exige zéro appel
 actif et zéro enregistrement en attente, sauvegarde le profil version 1, conserve
 les permissions privées et recrée les trois services Voice avec la même image.
@@ -633,6 +633,8 @@ navigateurs/casques et trois lignes destinataires disponibles, démarrages proch
 trois conversations visibles côté administrateur, audio dans les deux sens,
 raccrochages indépendants, puis trois historiques et enregistrements privés
 écoutables. Les simulations HTTP/PostgreSQL et navigateur ne prouvent pas cet audio
-ni la capacité réelle du fournisseur. La capacité à vingt agents, le composeur
-automatique, la réception audio et la messagerie vocale restent à livrer et à tester.
+ni la capacité réelle du fournisseur. Le composeur progressif, les rappels dus et
+les numéros régionaux sont décrits dans [AUTO_DIALER.md](AUTO_DIALER.md). La capacité
+média à vingt agents, la réception audio et la messagerie vocale restent à tester
+ou à livrer.
 Les SMS sont exclus de cette livraison sur demande de l'utilisateur.

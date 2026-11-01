@@ -11,7 +11,7 @@ assert sql('SELECT version_num FROM staging.alembic_version')=='0008_recordings'
 tables=['identity_users','identity_audit','contacts','contact_history','campaigns','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events','voice_intents','voice_events','voice_recordings','voice_archive_jobs']
 fingerprint='SELECT '+" || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+' t)' for table in tables)
 before=sql(fingerprint)
-subprocess.run([*compose,'run','--rm','--no-deps','migrate'],check=True)
+subprocess.run([*compose,'run','--rm','--no-deps','migrate','alembic','upgrade','0009_inbound'],check=True)
 assert sql('SELECT version_num FROM staging.alembic_version')=='0009_inbound'
 assert sql(fingerprint)==before
 assert sql('SELECT count(*) FROM staging.inbound_queues')=='0'

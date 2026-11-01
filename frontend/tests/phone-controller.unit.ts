@@ -8,6 +8,8 @@ import type {
   MediaDevice,
   Session,
   Transport,
+  AutomaticTransport,
+  Dialer,
 } from "../src/phone-controller.ts";
 
 function deferred<T>() {
@@ -50,7 +52,7 @@ class FakeDevice implements MediaDevice {
     ++this.destroyed;
   }
 }
-function fixture() {
+function fixture(automatic?: AutomaticTransport) {
   const session: Session = {
     enabled: true,
     destination: "+14165550101",
@@ -82,6 +84,7 @@ function fixture() {
     cancel: async (id) => {
       const intent = rows.get(id);
       if (!intent) throw { status: 404 };
+      if (intent.state === "cancelled") return intent;
       if (intent.state !== "reserved") throw { status: 409 };
       const result = { ...intent, state: "cancelled" };
       rows.set(id, result);
@@ -92,7 +95,7 @@ function fixture() {
     ++creations;
     return device;
   };
-  const controller = new PhoneController(api, create);
+  const controller = new PhoneController(api, create, automatic);
   return {
     session,
     rows,
@@ -437,4 +440,243 @@ test("durée normale et microphone conservé : aucun raccrochage après le plafo
   t.mock.timers.tick(420_000);
   assert.equal(f.device.call.disconnected, 1);
   f.controller.dispose();
+});
+
+function automaticFixture() {
+  let row: Dialer = {
+    mode: "stopped",
+    generation: 0,
+    campaign_id: null,
+    browser_id: null,
+  };
+  let nextGate: Promise<void> | null = null;
+  let heartbeatFailure = false;
+  let heartbeatCount = 0;
+  let idle = false;
+  let nextCount = 0;
+  let f!: ReturnType<typeof fixture>;
+  const automatic: AutomaticTransport = {
+    session: async () => ({ dialer: { ...row }, enabled: true }),
+    control: async (body) => {
+      const action = String(body.action);
+      if (action === "start")
+        row = {
+          mode: "running",
+          generation: row.generation + 1,
+          campaign_id: String(body.campaign_id),
+          browser_id: String(body.browser_id),
+        };
+      else if (action === "hold")
+        row = {
+          ...row,
+          mode: "booking",
+          generation: row.generation + 1,
+          hold_token: String(body.hold_token),
+        };
+      else if (action === "release")
+        row = {
+          ...row,
+          mode: "running",
+          generation: row.generation + 1,
+          hold_token: null,
+        };
+      else {
+        row = {
+          ...row,
+          mode: action === "stop" ? "stopped" : "paused",
+          generation: row.generation + 1,
+          hold_token: null,
+        };
+        for (const [id, intent] of f.rows)
+          if (intent.state === "reserved")
+            f.rows.set(id, { ...intent, state: "cancelled" });
+      }
+      return { dialer: { ...row } };
+    },
+    heartbeat: async () => {
+      heartbeatCount += 1;
+      if (heartbeatFailure) throw new Error("offline");
+      return { dialer: { ...row } };
+    },
+    next: async (body, signal) => {
+      ++nextCount;
+      if (idle) return { idle: "empty", dialer: { ...row } };
+      const reserved = await f.api.reserve(body.id, signal, "+14165550101");
+      const result = {
+        ...reserved,
+        intent: {
+          ...reserved.intent,
+          destination: "+14165550101",
+          automatic: true,
+        },
+        dialer: { ...row },
+      };
+      if (nextGate) await nextGate;
+      return result;
+    },
+  };
+  f = fixture(automatic);
+  return {
+    ...f,
+    automatic,
+    get nextCount() {
+      return nextCount;
+    },
+    get heartbeatCount() {
+      return heartbeatCount;
+    },
+    setGate: (value: Promise<void> | null) => {
+      nextGate = value;
+    },
+    failHeartbeat: () => {
+      heartbeatFailure = true;
+    },
+    empty: () => {
+      idle = true;
+    },
+    foreign: () => {
+      row = {
+        mode: "running",
+        generation: 3,
+        campaign_id: "campaign",
+        browser_id: "another-browser",
+      };
+    },
+  };
+}
+
+test("composeur : lancement explicite, un seul appel puis enchaînement après résultat serveur", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.refreshAutomatic();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.device.connections.length, 1);
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  const id = f.device.connections[0];
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 2);
+  assert.equal(f.device.connections.length, 2);
+});
+
+test("composeur : pause pendant une réponse de réservation perdue, aucun SDK ni appel tardif", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const gate = deferred<void>();
+  f.setGate(gate.promise);
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  const pending = f.controller.automaticTick();
+  await setImmediate();
+  await f.controller.pauseAutomatic();
+  gate.resolve();
+  await pending;
+  assert.equal(f.device.connections.length, 0);
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.controller.state.phase, "idle");
+});
+
+test("composeur : pause ne raccroche pas une conversation déjà connectée", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.rows.set(id, { ...f.rows.get(id)!, state: "answered" });
+  f.device.call.emit("accept");
+  await f.controller.pauseAutomatic();
+  assert.equal(f.device.call.disconnected, 0);
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+});
+
+test("composeur : perte de présence suspend l’enchaînement sans inventer la fin de l’appel", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  f.failHeartbeat();
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.device.call.disconnected, 0);
+  assert.notEqual(f.controller.state.phase, "idle");
+  assert.equal(f.nextCount, 1);
+});
+
+test("composeur : la saisie RDV suspend, puis reprend seulement si aucune pause n’a été demandée", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  const hold = await f.controller.beginBooking("campaign");
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  assert.equal(f.heartbeatCount, 1);
+  await f.controller.endBooking(hold);
+  assert.equal(f.controller.state.automaticRunning, true);
+  const second = await f.controller.beginBooking("campaign");
+  await f.controller.pauseAutomatic();
+  await f.controller.endBooking(second);
+  assert.equal(f.controller.state.automaticRunning, false);
+});
+
+test("composeur : une perte de présence pendant le RDV exige une reprise explicite", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  const hold = await f.controller.beginBooking("campaign");
+  f.failHeartbeat();
+  await f.controller.automaticTick();
+  await f.controller.endBooking(hold);
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.nextCount, 0);
+});
+
+test("composeur : un autre navigateur ou une restauration ne redémarre jamais les appels seul", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  f.foreign();
+  await f.controller.refresh();
+  await f.controller.refreshAutomatic();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  await f.controller.startAutomatic("campaign");
+  f.controller.dispose();
+  f.controller.activate();
+  await f.controller.refreshAutomatic();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+});
+
+test("composeur : une file vide ne crée ni réservation, ni SDK, ni faux historique", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  f.empty();
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.phase, "idle");
+  assert.equal(f.rows.size, 0);
+  assert.equal(f.device.connections.length, 0);
+  assert.equal(f.controller.state.automaticRunning, true);
 });

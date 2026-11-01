@@ -23,7 +23,7 @@ for path in ('/api/system', '/health/live', '/health/ready', '/openapi.json'):
         assert response.headers['Cache-Control'] == 'no-store'
         body = json.load(response)
         if path == '/health/ready':
-            assert body['database'] == 'connected' and body['migration'] == '0009_inbound'
+            assert body['database'] == 'connected' and body['migration'] == '0010_dialer'
             assert body['communications'] == 'webhooks_only' and body['calling_enabled'] is False
 
 config = json.loads(run('config', '--format', 'json'))

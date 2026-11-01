@@ -9,7 +9,12 @@ import {
 import type { ReactNode } from "react";
 import { api } from "./api";
 import { PhoneController } from "./phone-controller";
-import type { Intent, Session, MediaDevice } from "./phone-controller";
+import type {
+  Intent,
+  Session,
+  MediaDevice,
+  AutomaticTransport,
+} from "./phone-controller";
 import { createPhoneDevice } from "./phone-device";
 import { Field, Notice } from "./ui";
 
@@ -23,10 +28,14 @@ export function makePhoneController(
         api<Session>("/telephony/test/session", {
           signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
         }),
-      reserve: (id, signal, destination) =>
+      reserve: (id, signal, destination, campaignId) =>
         api<{ intent: Intent; token: string }>("/telephony/test/intents", {
           method: "POST",
-          body: { id, destination },
+          body: {
+            id,
+            destination,
+            ...(campaignId ? { campaign_id: campaignId } : {}),
+          },
           signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
         }),
       cancel: (id, signal) =>
@@ -41,6 +50,23 @@ export function makePhoneController(
         }),
     },
     factory,
+    {
+      session: (signal) => api("/telephony/dialer/session", { signal }),
+      control: (body, signal) =>
+        api("/telephony/dialer/control", { method: "POST", body, signal }),
+      heartbeat: (body, signal) =>
+        api("/telephony/dialer/heartbeat", {
+          method: "POST",
+          body,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        }),
+      next: (body, signal) =>
+        api("/telephony/dialer/next", {
+          method: "POST",
+          body,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
+        }),
+    } satisfies AutomaticTransport,
   );
 }
 export function PhoneProvider({
@@ -87,6 +113,15 @@ export function PhoneProvider({
       window.removeEventListener("beforeunload", warning);
     };
   }, [active, state.local, controller]);
+  useEffect(() => {
+    if (!state.automaticRunning && state.automatic?.mode !== "booking") return;
+    void controller.automaticTick();
+    const timer = window.setInterval(
+      () => void controller.automaticTick(),
+      2000,
+    );
+    return () => clearInterval(timer);
+  }, [controller, state.automaticRunning, state.automatic?.mode]);
   return <Context.Provider value={controller}>{children}</Context.Provider>;
 }
 export function usePhone() {
@@ -127,6 +162,9 @@ export function PhoneBar() {
       <div>
         <strong>{state.destination || "Appel téléphonique"}</strong>
         <p role="status">{labels[state.phase]}</p>
+        {state.intent?.caller_number ? (
+          <small>Numéro émetteur : {state.intent.caller_number}</small>
+        ) : null}
       </div>
       {state.local ? (
         <button
@@ -171,6 +209,7 @@ export function PhonePanel({
             !state.loaded ||
             !state.enabled ||
             busy ||
+            state.automaticRunning ||
             !state.dialNumber.trim()
           )
             return;
@@ -221,6 +260,7 @@ export function PhonePanel({
               !state.loaded ||
               !state.enabled ||
               busy ||
+              state.automaticRunning ||
               !state.dialNumber.trim()
             }
           >

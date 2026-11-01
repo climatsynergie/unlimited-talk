@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { silentWav } from "./fixtures/audio";
+import { disabledDialer } from "./fixtures/dialer-disabled";
 
 declare global {
   interface Window {
@@ -24,6 +25,7 @@ async function setup(
   enabled = true,
   role: "admin" | "agent" = "admin",
 ) {
+  await disabledDialer(page);
   const state = {
     enabled,
     reservations: 0,

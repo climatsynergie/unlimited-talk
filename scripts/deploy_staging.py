@@ -60,12 +60,12 @@ def run(args, *, env=None, data=None, timeout=180):
     return result.stdout.strip()
 
 
-def compose(release, *args, env=None, timeout=180):
+def compose(release, *args, env=None, data=None, timeout=180):
     command = ['docker', 'compose', '--project-directory', str(release)]
     if (release / '.env').is_file():
         command += ['--env-file', str(release / '.env')]
     return run([*command, '-f', str(release / 'compose.managed.yaml'), *args],
-               env=env, timeout=timeout)
+               env=env, data=data, timeout=timeout)
 
 
 def switch_current(release):
@@ -95,6 +95,13 @@ def check_health(revision=None):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0010_dialer':
+        running=check_health()
+        if running.get('calling_enabled') is not False:
+            raise ValueError('Disable calling before deploying the dialer release')
+        if running.get('migration')=='0010_dialer':return
+        if running.get('migration')=='0009_inbound' and running.get('revision')=='c59c839937eaa96b2d42c055c0efd82027d26070':return
+        raise ValueError('Deploy the dialer compatibility release first')
     if labels.get('io.unlimitedtalk.schema') == '0009_inbound':
         running=check_health()
         if running.get('migration') == '0009_inbound': return
@@ -179,14 +186,17 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings','0009_inbound'}:
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings','0009_inbound','0010_dialer'}:
             raise ValueError('This deployment template requires a compatible worker image')
-        if labels.get('io.unlimitedtalk.schema') == '0009_inbound' and labels.get('io.unlimitedtalk.inbound-config') != '1':
+        if labels.get('io.unlimitedtalk.schema') in {'0009_inbound','0010_dialer'} and labels.get('io.unlimitedtalk.inbound-config') != '1':
             raise ValueError('This deployment template requires inbound settings capability')
         if labels.get('io.unlimitedtalk.schema') == '0007_voice' and labels.get('io.unlimitedtalk.voice-runtime') != '1':
             raise ValueError('This deployment template requires the reviewed Voice worker capability')
-        if labels.get('io.unlimitedtalk.schema') in {'0008_recordings','0009_inbound'} and labels.get('io.unlimitedtalk.voice-archive') != '1':
+        if labels.get('io.unlimitedtalk.schema') in {'0008_recordings','0009_inbound','0010_dialer'} and labels.get('io.unlimitedtalk.voice-archive') != '1':
             raise ValueError('This deployment template requires the recording archive capability')
+        if labels.get('io.unlimitedtalk.schema')=='0010_dialer' and any(labels.get(k)!='1' for k in
+                ('io.unlimitedtalk.voice-manual','io.unlimitedtalk.dialer-compatible','io.unlimitedtalk.dialer')):
+            raise ValueError('This deployment template requires the reviewed dialer capability')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}
@@ -214,6 +224,18 @@ def deploy(request):
         if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler','voice-archiver')):
             raise ValueError('Migration and API must use the same tested image')
         require_identity_rollback_target(labels)
+        if labels.get('io.unlimitedtalk.schema')=='0010_dialer' and previous is not None:
+            code="""from app.database import make_engine
+from sqlalchemy import text
+engine=make_engine()
+try:
+ with engine.connect() as db:
+  db.execute(text('SET TRANSACTION READ ONLY'))
+  active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
+ assert active==0
+finally:engine.dispose()
+"""
+            compose(previous,'exec','-T','api','python','-',data=code,env=env)
         # Migrations must follow expand/contract compatibility. Never downgrade
         # data automatically, including when application health checks fail.
         compose(release, 'up', '-d', '--no-deps', '--wait', 'broker', env=env)

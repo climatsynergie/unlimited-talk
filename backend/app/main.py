@@ -21,6 +21,8 @@ from app.scheduling_routes import router as scheduling_router
 from app.telephony.routes import router as telephony_router
 from app.telephony.recording_routes import router as recording_router
 from app.telephony.inbound_routes import router as inbound_router
+from app.telephony.calling_routes import router as calling_router
+from app.telephony.dialer_routes import router as dialer_router
 from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
@@ -30,9 +32,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Inbound configuration requires schema 9; the preceding compatibility image
+# Automatic calling requires schema 10; the preceding compatibility image
 # continues serving the existing business features after an application rollback.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0009_inbound', '0010_dialer'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0010_dialer'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
@@ -53,11 +55,6 @@ async def lifespan(app):
     app.state.voice_profile = load_profile()
     app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') in {'controlled_test', 'manual'}
     app.state.engine = make_engine()
-    # A rollback keeps the CRM readable on the expanded schema. Only the new
-    # dialer understands its claims/policies, so this predecessor cannot dial.
-    with app.state.engine.connect() as connection:
-        if connection.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one() == '0010_dialer':
-            app.state.voice_calling_enabled = False
     yield
     app.state.engine.dispose()
 
@@ -73,6 +70,8 @@ app.include_router(scheduling_router)
 app.include_router(telephony_router)
 app.include_router(recording_router)
 app.include_router(inbound_router)
+app.include_router(calling_router)
+app.include_router(dialer_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -156,7 +155,8 @@ def ready(request: Request):
                           'contacts','contact_imports','contact_import_rows','contact_history',
                           'campaigns','campaign_stages','campaign_agents','campaign_contacts','contact_notes','campaign_events','appointments','appointment_events','callbacks','callback_events',
                           'voice_intents','voice_events','voice_recordings','voice_archive_jobs',
-                          'inbound_queues','inbound_queue_agents','inbound_queue_events','inbound_followups','inbound_interactions','inbound_followup_events'):
+                          'inbound_queues','inbound_queue_agents','inbound_queue_events','inbound_followups','inbound_interactions','inbound_followup_events',
+                          'voice_numbers','voice_directory_state','voice_campaign_settings','voice_region_rules','voice_dialer_sessions','voice_completion_jobs'):
                 connection.execute(text('SELECT 1 FROM staging.' + table + ' LIMIT 0'))
             secret = connection.execute(text('SELECT mfa_secret FROM staging.identity_users WHERE mfa_secret IS NOT NULL LIMIT 1')).scalar_one_or_none()
             if secret:

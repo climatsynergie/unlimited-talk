@@ -33,7 +33,7 @@ with engine.connect() as db:
 
 # The migration sentinel at +14165550101 deliberately remains opted out. Do not
 # reuse that contact as the recipient for unrelated successful-call fixtures.
-profile = ControlledVoiceProfile('AC'+'a'*32, 'SK'+'b'*32, 'c'*32, 'AP'+'d'*32,
+profile = ControlledVoiceProfile('AC'+uuid4().hex, 'SK'+'b'*32, 'c'*32, 'AP'+'d'*32,
     'webhooks_sharedkey_'+'e'*26, 'f'*32, 'https://voice.example.invalid', '+14165550100', '+14165550901')
 base = 'http://127.0.0.1:18001'
 origin = os.environ['APP_ORIGIN']
@@ -467,6 +467,10 @@ try:
     profile = ManualVoiceProfile('AC'+uuid4().hex, 'SK'+'b'*32, 'c'*32, 'AP'+'d'*32,
         'webhooks_sharedkey_'+'e'*26, 'f'*32, 'https://voice.example.invalid', '+14165550100', 3, 600)
     app.state.voice_profile = profile
+    with engine.begin() as db:
+        query(db,'''INSERT INTO staging.voice_numbers(id,account_sid,provider_sid,number,name,country,voice_enabled,verified_at)
+            VALUES (:id,:account,:provider,:number,'Numéro synthétique','CA',true,clock_timestamp())''',
+            id=uuid4(),account=profile.account_sid,provider='PN'+uuid4().hex,number=profile.caller_number)
     agents = [Browser('agent') for _ in range(3)]
     supervisor = Browser()
     ids = [uuid4() for _ in agents]
@@ -506,11 +510,11 @@ try:
         assert own['intent']['state']=='finished' and len(own['recordings'])==1
     # The same destination cannot be called concurrently, even by another agent.
     duplicate_id = uuid4()
-    agents[0].request('POST','/api/telephony/test/intents',{'id':str(duplicate_id),'destination':destinations[0]},201)
-    agents[1].request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':destinations[0]},409)
+    agents[0].request('POST','/api/telephony/test/intents',{'id':str(duplicate_id),'destination':'+14165550117'},201)
+    agents[1].request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':'+14165550117'},409)
     agents[0].request('POST','/api/telephony/test/intents/'+str(duplicate_id)+'/cancel',{})
     # Global contact restrictions apply before reservation AND after a late opt-out.
-    blocked = '+14165550119'; contact = uuid4()
+    blocked = '+1416'+str(2000000+uuid4().int%7000000); contact = uuid4()
     with engine.begin() as db:
         query(db,"INSERT INTO staging.contacts(id,phone,profile,do_not_contact) VALUES (:id,:phone,'{}',true)",id=contact,phone=blocked)
     agents[0].request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':blocked},400)
@@ -522,7 +526,7 @@ try:
         query(db,'UPDATE staging.contacts SET non_interested=true WHERE id=:id',id=contact)
     assert voice(agents[0],late)[1].find('Dial') is None and row(late)['state']=='cancelled'
     revoked_id = uuid4()
-    agents[1].request('POST','/api/telephony/test/intents',{'id':str(revoked_id),'destination':destinations[1]},201)
+    agents[1].request('POST','/api/telephony/test/intents',{'id':str(revoked_id),'destination':'+14165550118'},201)
     with engine.begin() as db:
         query(db,'DELETE FROM staging.identity_sessions WHERE token_hash=:token',token=digest(agents[1].token))
     assert voice(agents[1],revoked_id)[1].find('Dial') is None and row(revoked_id)['state']=='cancelled'

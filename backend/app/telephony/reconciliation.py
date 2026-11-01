@@ -54,9 +54,10 @@ class PendingCall:
     def check(self, profile):
         if (not isinstance(self.id, UUID) or not isinstance(self.actor_id, UUID)
                 or self.profile_hash != service.profile_hash(profile) or self.account_sid != profile.account_sid
-                or self.caller_number != profile.caller_number
+                or not re.fullmatch(r'\+[1-9][0-9]{8,14}',self.caller_number)
                 or not re.fullmatch(r'\+[1-9][0-9]{8,14}', self.destination)
-                or self.destination == profile.caller_number
+                or self.destination == self.caller_number
+                or (isinstance(profile, ControlledVoiceProfile) and self.caller_number != profile.caller_number)
                 or (isinstance(profile, ControlledVoiceProfile) and self.destination != profile.approved_destination)
                 or not sid(self.parent_call_sid, 'CA')
                 or (self.child_call_sid is not None and (not sid(self.child_call_sid, 'CA')
@@ -264,17 +265,22 @@ def main():
             time.sleep(10)
     engine = make_engine()
     provider = configured_provider(profile)
+    from app.telephony import completion,caller_directory
+    next_reconciliation=0
     try:
         while True:
             try:
-                result = reconcile_once(engine, profile, provider)
+                completion.process_once(engine,profile)
+                caller_directory.synchronize_once(engine,profile)
+                result = reconcile_once(engine, profile, provider) if time.monotonic()>=next_reconciliation else {'failed':0}
+                if time.monotonic()>=next_reconciliation:next_reconciliation=time.monotonic()+10
                 if result['failed']:
                     logger.warning('Rapprochement Voice en attente : %s', result)
                 else:
                     Path('/tmp/voice-reconciliation-heartbeat').touch()
             except Exception:
                 logger.warning('Rapprochement Voice à reprendre.')
-            time.sleep(10)
+            time.sleep(1)
     finally:
         engine.dispose()
 

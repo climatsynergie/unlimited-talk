@@ -21,7 +21,7 @@ ROOT = Path('/etc/unlimited-talk-staging')
 BASE = Path('/srv/unlimited-talk-staging')
 PROFILE = ROOT/'voice-runtime.json'
 OVERRIDE = ROOT/'voice-manual.yaml'
-SCHEMA = '0009_inbound'
+SCHEMA = '0010_dialer'
 COMMON = {'account_sid','api_key_sid','api_key_secret','twiml_app_sid','shared_key_id',
           'shared_key_secret','public_origin','caller_number'}
 OVERRIDE_BYTES = (json.dumps({'services': {'api': {'environment': {'COMMUNICATIONS_MODE': 'manual'}}}}, sort_keys=True)+'\n').encode()
@@ -32,7 +32,7 @@ def labels_valid(labels, revision):
         'org.opencontainers.image.revision': valid_revision(revision), 'io.unlimitedtalk.schema': SCHEMA,
         'io.unlimitedtalk.voice-runtime': '1', 'io.unlimitedtalk.voice-browser': '1',
         'io.unlimitedtalk.voice-archive': '1', 'io.unlimitedtalk.inbound-config': '1',
-        'io.unlimitedtalk.voice-manual': '1'}
+        'io.unlimitedtalk.voice-manual': '1', 'io.unlimitedtalk.dialer': '1'}
     if any(labels.get(key) != value for key, value in required.items()):
         raise ValueError('Attested manual Voice delivery required')
 
@@ -140,21 +140,22 @@ engine=make_engine()
 try:
  with engine.connect() as db:
   db.execute(text('SET TRANSACTION READ ONLY'))
-  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one()=='0009_inbound'
+  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one()=='0010_dialer'
   assert db.execute(text('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()')).scalar_one()
   assert db.execute(text('SELECT current_user')).scalar_one()=='ut_staging_runtime'
   assert not db.execute(text("SELECT pg_has_role(current_user,'ut_staging_migrator','MEMBER')")).scalar_one()
   assert not db.execute(text("SELECT has_table_privilege(current_user,'staging.voice_archive_jobs','DELETE')")).scalar_one()
   active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
   pending=db.execute(text("SELECT count(*) FROM staging.voice_recordings WHERE state<>'archived'")).scalar_one()
+  caller=db.execute(text("SELECT EXISTS(SELECT 1 FROM staging.voice_numbers WHERE account_sid=:account AND number=:number AND voice_enabled AND is_present AND is_active AND verified_at>clock_timestamp()-interval '24 hours')"),dict(account=profile.account_sid,number=profile.caller_number)).scalar_one()
  assert engine.pool.checkedout()==0
  transport,bucket=client(); assert transport.head_bucket(Bucket=bucket)['ResponseMetadata']['HTTPStatusCode']==200
  print(json.dumps({'active':active,'pending_archives':pending,'manual':isinstance(profile,ManualVoiceProfile),
-  'storage':True,'tls':True,'runtime_role':True,'profile_valid':True}))
+  'storage':True,'tls':True,'runtime_role':True,'profile_valid':True,'caller_verified':caller}))
 finally: engine.dispose()
 '''
     result = json.loads(run([*command,'exec','-T','api','python','-'],data=code))
-    if manual and result.get('manual') is not True:
+    if manual and (result.get('manual') is not True or result.get('caller_verified') is not True):
         raise ValueError('Manual profile required')
     if idle and (result.get('active') != 0 or result.get('pending_archives') != 0):
         raise ValueError('Finish calls and archive jobs before profile conversion')
@@ -168,6 +169,7 @@ from uuid import uuid4
 from app.telephony.configuration import load_profile
 from app.telephony.twilio_voice import ManualVoiceProfile
 from app.telephony.recording_archive import RecordingReader,Job,ArchiveError
+from app.telephony.caller_directory import NumberReader
 assert os.getuid()==10001 and os.environ['COMMUNICATIONS_MODE']=='recovery_only'
 profile=load_profile(); assert isinstance(profile,ManualVoiceProfile)
 reader=RecordingReader(profile)
@@ -175,9 +177,11 @@ assert reader.transport.base.startswith('http://172.30.8.1:8112/')
 try: reader.read(Job('RE'+'0'*32,uuid4(),'CA'+'0'*32,1,2,uuid4(),1))
 except ArchiveError as error: assert error.args==('recording_not_available',)
 else: raise AssertionError('Dummy recording unexpectedly exists')
-print(json.dumps({'gateway':True}))
+numbers=NumberReader(profile).read()
+assert any(n['number']==profile.caller_number and n['voice_enabled'] for n in numbers)
+print(json.dumps({'gateway':True,'numbers':True}))
 '''
-    if json.loads(run([*command,'exec','-T','voice-archiver','python','-'],data=code)) != {'gateway':True}:
+    if json.loads(run([*command,'exec','-T','voice-archiver','python','-'],data=code)) != {'gateway':True,'numbers':True}:
         raise ValueError('Recording gateway verification failed')
     runtime_probe(command,manual=True)
     atomic(ROOT/'recording-runtime-verified.json', (json.dumps(dict(revision=revision,schema=SCHEMA,
@@ -268,7 +272,7 @@ def operate(action, revision):
         elif action == 'public-access':
             local = 'http://127.0.0.1:8110'
             for path, expected in [('/api/auth/me',401),('/api/telephony/calls',401),
-                ('/api/telephony/active-calls',401),('/api/campaigns',401),
+                ('/api/telephony/active-calls',401),('/api/telephony/dialer/session',401),('/api/telephony/numbers',401),('/api/campaigns',401),
                 ('/api/calendar?start=2026-11-01T00:00:00Z&end=2026-11-02T00:00:00Z',401),('/docs',404),('/openapi.json',404)]:
                 if status_code(local+path) != expected:
                     raise ValueError('Application authentication must protect every business API')

@@ -40,7 +40,7 @@ actor, timestamp and reason. Reactivation never resurrects a cancelled callback.
 Archival, owner deactivation or assignment revocation block priority processing;
 the record remains visible for its owner/admin to resolve or cancel.
 
-## Priority and future phone integration
+## Priority and automatic phone integration
 
 `due_candidates` returns the requesting agent's due, pending, unblocked callbacks
 ordered by due time then stable UUID. It excludes restricted contacts, inactive
@@ -49,13 +49,14 @@ must not transfer callback ownership or limit callbacks to the selected campaign
 List views show due reminders first; history shows recent due dates first.
 
 The priority endpoint is **read only**. It does not claim a contact, start a call,
-create a result, or infer that an agent is available. Telephony remains disabled.
+create a result, or infer that an agent is available. Calling requires the private
+agent profile and explicit activation described in [AUTO_DIALER.md](AUTO_DIALER.md).
 No callback reminder exists only in an in-memory timer or delayed Celery message:
 a restart or broker outage does not erase the schedule, and overdue records remain
 queryable after recovery. Read polling uses authentication without touching session
 activity, preserving idle expiry.
 
-When integrating the phone engine, the authoritative agent controller must:
+The authoritative automatic agent controller implements these rules:
 
 1. Respect pause/stop and in-call/appointment-entry states before claiming work.
 2. Prefer that agent's due callbacks over ordinary campaign contacts, with the
@@ -70,9 +71,9 @@ When integrating the phone engine, the authoritative agent controller must:
    with idempotent provider event handling. Do not mark a reminder completed merely
    because it appeared in a list or a provider API request was sent.
 
-Agent availability, call claims, provider events, call attempts and automatic
-origination belong to the upcoming phone integration, not this scheduling module.
-This is not a capacity test or a claim that calling is operational.
+Agent availability, call claims, provider events and attempt limits live in the
+telephony module. Due reminders run only while the owning agent has explicitly
+started a live composeur. Browser/SQL simulations do not establish PSTN capacity.
 
 ## API and interface
 

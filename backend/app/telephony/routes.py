@@ -23,6 +23,7 @@ HANGUP = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup /></Response>'
 class Reservation(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: UUID
+    campaign_id: UUID | None = None
     # Optional only for the preceding browser delivery. New clients always send
     # their explicit dialled number; it is never silently replaced by the test target.
     destination: str | None = Field(default=None, max_length=40)
@@ -93,7 +94,7 @@ def reserve(body: Reservation, request: Request):
     try:
         with request.app.state.engine.begin() as db:
             actor = caller(db, request, configured)
-            row = service.reserve(db, actor, body.id, configured, body.destination)
+            row = service.reserve(db, actor, body.id, configured, body.destination,campaign_id=body.campaign_id)
             payload = service.public(row)
             actor_id = actor['id']
     except IntegrityError:
@@ -154,8 +155,9 @@ def apply_webhook(request, configured, kind, identifier, params):
             if kind == 'voice':
                 accepted = getattr(request.app.state, 'voice_calling_enabled', False) and service.consume(db, configured, params)
                 if accepted:
-                    destination = identity.query(db, 'SELECT destination FROM staging.voice_intents WHERE id=:id',
-                                                 id=UUID(params['Intent'])).scalar_one()
+                    selected = identity.query(db, 'SELECT destination,caller_number FROM staging.voice_intents WHERE id=:id',
+                                              id=UUID(params['Intent'])).mappings().one()
+                    destination = selected['destination']
             else:
                 service.notify(db, configured, kind, identifier, params)
                 accepted = False
@@ -164,7 +166,7 @@ def apply_webhook(request, configured, kind, identifier, params):
     # DB commit precedes the only response that can create the external call.
     # Replays and revoked/expired reservations receive Hangup, never another Dial.
     if accepted:
-        return controlled_call_twiml(configured, UUID(params['Intent']), destination)
+        return controlled_call_twiml(configured, UUID(params['Intent']), destination,selected['caller_number'])
     return HANGUP
 
 

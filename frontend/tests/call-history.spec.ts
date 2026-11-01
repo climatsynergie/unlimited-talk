@@ -1,11 +1,13 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { silentWav as wav } from "./fixtures/audio";
+import { disabledDialer } from "./fixtures/dialer-disabled";
 
 const id = "00000000-0000-0000-0000-000000000001";
 const recording = "RE" + "1".repeat(32);
 const playback = `/api/telephony/recordings/${recording}/audio`;
 test.beforeEach(async ({ page }) => {
+  await disabledDialer(page);
   await page.route("**/api/auth/me", (route) =>
     route.fulfill({
       json: {

@@ -35,7 +35,7 @@ def limited(engine, operation, identity, *, limit=10, seconds=900, global_limit=
     exceeded = False
     with engine.begin() as db:
         query(db, 'DELETE FROM staging.identity_rate_limits WHERE expires_at<now()-interval \'1 day\'')
-        for bucket, limit, seconds in [('voice-global' if operation == 'voice-reserve' else 'global', global_limit, 60),
+        for bucket, limit, seconds in [('voice-global' if operation == 'voice-reserve' else 'dialer-global' if operation == 'dialer-next' else 'global', global_limit, 60),
                                        (operation + ':' + digest(identity), limit, seconds)]:
             row = query(db, '''INSERT INTO staging.identity_rate_limits(bucket,attempts,expires_at)
                 VALUES (:bucket,1,now()+make_interval(secs=>:seconds))

@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from app.identity.service import query, audit
 from app.telephony.twilio_voice import ManualVoiceProfile, client_identity, sid
+from app.telephony import dialer_policy
 
 ACTIVE = {'reserved', 'authorized', 'ringing', 'answered'}
 TERMINAL = {'finished', 'cancelled', 'expired'}
@@ -45,8 +46,12 @@ def event(db, intent_id, kind, details):
 
 
 def public(row):
-    return {key: str(row[key]) if row[key] is not None else None
+    value = {key: str(row[key]) if row[key] is not None else None
             for key in ('id', 'actor_id', 'state', 'outcome', 'created_at', 'expires_at', 'consumed_at', 'finished_at', 'destination')}
+    value.update({key: str(row.get(key)) if row.get(key) is not None else None
+                  for key in ('campaign_id','contact_id','callback_id','caller_number')})
+    value['automatic'] = row.get('dialer_generation') is not None
+    return value
 
 
 def validate_destination(value, profile):
@@ -72,11 +77,12 @@ def unrestricted_contact(db, destination):
     return not row or not (row['do_not_contact'] or row['non_interested'])
 
 
-def reserve(db, actor, identifier, profile, destination=None):
+def reserve(db, actor, identifier, profile, destination=None, *, campaign_id=None, automatic=None):
     # authenticate already holds the actor row lock. Database unique
     # indexes arbitrate competing users and sessions, including the same target.
     destination = validate_destination(destination, profile)
-    if not unrestricted_contact(db, destination):
+    context = dialer_policy.prepare_context(db,actor,profile,destination,campaign_id,automatic) if isinstance(profile,ManualVoiceProfile) else None
+    if context is None and not unrestricted_contact(db, destination):
         raise HTTPException(400, 'Ce contact est marqué « Ne pas contacter » ou « Non intéressé ».')
     # Admission is short and global to this provider account. PostgreSQL unique
     # indexes retain the actor/destination guarantees even across API replicas.
@@ -90,10 +96,17 @@ def reserve(db, actor, identifier, profile, destination=None):
     if previous:
         if (previous['actor_id'] != actor['id'] or previous['session_hash'] != actor['session_hash']
                 or previous['profile_hash'] != binding or previous['state'] != 'reserved'
-                or previous['destination'] != destination):
+                or previous['destination'] != destination
+                or (context and (previous['campaign_id'] != context['campaign_id']
+                    or previous['dialer_generation'] != context['dialer_generation']))):
             raise HTTPException(409, 'Cette réservation ne peut pas être réutilisée.')
         return previous
     if isinstance(profile, ManualVoiceProfile):
+        now=query(db,'SELECT clock_timestamp()').scalar_one()
+        zone,reason,_=dialer_policy.attempt_limits(db,profile,destination,context['attempt_timezone'],now)
+        if reason:
+            raise HTTPException(409,'Ce numéro a atteint deux tentatives aujourd’hui ou doit attendre deux heures entre appels.')
+        context['attempt_timezone']=zone
         count = query(db, '''SELECT count(*) FROM staging.voice_intents WHERE account_sid=:account
             AND state IN ('reserved','authorized','ringing','answered')''', account=profile.account_sid).scalar_one()
         if count >= profile.max_concurrent_calls:
@@ -104,7 +117,13 @@ def reserve(db, actor, identifier, profile, destination=None):
                 clock_timestamp()+interval '2 minutes') RETURNING *''',
         id=identifier, actor=actor['id'], session=actor['session_hash'], profile=binding,
         account=profile.account_sid, application=profile.twiml_app_sid,
-        caller=profile.caller_number, destination=destination).mappings().one()
+        caller=context['caller_number'] if context else profile.caller_number, destination=destination).mappings().one()
+    if context:
+        row=query(db,'''UPDATE staging.voice_intents SET campaign_id=:campaign_id,contact_id=:contact_id,
+            callback_id=:callback_id,callback_version=:callback_version,caller_number_id=:caller_number_id,
+            membership_version=:membership_version,attempt_timezone=:attempt_timezone,
+            dialer_generation=:dialer_generation,dialer_browser_id=:dialer_browser_id
+            WHERE id=:id RETURNING *''',id=identifier,**{k:v for k,v in context.items() if k!='caller_number'}).mappings().one()
     event(db, identifier, 'reserved', {})
     audit(db, actor['id'], 'voice.reserved' if isinstance(profile, ManualVoiceProfile) else 'voice.test_reserved', identifier)
     return row
@@ -132,7 +151,7 @@ def bound(row, profile):
 
 def consume(db, profile, params):
     identifier = UUID(params['Intent'])  # The entire form was authenticated first.
-    lookup = query(db, 'SELECT actor_id,session_hash,destination FROM staging.voice_intents WHERE id=:id', id=identifier).mappings().first()
+    lookup = query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id', id=identifier).mappings().first()
     if lookup is None:
         return False
     # Keep the same user -> session -> intent lock order as human operations.
@@ -141,7 +160,10 @@ def consume(db, profile, params):
         WHERE token_hash=:hash AND user_id=:actor AND mfa_verified AND expires_at>clock_timestamp()
           AND last_seen_at>clock_timestamp()-interval '30 minutes' FOR UPDATE''',
         hash=lookup['session_hash'], actor=lookup['actor_id']).first()
-    allowed_contact = unrestricted_contact(db, lookup['destination'])
+    try:
+        allowed_contact = dialer_policy.authorize_context(db,user,lookup,profile) if isinstance(profile,ManualVoiceProfile) and user else unrestricted_contact(db,lookup['destination'])
+    except HTTPException:
+        allowed_contact = False
     row = bound(query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id FOR UPDATE', id=identifier).mappings().first(), profile)
     if row['state'] != 'reserved':
         return False  # Even the same CallSid cannot obtain a second Dial.
@@ -186,6 +208,10 @@ def advance(db, row, status, source_rank, sequence=None):
             query(db, '''UPDATE staging.voice_intents SET state='finished',outcome=:outcome,outcome_rank=:rank,
                 finished_at=coalesce(finished_at,clock_timestamp()) WHERE id=:id''',
                 id=row['id'], outcome=status, rank=source_rank)
+            query(db,'''INSERT INTO staging.voice_completion_jobs(intent_id,next_attempt_at)
+                VALUES (:id,clock_timestamp()+interval '2 seconds')
+                ON CONFLICT(intent_id) DO UPDATE SET completed_at=NULL,
+                    next_attempt_at=clock_timestamp()+interval '2 seconds' ''',id=row['id'])
     elif row['state'] not in TERMINAL and RANK[PROGRESS[status]] > RANK.get(row['state'], -1):
         query(db, 'UPDATE staging.voice_intents SET state=:state WHERE id=:id', id=row['id'], state=PROGRESS[status])
 
@@ -220,7 +246,7 @@ def notify(db, profile, kind, identifier, params):
         if child:
             attach_child(db, row, child)
         details = {'call_sid': params['CallSid'], 'status': status, 'child_call_sid': child}
-        if event(db, row['id'], kind, details):
+        if event(db, row['id'], kind, details) and (kind!='parent-status' or row['outcome_rank']>=2 or not isinstance(profile,ManualVoiceProfile)):
             advance(db, row, status, 3 if kind == 'finish' else 1)
     elif kind == 'recording':
         # DialVerb recordings always belong to the parent leg (Twilio contract).

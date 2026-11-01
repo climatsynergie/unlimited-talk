@@ -36,12 +36,12 @@ class Connection:
 
 class CallbackSchemaTests(unittest.TestCase):
     def test_readiness_requires_current_schema(self):
-        for revision in ['0004_campaigns', '0005_calendar', '0006_callbacks', '0007_voice', '0008_recordings', '0009_inbound', '9999_unknown']:
+        for revision in ['0004_campaigns', '0005_calendar', '0006_callbacks', '0007_voice', '0008_recordings', '0009_inbound', '0010_dialer', '9999_unknown']:
             with self.subTest(revision=revision):
                 engine = SimpleNamespace(connect=lambda: Connection(revision))
                 request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
                 result = ready(request)
-                if revision != '0009_inbound':
+                if revision != '0010_dialer':
                     self.assertEqual(result.status_code, 503)
                 else:
                     self.assertEqual(result['status'], 'ready')

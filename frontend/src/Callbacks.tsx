@@ -63,6 +63,7 @@ const actions: Record<string, string> = {
   "callback.updated": "Rappel modifié",
   "callback.completed": "Rappel marqué comme traité",
   "callback.cancelled": "Rappel annulé",
+  "callback.called": "Rappel effectué par téléphone",
 };
 function name(row: Callback) {
   return (

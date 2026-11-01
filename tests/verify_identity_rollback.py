@@ -26,13 +26,13 @@ def snapshot():
     result=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d',
         'unlimited_talk_staging','-tAc',"SELECT version_num || ':' || (SELECT count(*) FROM staging.identity_users) || ':' || (SELECT count(*) FROM staging.identity_audit) || ':' || (SELECT md5(string_agg(row_to_json(u)::text,'' ORDER BY id)) FROM staging.identity_users u) FROM staging.alembic_version"],text=True).strip()
     revision,users,audit,fingerprint=result.split(':')
-    assert revision=='0009_inbound' and int(users)>0 and int(audit)>0
+    assert revision=='0010_dialer' and int(users)>0 and int(audit)>0
     extra=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT (SELECT md5(coalesce(string_agg(row_to_json(c)::text,'' ORDER BY id),'')) FROM staging.contacts c) || ':' || (SELECT count(*) FROM staging.contact_history) || ':' || (SELECT count(*) FROM staging.contact_import_rows) || ':' || (SELECT count(*) FROM staging.campaigns) || ':' || (SELECT count(*) FROM staging.campaign_contacts) || ':' || (SELECT count(*) FROM staging.contact_notes) || ':' || (SELECT count(*) FROM staging.campaign_events)"],text=True).strip()
     calendar=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.appointments t) || ':' || (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.appointment_events t)"],text=True).strip()
     callbacks=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.callbacks t) || ':' || (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.callback_events t)"],text=True).strip()
     voice=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.voice_intents t) || ':' || (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY id),'')) FROM staging.voice_events t) || ':' || (SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY sid),'')) FROM staging.voice_recordings t)"],text=True).strip()
     jobs=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT md5(coalesce(string_agg(row_to_json(j)::text,'' ORDER BY recording_sid),'')) FROM staging.voice_archive_jobs j"],text=True).strip()
-    inbound=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT " + " || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+" t)" for table in ('inbound_queues','inbound_queue_agents','inbound_queue_events','inbound_followups','inbound_interactions','inbound_followup_events'))],text=True).strip()
+    inbound=subprocess.check_output([*compose,'exec','-T','db','psql','-U','postgres','-d','unlimited_talk_staging','-tAc',"SELECT " + " || ':' || ".join("(SELECT md5(coalesce(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) FROM staging."+table+" t)" for table in ('inbound_queues','inbound_queue_agents','inbound_queue_events','inbound_followups','inbound_interactions','inbound_followup_events','voice_numbers','voice_directory_state','voice_campaign_settings','voice_region_rules','voice_dialer_sessions','voice_completion_jobs'))],text=True).strip()
     return result+':'+extra+':'+calendar+':'+callbacks+':'+voice+':'+jobs+':'+inbound
 
 
@@ -41,7 +41,7 @@ def ready(revision):
         try:
             with urllib.request.urlopen(base+'/health/ready',timeout=5) as response:
                 row=json.load(response)
-            if row['migration']=='0009_inbound' and row['revision']==revision:
+            if row['migration']=='0010_dialer' and row['revision']==revision:
                 return
         except (urllib.error.URLError,TimeoutError):
             pass
@@ -50,7 +50,7 @@ def ready(revision):
 
 
 before=snapshot()
-old_revision='acc101c5071beea7fc37553297e3529921e3aef1'
+old_revision='c59c839937eaa96b2d42c055c0efd82027d26070'
 with tempfile.TemporaryDirectory(prefix='identity-app-rollback-') as tmp:
     override=Path(tmp)/'rollback.yaml'
     override.write_text('services:\n  api:\n    image: unlimited-talk-staging-api:identity-rollback\n')

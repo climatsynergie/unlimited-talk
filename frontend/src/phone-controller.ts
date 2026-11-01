@@ -6,6 +6,11 @@ export type Intent = {
   outcome: string | null;
   owned_session?: boolean;
   destination?: string;
+  campaign_id?: string | null;
+  contact_id?: string | null;
+  callback_id?: string | null;
+  caller_number?: string | null;
+  automatic?: boolean;
 };
 export type Session = {
   enabled: boolean;
@@ -28,9 +33,40 @@ export type Transport = {
     id: string,
     signal: AbortSignal,
     destination: string,
+    campaignId?: string,
   ) => Promise<{ intent: Intent; token: string }>;
   cancel: (id: string, signal: AbortSignal) => Promise<Intent>;
   history: (id: string, signal: AbortSignal) => Promise<{ intent: Intent }>;
+};
+export type Dialer = {
+  mode: "running" | "paused" | "stopped" | "booking";
+  generation: number;
+  campaign_id: string | null;
+  browser_id: string | null;
+  hold_token?: string | null;
+  owned_session?: boolean;
+};
+export type AutomaticTransport = {
+  session: (
+    signal: AbortSignal,
+  ) => Promise<{ dialer: Dialer; enabled: boolean }>;
+  control: (
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ) => Promise<{ dialer: Dialer }>;
+  heartbeat: (
+    body: { browser_id: string; generation: number },
+    signal: AbortSignal,
+  ) => Promise<{ dialer: Dialer }>;
+  next: (
+    body: { id: string; browser_id: string; generation: number },
+    signal: AbortSignal,
+  ) => Promise<{
+    intent?: Intent;
+    token?: string;
+    idle?: string;
+    dialer: Dialer;
+  }>;
 };
 export type PhoneState = {
   loaded: boolean;
@@ -39,6 +75,13 @@ export type PhoneState = {
   dialNumber: string;
   maxDurationSeconds: number;
   inputDevice: string;
+  campaignId: string;
+  automatic: Dialer | null;
+  automaticLoaded: boolean;
+  automaticRunning: boolean;
+  automaticBusy: boolean;
+  automaticMessage: string;
+  automaticError: string;
   phase:
     | "idle"
     | "preparing"
@@ -49,6 +92,7 @@ export type PhoneState = {
     | "ending"
     | "checking";
   intent: Intent | null;
+  lastIntent: Intent | null;
   local: boolean;
   error: string;
   result: string;
@@ -70,6 +114,12 @@ export class PhoneController {
   private pending: number | null = null;
   private requests = new AbortController();
   private mediaAttempted = false;
+  private automaticTransport?: AutomaticTransport;
+  private browserId = crypto.randomUUID();
+  private automaticEpoch = 0;
+  private automaticPolling = false;
+  private automaticArmed = false;
+  private bookingArmed = false;
   state: PhoneState = {
     loaded: false,
     enabled: false,
@@ -77,8 +127,16 @@ export class PhoneController {
     dialNumber: "",
     maxDurationSeconds: 180,
     inputDevice: "",
+    campaignId: "",
+    automatic: null,
+    automaticLoaded: false,
+    automaticRunning: false,
+    automaticBusy: false,
+    automaticMessage: "",
+    automaticError: "",
     phase: "idle",
     intent: null,
+    lastIntent: null,
     local: false,
     error: "",
     result: "",
@@ -87,9 +145,11 @@ export class PhoneController {
   constructor(
     transport: Transport,
     factory: (token: string) => Promise<MediaDevice>,
+    automaticTransport?: AutomaticTransport,
   ) {
     this.transport = transport;
     this.factory = factory;
+    this.automaticTransport = automaticTransport;
   }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -130,6 +190,10 @@ export class PhoneController {
     this.update({
       phase: "idle",
       intent: null,
+      lastIntent:
+        row.state === "finished"
+          ? { ...this.state.intent, ...row }
+          : this.state.lastIntent,
       local: false,
       error: "",
       result: row.outcome || row.state,
@@ -223,21 +287,235 @@ export class PhoneController {
     if (this.closed || this.state.phase !== "idle") return;
     this.update({ inputDevice: value });
   }
-  async start(input = this.state.inputDevice, number = this.state.dialNumber) {
+  setCampaignId(value: string) {
+    if (this.closed || this.state.phase !== "idle" || this.automaticArmed)
+      return;
+    this.update({ campaignId: value });
+  }
+  private applyAutomatic(row: Dialer) {
+    if (row.mode !== "running" || row.browser_id !== this.browserId)
+      this.automaticArmed = false;
+    this.update({
+      automatic: row,
+      automaticLoaded: true,
+      automaticRunning: this.automaticArmed && row.mode === "running",
+    });
+  }
+  async refreshAutomatic() {
+    if (!this.automaticTransport || this.closed) return;
+    const epoch = this.automaticEpoch;
+    try {
+      const result = await this.automaticTransport.session(
+        this.requests.signal,
+      );
+      if (this.closed || epoch !== this.automaticEpoch) return;
+      this.applyAutomatic(result.dialer);
+    } catch {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({
+          automaticLoaded: true,
+          automaticError:
+            "Le composeur ne peut pas être vérifié. Actualisez avant de le démarrer.",
+        });
+    }
+  }
+  async startAutomatic(campaignId: string) {
+    if (
+      !this.automaticTransport ||
+      this.closed ||
+      !this.state.enabled ||
+      !this.state.loaded ||
+      this.state.automaticBusy ||
+      !campaignId
+    )
+      return;
+    const epoch = ++this.automaticEpoch;
+    this.update({ automaticBusy: true, automaticError: "" });
+    try {
+      const result = await this.automaticTransport.control(
+        {
+          action: "start",
+          browser_id: this.browserId,
+          campaign_id: campaignId,
+        },
+        this.requests.signal,
+      );
+      if (this.closed || epoch !== this.automaticEpoch) return;
+      this.automaticArmed = true;
+      this.applyAutomatic(result.dialer);
+      this.update({
+        campaignId,
+        automaticMessage: "Recherche du prochain contact ou rappel dû…",
+      });
+    } catch (error) {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({
+          automaticError:
+            error instanceof Error
+              ? error.message
+              : "Le composeur n’a pas démarré.",
+        });
+    } finally {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({ automaticBusy: false });
+    }
+  }
+  async pauseAutomatic(stop = false) {
+    this.automaticArmed = false;
+    const epoch = ++this.automaticEpoch;
+    this.update({
+      automaticRunning: false,
+      automaticBusy: true,
+      automaticMessage: stop
+        ? "Enchaînement arrêté."
+        : "Enchaînement en pause.",
+    });
+    const row = this.state.automatic;
+    try {
+      if (
+        this.automaticTransport &&
+        row?.generation &&
+        row.browser_id === this.browserId
+      ) {
+        const result = await this.automaticTransport.control(
+          {
+            action: stop ? "stop" : "pause",
+            browser_id: this.browserId,
+            generation: row.generation,
+          },
+          this.requests.signal,
+        );
+        if (!this.closed && epoch === this.automaticEpoch)
+          this.applyAutomatic(result.dialer);
+      }
+    } catch {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({
+          automaticError:
+            "L’enchaînement est suspendu sur cet appareil. La confirmation serveur reste à vérifier.",
+        });
+    } finally {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({ automaticBusy: false });
+    }
+  }
+  async beginBooking(campaignId: string): Promise<string | null> {
+    if (!this.automaticTransport || this.closed) return null;
+    this.bookingArmed = this.automaticArmed;
+    this.automaticArmed = false;
+    this.update({ automaticRunning: false });
+    const epoch = ++this.automaticEpoch;
+    const current = await this.automaticTransport.session(this.requests.signal);
+    if (this.closed || epoch !== this.automaticEpoch)
+      throw new Error("La session du composeur a changé.");
+    const hold = crypto.randomUUID();
+    const result = await this.automaticTransport.control(
+      {
+        action: "hold",
+        browser_id: this.browserId,
+        campaign_id: campaignId,
+        generation: current.dialer.generation || undefined,
+        hold_token: hold,
+      },
+      this.requests.signal,
+    );
+    if (this.closed || epoch !== this.automaticEpoch)
+      throw new Error("La saisie du rendez-vous doit être vérifiée.");
+    this.applyAutomatic(result.dialer);
+    return hold;
+  }
+  async endBooking(token: string | null) {
+    const row = this.state.automatic;
+    if (
+      !this.automaticTransport ||
+      !token ||
+      !row ||
+      row.hold_token !== token ||
+      this.closed
+    )
+      return;
+    const epoch = ++this.automaticEpoch;
+    try {
+      const result = await this.automaticTransport.control(
+        {
+          action: "release",
+          browser_id: this.browserId,
+          generation: row.generation,
+          hold_token: token,
+        },
+        this.requests.signal,
+      );
+      if (this.closed || epoch !== this.automaticEpoch) return;
+      this.automaticArmed = this.bookingArmed;
+      this.bookingArmed = false;
+      this.applyAutomatic(result.dialer);
+    } catch {
+      if (!this.closed && epoch === this.automaticEpoch)
+        this.update({
+          automaticError:
+            "Le composeur reste en pause. Vérifiez puis reprenez explicitement.",
+        });
+    }
+  }
+  async automaticTick() {
+    const row = this.state.automatic;
+    if (
+      !this.automaticTransport ||
+      this.closed ||
+      (!this.automaticArmed &&
+        !(row?.mode === "booking" && row.browser_id === this.browserId)) ||
+      this.automaticPolling ||
+      this.state.automaticBusy ||
+      !row
+    )
+      return;
+    this.automaticPolling = true;
+    const epoch = this.automaticEpoch;
+    try {
+      const result = await this.automaticTransport.heartbeat(
+        { browser_id: this.browserId, generation: row.generation },
+        this.requests.signal,
+      );
+      if (this.closed || epoch !== this.automaticEpoch) return;
+      this.applyAutomatic(result.dialer);
+      if (this.automaticArmed && this.state.phase === "idle")
+        await this.start(undefined, "", this.state.campaignId, true);
+    } catch {
+      if (!this.closed && epoch === this.automaticEpoch) {
+        this.automaticArmed = false;
+        this.bookingArmed = false;
+        this.update({
+          automaticRunning: false,
+          automaticError:
+            "Composeur suspendu après une perte de connexion. Vérifiez l’appel avant de reprendre.",
+        });
+      }
+    } finally {
+      this.automaticPolling = false;
+    }
+  }
+  async start(
+    input = this.state.inputDevice,
+    number = this.state.dialNumber,
+    campaignId = this.state.campaignId,
+    automatic = false,
+  ) {
     if (
       this.closed ||
       !this.state.loaded ||
       !this.state.enabled ||
       this.state.phase !== "idle" ||
-      this.pending
+      this.pending ||
+      (!automatic && this.automaticArmed)
     )
       return;
     // Strip only presentation characters. Extensions, letters and control
     // characters must never be interpreted as a different phone number.
     const destination = number.replace(/[ ().-]/g, "");
     if (
-      destination.trim() !== destination ||
-      !/^\+[1-9][0-9]{8,14}$/.test(destination)
+      !automatic &&
+      (destination.trim() !== destination ||
+        !/^\+[1-9][0-9]{8,14}$/.test(destination))
     ) {
       this.update({
         error:
@@ -246,6 +524,7 @@ export class PhoneController {
       return;
     }
     const generation = ++this.generation;
+    const automaticEpoch = this.automaticEpoch;
     const id = crypto.randomUUID();
     this.identifier = id;
     this.mediaAttempted = false;
@@ -261,13 +540,74 @@ export class PhoneController {
     });
     let attemptedConnect = false;
     try {
-      const reserved = await this.transport.reserve(
-        id,
-        this.requests.signal,
-        destination,
-      );
+      const reserved =
+        automatic && this.automaticTransport && this.state.automatic
+          ? await this.automaticTransport.next(
+              {
+                id,
+                browser_id: this.browserId,
+                generation: this.state.automatic.generation,
+              },
+              this.requests.signal,
+            )
+          : await this.transport.reserve(
+              id,
+              this.requests.signal,
+              destination,
+              campaignId || undefined,
+            );
       if (this.closed || generation !== this.generation) return;
+      if (
+        !("intent" in reserved) ||
+        !reserved.intent ||
+        !("token" in reserved) ||
+        !reserved.token
+      ) {
+        this.identifier = null;
+        this.pending = null;
+        const reasons: Record<string, string> = {
+          empty:
+            "Aucun contact disponible. Les rappels dus restent prioritaires.",
+          policy:
+            "Les horaires, numéros ou délais de rappel ne permettent aucun appel pour le moment.",
+          claimed: "Les contacts disponibles sont déjà pris en charge.",
+          settling: "Enregistrement du résultat de l’appel…",
+          active_call: "Un appel reste à vérifier avant de continuer.",
+          presence_expired:
+            "Session du composeur expirée. Reprenez explicitement.",
+        };
+        if ("dialer" in reserved && automaticEpoch === this.automaticEpoch)
+          this.applyAutomatic(reserved.dialer);
+        this.release();
+        this.update({
+          phase: "idle",
+          local: false,
+          intent: null,
+          automaticMessage:
+            "idle" in reserved
+              ? reasons[reserved.idle || ""] || "Composeur en attente."
+              : "Composeur en attente.",
+        });
+        return;
+      }
+      if (
+        automatic &&
+        (!this.automaticArmed || automaticEpoch !== this.automaticEpoch)
+      ) {
+        this.update({
+          intent: { ...reserved.intent, owned_session: true },
+          phase: "checking",
+          local: false,
+        });
+        const cancelled = await this.transport.cancel(id, this.requests.signal);
+        this.settle(cancelled);
+        return;
+      }
+      if (automatic && "dialer" in reserved)
+        this.applyAutomatic(reserved.dialer);
       this.update({ intent: { ...reserved.intent, owned_session: true } });
+      if (automatic) this.update({ automaticMessage: "" });
+      this.update({ destination: reserved.intent.destination || destination });
       const device = await this.factory(reserved.token);
       // The token stays only in this stack and the SDK, never in React/storage.
       if (this.closed || generation !== this.generation) {
@@ -276,10 +616,21 @@ export class PhoneController {
       }
       this.device = device;
       device.onError(() => {
-        if (generation === this.generation) this.interrupted();
+        if (generation === this.generation) {
+          if (automatic) void this.pauseAutomatic();
+          this.interrupted();
+        }
       });
       if (this.closed || generation !== this.generation) {
         device.destroy();
+        return;
+      }
+      if (
+        automatic &&
+        (!this.automaticArmed || automaticEpoch !== this.automaticEpoch)
+      ) {
+        device.destroy();
+        this.settle(await this.transport.cancel(id, this.requests.signal));
         return;
       }
       this.update({ phase: "connecting" });
@@ -302,7 +653,10 @@ export class PhoneController {
       call.on("reconnected", when("connected"));
       for (const event of ["disconnect", "cancel", "reject", "error"])
         call.on(event, () => {
-          if (generation === this.generation) this.interrupted();
+          if (generation === this.generation) {
+            if (automatic && event === "error") void this.pauseAutomatic();
+            this.interrupted();
+          }
         });
       // The provider enforces the configured limit; allow signalling teardown.
       if (this.watchdog !== null) clearTimeout(this.watchdog);
@@ -312,6 +666,7 @@ export class PhoneController {
       );
     } catch (error) {
       if (this.closed || generation !== this.generation) return;
+      if (automatic) void this.pauseAutomatic();
       ++this.generation;
       this.release();
       if (
@@ -416,6 +771,8 @@ export class PhoneController {
     }
   }
   dispose() {
+    this.automaticArmed = false;
+    ++this.automaticEpoch;
     this.closed = true;
     this.requests.abort();
     ++this.generation;
@@ -427,6 +784,12 @@ export class PhoneController {
     this.requests = new AbortController();
     this.refreshing = false;
     this.pending = null;
-    this.update({ local: false, phase: this.identifier ? "checking" : "idle" });
+    this.automaticArmed = false;
+    this.update({
+      local: false,
+      automaticRunning: false,
+      automaticBusy: false,
+      phase: this.identifier ? "checking" : "idle",
+    });
   }
 }

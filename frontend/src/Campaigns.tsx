@@ -5,6 +5,7 @@ import { CallbackForm } from "./Callbacks";
 import { AppointmentForm } from "./Calendar";
 import { Field, Modal, Notice, Submit } from "./ui";
 import { usePhone } from "./Phone";
+import { CallingSettingsDialog } from "./CallingSettings";
 
 type Campaign = {
   id: string;
@@ -88,6 +89,9 @@ const actions: Record<string, string> = {
   "contact.restored": "Restrictions révisées",
   "note.added": "Note ajoutée",
   "contact.removed": "Retrait de la campagne",
+  "call.finished": "Appel terminé",
+  "call.pipeline_updated": "Étape mise à jour après l’appel",
+  "calling.settings_changed": "Réglages téléphoniques modifiés",
 };
 function name(card: Card) {
   return (
@@ -111,6 +115,7 @@ export function Campaigns({ admin }: { admin: boolean }) {
   const [revision, setRevision] = useState(0);
   const [create, setCreate] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [callingSettings, setCallingSettings] = useState(false);
   const [enroll, setEnroll] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -270,6 +275,14 @@ export function Campaigns({ admin }: { admin: boolean }) {
               onClick={() => setSettings(true)}
             >
               Réglages de la campagne
+            </button>
+          ) : null}
+          {board && admin ? (
+            <button
+              className="button secondary"
+              onClick={() => setCallingSettings(true)}
+            >
+              Téléphonie de la campagne
             </button>
           ) : null}
           <button
@@ -442,6 +455,12 @@ export function Campaigns({ admin }: { admin: boolean }) {
           campaignId={selected}
           onClose={() => setEnroll(false)}
           onSaved={() => setRevision((n) => n + 1)}
+        />
+      ) : null}
+      {callingSettings && selected ? (
+        <CallingSettingsDialog
+          campaignId={selected}
+          onClose={() => setCallingSettings(false)}
         />
       ) : null}
       {detail && selected && board ? (
@@ -1046,6 +1065,52 @@ export function EnrollContacts({
   );
 }
 
+export function CallContactDialog({
+  campaignId,
+  contactId,
+  admin,
+  onClose,
+}: {
+  campaignId: string;
+  contactId: string;
+  admin: boolean;
+  onClose: () => void;
+}) {
+  const [board, setBoard] = useState<Board | null>(null);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    setError("");
+    api<Board>(`/campaigns/${campaignId}/board`, { signal: abort.signal })
+      .then((result) => {
+        if (!abort.signal.aborted) setBoard(result);
+      })
+      .catch((error) => {
+        if (!abort.signal.aborted) setError(message(error));
+      });
+    return () => abort.abort();
+  }, [campaignId, revision]);
+  if (!board || error)
+    return (
+      <Modal title="Fiche de l’appel" onClose={onClose}>
+        {error ? <Notice error>{error}</Notice> : <p>Chargement du contact…</p>}
+      </Modal>
+    );
+  return (
+    <CardDetail
+      key={`${contactId}-${revision}`}
+      campaign={board.campaign}
+      identifier={contactId}
+      stages={board.stages}
+      admin={admin}
+      onClose={onClose}
+      onMove={() => setRevision((n) => n + 1)}
+      onChanged={() => setRevision((n) => n + 1)}
+    />
+  );
+}
+
 function CardDetail({
   campaign,
   identifier,
@@ -1069,6 +1134,7 @@ function CardDetail({
   }, [controller]);
   const [data, setData] = useState<Detail | null>(null);
   const [booking, setBooking] = useState(false);
+  const bookingHold = useRef<string | null>(null);
   const [callback, setCallback] = useState(false);
   const [target, setTarget] = useState("");
   const [revision, setRevision] = useState(0);
@@ -1235,12 +1301,17 @@ function CardDetail({
                 !phone.loaded ||
                 !phone.enabled ||
                 calling ||
+                phone.automaticRunning ||
                 busy ||
                 data.contact.do_not_contact ||
                 data.contact.non_interested
               }
               onClick={() =>
-                void controller.start(undefined, data.contact.phone)
+                void controller.start(
+                  undefined,
+                  data.contact.phone,
+                  campaign.id,
+                )
               }
             >
               Appeler ce contact
@@ -1284,9 +1355,15 @@ function CardDetail({
                     membership_version: data.contact.version,
                     timezone: campaign.timezone,
                   }}
-                  onCancel={() => setBooking(false)}
+                  onCancel={() => {
+                    setBooking(false);
+                    void controller.endBooking(bookingHold.current);
+                    bookingHold.current = null;
+                  }}
                   onSaved={() => {
                     setBooking(false);
+                    void controller.endBooking(bookingHold.current);
+                    bookingHold.current = null;
                     setRevision((n) => n + 1);
                     onChanged();
                   }}
@@ -1299,7 +1376,18 @@ function CardDetail({
               <button
                 className="button primary"
                 disabled={busy}
-                onClick={() => setBooking(true)}
+                onClick={() => {
+                  setBusy(true);
+                  setError("");
+                  void controller
+                    .beginBooking(campaign.id)
+                    .then((token) => {
+                      bookingHold.current = token;
+                      setBooking(true);
+                    })
+                    .catch((error) => setError(message(error)))
+                    .finally(() => setBusy(false));
+                }}
               >
                 Prendre rendez-vous
               </button>
@@ -1389,6 +1477,19 @@ function CardDetail({
                   <p>
                     {String(e.details.previous_stage_name)} →{" "}
                     {String(e.details.stage_name)}
+                  </p>
+                ) : null}
+                {e.action === "call.finished" ? (
+                  <p>
+                    {(
+                      {
+                        completed: "Conversation terminée",
+                        busy: "Occupé",
+                        "no-answer": "Pas de réponse",
+                        failed: "Échec",
+                        canceled: "Annulé",
+                      } as Record<string, string>
+                    )[String(e.details.outcome)] || "Appel terminé"}
                   </p>
                 ) : null}
                 <small>
