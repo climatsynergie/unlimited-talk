@@ -40,6 +40,7 @@ export function Workstation({ admin }: { admin: boolean }) {
   const [playing, setPlaying] = useState(false);
   const [played, setPlayed] = useState(false);
   const [heard, setHeard] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
   const mounted = useRef(false);
   const generation = useRef(0);
   const microphone = useRef<Microphone>({});
@@ -252,13 +253,48 @@ export function Workstation({ admin }: { admin: boolean }) {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow">VOTRE ÉQUIPEMENT</span>
+          <span className="eyebrow">VOTRE ESPACE D’APPELS</span>
           <h1>Poste d’appel</h1>
-          <p>Vérifiez votre microphone et le son dans votre casque.</p>
+          <p>
+            Vos campagnes, vos contacts et vos conversations au même endroit.
+          </p>
         </div>
+        <button
+          type="button"
+          className="button secondary"
+          disabled={calling}
+          aria-expanded={audioOpen}
+          aria-controls="audio-checks"
+          onClick={() => {
+            stopMicrophone();
+            stopOutput();
+            setAudioOpen((open) => !open);
+          }}
+        >
+          <Icon name="headset" />
+          {audioOpen ? "Fermer les tests du casque" : "Tester mon casque"}
+        </button>
       </div>
       {error ? <Notice error>{error}</Notice> : null}
-      <div className="audio-grid">
+      <div className="calling-workspace-grid">
+        <AutoDialerPanel
+          admin={admin}
+          beforeStart={() => {
+            stopMicrophone();
+            stopOutput();
+            setAudioOpen(false);
+          }}
+        />
+        <PhonePanel
+          input={deviceId}
+          beforeStart={() => {
+            stopMicrophone();
+            stopOutput();
+            setAudioOpen(false);
+          }}
+        />
+      </div>
+      <div id="audio-checks" className="audio-grid" hidden={!audioOpen}>
         <section
           className="panel audio-panel"
           aria-labelledby="microphone-heading"
@@ -374,22 +410,8 @@ export function Workstation({ admin }: { admin: boolean }) {
           {heard ? <p className="audio-result">Écoute confirmée.</p> : null}
         </section>
       </div>
-      <PhonePanel
-        input={deviceId}
-        beforeStart={() => {
-          stopMicrophone();
-          stopOutput();
-        }}
-      />
-      <AutoDialerPanel
-        admin={admin}
-        beforeStart={() => {
-          stopMicrophone();
-          stopOutput();
-        }}
-      />
+      <CallHistory disabled={calling} admin={admin} />
       {admin ? <LiveCalls /> : null}
-      <CallHistory disabled={calling} />
     </>
   );
 }

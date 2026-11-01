@@ -35,19 +35,35 @@ export function AutoDialerPanel({
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    api<{ items: Campaign[] }>("/telephony/dialer/campaigns", {
-      signal: controller.signal,
-    })
-      .then((result) => {
-        if (!controller.signal.aborted) setCampaigns(result.items);
+    let pending = false;
+    const refresh = () => {
+      if (
+        pending ||
+        controller.signal.aborted ||
+        document.visibilityState === "hidden"
+      )
+        return;
+      pending = true;
+      api<{ items: Campaign[] }>("/telephony/dialer/campaigns", {
+        signal: controller.signal,
       })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError(message(e));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
+        .then((result) => {
+          if (!controller.signal.aborted) setCampaigns(result.items);
+        })
+        .catch((e) => {
+          if (!controller.signal.aborted) setError(message(e));
+        })
+        .finally(() => {
+          pending = false;
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 15000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [revision]);
   useEffect(() => {
     void controller.refreshAutomatic();
@@ -92,9 +108,25 @@ export function AutoDialerPanel({
     booking: "Suspendu pendant la saisie du rendez-vous",
   };
   const active = state.intent || state.lastIntent;
+  const selectedCampaign = campaigns.find(
+    (campaign) => campaign.id === state.campaignId,
+  );
+  const needsSettings =
+    !!selectedCampaign && !selectedCampaign.automatic_enabled;
   return (
-    <section className="panel audio-panel" aria-labelledby="automatic-heading">
-      <h2 id="automatic-heading">Composeur automatique</h2>
+    <section
+      className="panel audio-panel automatic-panel"
+      aria-labelledby="automatic-heading"
+    >
+      <div className="automatic-title">
+        <div>
+          <span className="eyebrow">VOS APPELS SORTANTS</span>
+          <h2 id="automatic-heading">Composeur automatique</h2>
+        </div>
+        <span className={`dialer-status dialer-status-${mode}`}>
+          {labels[mode]}
+        </span>
+      </div>
       <p>
         Les rappels dus de vos campagnes sont prioritaires. Les autres contacts
         suivent la file de la campagne choisie.
@@ -102,6 +134,13 @@ export function AutoDialerPanel({
       {error ? <Notice error>{error}</Notice> : null}
       {state.automaticError ? (
         <Notice error>{state.automaticError}</Notice>
+      ) : null}
+      {needsSettings ? (
+        <Notice>
+          {admin
+            ? "Choisissez le numéro émetteur dans « Régler la téléphonie » pour démarrer cette campagne."
+            : "Un administrateur doit choisir le numéro émetteur de cette campagne. La liste se met à jour automatiquement après son enregistrement."}
+        </Notice>
       ) : null}
       <label>
         Campagne d’appel
@@ -130,7 +169,9 @@ export function AutoDialerPanel({
       ) : !campaigns.length ? (
         <p>Aucune campagne active ne vous est attribuée.</p>
       ) : null}
-      <p role="status">{labels[mode]}</p>
+      <p role="status" className="sr-only">
+        {labels[mode]}
+      </p>
       {state.automaticMessage ? <p>{state.automaticMessage}</p> : null}
       <div className="audio-actions">
         {preparing ? (
@@ -147,7 +188,7 @@ export function AutoDialerPanel({
         ) : null}
         <button
           type="button"
-          className="button primary"
+          className="button primary dialer-start"
           disabled={
             !state.enabled ||
             !state.loaded ||
@@ -156,6 +197,7 @@ export function AutoDialerPanel({
             preparing ||
             busy ||
             !state.campaignId ||
+            needsSettings ||
             state.automaticRunning
           }
           onClick={() => void start()}

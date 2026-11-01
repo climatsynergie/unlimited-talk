@@ -2,7 +2,8 @@
 import re
 from threading import BoundedSemaphore
 from uuid import UUID
-from fastapi import APIRouter,HTTPException,Request
+from typing import Literal
+from fastapi import APIRouter,HTTPException,Request,Query
 from pydantic import AwareDatetime
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
@@ -16,17 +17,39 @@ playback_slots=BoundedSemaphore(2)
 
 
 @router.get('/calls')
-def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UUID|None=None):
+def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UUID|None=None,
+          q:str=Query(default='',max_length=120),outcome:Literal['','completed','no-answer','busy','failed','canceled']='',
+          recordings_only:bool=False,actor_id:UUID|None=None,destination:str=Query(default='',max_length=16),
+          from_at:AwareDatetime|None=None,until_at:AwareDatetime|None=None):
     if (before_created_at is None)!=(before_id is None):
         raise HTTPException(400,'Curseur d’historique incomplet.')
+    if from_at and until_at and until_at<=from_at:raise HTTPException(400,'La date de fin doit suivre la date de début.')
+    if destination and not re.fullmatch(r'\+[1-9][0-9]{8,14}',destination):raise HTTPException(400,'Numéro international invalide.')
+    search=q.strip()
+    if search and all(c in '+0123456789 ().-' for c in search):search=re.sub(r'[ ().-]','',search)
+    search='%'+search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
     with request.app.state.engine.begin() as db:
         user=identity.authenticate(db,request)
-        rows=query(db,'''SELECT i.id,i.created_at,i.destination,i.state,i.outcome,u.display_name AS actor_name
+        if actor_id and user['role']!='admin' and actor_id!=user['id']:raise HTTPException(403,'Vous pouvez consulter uniquement vos appels.')
+        rows=query(db,'''SELECT i.id,i.created_at,i.finished_at,i.destination,i.state,i.outcome,i.caller_number,
+            i.actor_id,i.campaign_id,i.contact_id,u.display_name AS actor_name,ca.name AS campaign_name,
+            coalesce(nullif(trim(c.profile->>'display_name'),''),nullif(trim(concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name')),'')) AS contact_name
             FROM staging.voice_intents i JOIN staging.identity_users u ON u.id=i.actor_id
-            WHERE (:admin OR i.actor_id=:actor) AND
+            LEFT JOIN staging.campaigns ca ON ca.id=i.campaign_id LEFT JOIN staging.contacts c ON c.id=i.contact_id
+            WHERE (:admin OR i.actor_id=:actor)
+              AND (CAST(:agent AS uuid) IS NULL OR i.actor_id=CAST(:agent AS uuid))
+              AND (:destination='' OR i.destination=:destination)
+              AND (:outcome='' OR i.outcome=:outcome)
+              AND (NOT :recordings OR EXISTS(SELECT 1 FROM staging.voice_recordings r WHERE r.intent_id=i.id))
+              AND (CAST(:from_at AS timestamptz) IS NULL OR i.created_at>=CAST(:from_at AS timestamptz))
+              AND (CAST(:until_at AS timestamptz) IS NULL OR i.created_at<CAST(:until_at AS timestamptz))
+              AND (i.destination ILIKE :search OR u.display_name ILIKE :search OR ca.name ILIKE :search OR c.profile->>'display_name' ILIKE :search
+                   OR concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name') ILIKE :search)
+              AND
               (:initial OR (i.created_at,i.id)<(CAST(:before_at AS timestamptz),CAST(:before_id AS uuid)))
             ORDER BY i.created_at DESC,i.id DESC LIMIT 21''',admin=user['role']=='admin',actor=user['id'],
-            initial=before_id is None,before_at=before_created_at,before_id=before_id).mappings().all()
+            initial=before_id is None,before_at=before_created_at,before_id=before_id,
+            agent=actor_id,destination=destination,outcome=outcome,recordings=recordings_only,from_at=from_at,until_at=until_at,search=search).mappings().all()
         items=[dict(row) for row in rows[:20]]
         recordings=[]
         if items:
@@ -44,6 +67,16 @@ def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UU
                 for r in recordings if r['intent_id']==item['id']]
         cursor={'id':str(items[-1]['id']),'created_at':items[-1]['created_at'].isoformat()} if len(rows)>20 else None
         return {'items':items,'next_cursor':cursor}
+
+
+@router.get('/call-agents')
+def call_agents(request:Request):
+    with request.app.state.engine.begin() as db:
+        user=identity.admin(db,request)
+        rows=query(db,'''SELECT u.id,u.display_name FROM staging.identity_users u
+            WHERE (u.role='agent' AND u.is_active) OR EXISTS(SELECT 1 FROM staging.voice_intents i WHERE i.actor_id=u.id)
+            ORDER BY lower(u.display_name),u.id LIMIT 1000''').mappings().all()
+        return {'items':[dict(row) for row in rows]}
 
 
 def authorize(request,recording_sid):

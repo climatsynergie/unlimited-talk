@@ -8,17 +8,20 @@ part uniquement parce qu’un rappel devient dû ou qu’un worker redémarre.
 ## Parcours administrateur
 
 Dans **Campagnes → Téléphonie de la campagne**, ou **Poste d’appel → Régler la
-téléphonie**, synchroniser les numéros Twilio, choisir le numéro par défaut et les
-horaires dans le fuseau de la campagne. Activer le composeur et enregistrer.
-Les numéros affichés proviennent exclusivement de l’inventaire Voice du compte
-Twilio configuré. Cette synchronisation ne modifie ni numéro ni routage Twilio.
+ téléphonie**, choisir un numéro vérifié et enregistrer. Cet enregistrement active
+le composeur de la campagne. L’interface ne demande ni plage horaire ni règle
+régionale : un numéro suffit. Les appels partent uniquement quand l’agent démarre
+son composeur et s’arrêtent après sa pause ou son arrêt.
 
-Ajouter éventuellement des règles par pays ISO (`CA`, `GB`) et/ou préfixe
-international (`+1514`, `+44`). Le préfixe correspondant le plus long prime, puis
-le pays le plus précis. Sans règle correspondante, le numéro par défaut est utilisé.
-Une règle dont le numéro est devenu indisponible bloque cet appel plutôt que de
-substituer silencieusement une autre identité. La vérification expire après 24 h ;
-le worker tente de renouveler le catalogue toutes les cinq minutes.
+Le catalogue provient du compte Twilio configuré, sans achat ni modification de
+routage fournisseur. Une liste ancienne est renouvelée par le worker. Les anciens
+réglages avancés restent lisibles par l’API pour compatibilité ; enregistrer depuis
+le formulaire simple retire leurs horaires et règles de cette campagne.
+
+La sélection d’un numéro vérifié est un réglage courant d’administrateur. Elle
+requiert la session individuelle, la MFA déjà validée, l’origine et la protection
+CSRF, sans imposer une nouvelle connexion après quinze minutes. Les opérations
+sensibles sur les identités et les accès conservent leur réauthentification.
 
 ## Parcours agent
 
@@ -40,7 +43,7 @@ La navigation interne conserve le téléphone. Un rechargement, une session expi
 une présence serveur périmée ou une erreur média demande une reprise explicite.
 Les fenêtres concurrentes ne peuvent pas contrôler simultanément le même agent.
 
-Les restrictions globales, l’attribution, les horaires et le propriétaire/date du
+Les restrictions globales, l’attribution et le propriétaire/date du
 rappel sont revérifiés au moment de l’autorisation signée. Un numéro destinataire
 ne peut recevoir que deux tentatives autorisées par jour local, espacées d’au
 moins deux heures, même en changeant de campagne. Le premier fuseau enregistré
@@ -81,7 +84,7 @@ historiques. Les archives privées et permissions de lecture restent appliquées
 5. Employer l’opérateur `control_manual_voice.py` du schéma 10 avec la révision
    réellement active : `prepare`, `check`, `public-access`, `enable`. Le catalogue
    vérifié et l’identité principale sont exigés avant l’ouverture des appels.
-6. Configurer les numéros et horaires dans l’interface, puis faire l’acceptation
+6. Choisir le numéro de chaque campagne dans l’interface, puis faire l’acceptation
    avec trois agents, trois casques et des destinataires disponibles.
 
 L’opérateur ne lance pas de conversation et ne contourne pas la chaîne attestée.

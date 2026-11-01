@@ -44,8 +44,8 @@ def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_tok
         if campaign_id is None:raise HTTPException(400,'Choisissez une campagne.')
         campaigns.access(db,actor,campaign_id)
         config=policy.settings(db,campaign_id)
-        if not config or not config['enabled'] or not config['hours'] or not config['default_number_id']:
-            raise HTTPException(409,'Un administrateur doit configurer le composeur, les numéros et les horaires de cette campagne.')
+        if not config or not config['enabled'] or not config['default_number_id']:
+            raise HTTPException(409,'Un administrateur doit choisir le numéro émetteur de cette campagne.')
         if row and row['mode']=='running' and row['lease_alive'] and (row['browser_id']!=browser_id or row['session_hash']!=actor['session_hash']):
             raise HTTPException(409,'Le composeur est déjà actif dans un autre navigateur.')
         active=query(db,'''SELECT * FROM staging.voice_intents WHERE actor_id=:id

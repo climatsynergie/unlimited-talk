@@ -86,6 +86,9 @@ test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", a
     if (request.method() !== "GET") commands.push(request.url());
   });
   const response = await page.goto("/poste-appel");
+  await page
+    .getByRole("button", { name: "Tester mon casque", exact: true })
+    .click();
   expect(response?.headers()["permissions-policy"]).toBe(
     "microphone=(self), camera=()",
   );
@@ -105,6 +108,14 @@ test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", a
   await expect(
     page.getByRole("button", { name: "Appeler", exact: true }),
   ).toBeDisabled();
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -144,6 +155,14 @@ test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", a
       ),
     ),
   ).toBe(true);
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -169,9 +188,25 @@ test("refus d’autorisation lisible, puis nouvelle tentative", async ({
   page,
 }) => {
   await page.goto("/poste-appel");
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page.evaluate(() => {
     window.audioProof.mode = "denied";
   });
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -182,6 +217,14 @@ test("refus d’autorisation lisible, puis nouvelle tentative", async ({
   await page.evaluate(() => {
     window.audioProof.mode = "normal";
   });
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -197,9 +240,25 @@ test("autorisation tardive après annulation : aucune capture persistante", asyn
   page,
 }) => {
   await page.goto("/poste-appel");
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page.evaluate(() => {
     window.audioProof.mode = "pending";
   });
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -229,7 +288,23 @@ test("autorisation tardive après annulation : aucune capture persistante", asyn
 
 test("arrêt automatique et déconnexion du périphérique", async ({ page }) => {
   await page.goto("/poste-appel");
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page.clock.install();
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -247,6 +322,14 @@ test("arrêt automatique et déconnexion du périphérique", async ({ page }) =>
         .every((track) => track.readyState === "ended"),
     ),
   ).toBe(true);
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();
@@ -289,6 +372,14 @@ test("écran mobile accessible et accès avec une vraie session d’agent", asyn
   expect(result.status).toBe(0);
   const seed = JSON.parse(result.stdout) as { email: string; password: string };
   await page.goto("/poste-appel");
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await expect(
     page.getByRole("heading", { name: "Heureux de vous retrouver." }),
   ).toBeVisible();
@@ -318,6 +409,14 @@ test("écran mobile accessible et accès avec une vraie session d’agent", asyn
       targets: v.nodes.map((n) => n.target),
     })),
   ).toEqual([]);
+  if (
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .isVisible()
+  )
+    await page
+      .getByRole("button", { name: "Tester mon casque", exact: true })
+      .click();
   await page
     .getByRole("button", { name: "Tester mon microphone", exact: true })
     .click();

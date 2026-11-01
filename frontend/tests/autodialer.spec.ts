@@ -295,7 +295,7 @@ test("agent : un résultat serveur terminé déclenche le contact suivant sans n
   ).toBeVisible();
 });
 
-test("administrateur : numéros vérifiés, horaires et règle régionale conservés", async ({
+test("administrateur : un numéro suffit, sans horaires ni règles régionales", async ({
   page,
 }) => {
   const f = await setup(page, "admin");
@@ -308,38 +308,23 @@ test("administrateur : numéros vérifiés, horaires et règle régionale conser
     .click();
   const dialog = page.getByRole("dialog");
   await dialog
-    .getByLabel("Autoriser le composeur automatique pour cette campagne")
-    .check();
-  await dialog
-    .getByRole("combobox", { name: "Numéro émetteur par défaut", exact: true })
+    .getByRole("combobox", { name: "Numéro émetteur", exact: true })
     .selectOption(ca);
-  await dialog
-    .getByRole("button", { name: "Ajouter une plage horaire", exact: true })
-    .click();
-  await dialog.getByLabel("Début de la plage 1", { exact: true }).fill("08:30");
-  await dialog.getByLabel("Fin de la plage 1", { exact: true }).fill("19:00");
-  await dialog
-    .getByRole("button", { name: "Ajouter une règle régionale", exact: true })
-    .click();
-  await dialog
-    .getByLabel("Pays de la règle 1 (optionnel)", { exact: true })
-    .fill("GB");
-  await dialog
-    .getByLabel("Préfixe de la règle 1 (optionnel)", { exact: true })
-    .fill("+44");
-  await dialog
-    .getByRole("combobox", { name: "Numéro de la règle 1", exact: true })
-    .selectOption(gb);
+  await expect(
+    dialog.getByText("Horaires d’appel", { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByText("Numéros par région", { exact: true }),
+  ).toHaveCount(0);
   await dialog
     .getByRole("button", { name: "Enregistrer la téléphonie", exact: true })
     .click();
   await expect(
     dialog.getByText("Réglages téléphoniques enregistrés.", { exact: true }),
   ).toBeVisible();
-  expect(f.settings.hours).toEqual([{ weekday: 0, start: 510, end: 1140 }]);
-  expect(f.settings.rules).toEqual([
-    { number_id: gb, country: "GB", prefix: "+44" },
-  ]);
+  expect(f.settings.hours).toEqual([]);
+  expect(f.settings.rules).toEqual([]);
+  expect(f.settings.enabled).toBe(true);
   const report = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
@@ -351,8 +336,8 @@ test("administrateur : numéros vérifiés, horaires et règle régionale conser
     .getByRole("button", { name: "Régler la téléphonie", exact: true })
     .click();
   await expect(
-    page.getByLabel("Préfixe de la règle 1 (optionnel)", { exact: true }),
-  ).toHaveValue("+44");
+    page.getByRole("combobox", { name: "Numéro émetteur", exact: true }),
+  ).toHaveValue(ca);
   expect(f.nextCount).toBe(0);
 });
 

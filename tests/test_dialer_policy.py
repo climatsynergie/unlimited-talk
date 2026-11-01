@@ -21,7 +21,8 @@ class DialerPolicyTests(unittest.TestCase):
         base=dict(request_id=uuid4(),version=0,enabled=True,default_number_id=number,
             hours=[dict(weekday=0,start=540,end=1020)])
         self.assertTrue(CallingSettings(**base).enabled)
-        for invalid in [dict(default_number_id=None),dict(hours=[]),dict(hours=[dict(weekday=0,start=600,end=500)]),
+        self.assertEqual(CallingSettings(**(base|dict(hours=[]))).hours, [])
+        for invalid in [dict(default_number_id=None),dict(hours=[dict(weekday=0,start=600,end=500)]),
             dict(hours=[dict(weekday=0,start=540,end=1020),dict(weekday=0,start=600,end=1080)]),dict(enabled=1)]:
             with self.subTest(invalid=invalid),self.assertRaises(ValidationError):CallingSettings(**(base|invalid))
         rule=dict(number_id=number,country='ca',prefix='+1514')

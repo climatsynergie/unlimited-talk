@@ -40,7 +40,8 @@ def synchronize(request:Request):
     profile=getattr(request.app.state,'voice_profile',None)
     if profile is None:raise HTTPException(503,'La connexion Twilio doit être configurée.')
     with request.app.state.engine.begin() as db:
-        actor=identity.admin(db,request)
+        actor=identity.authenticate(db,request)
+        campaigns.administrator(actor)
         identity.query(db,'''INSERT INTO staging.voice_directory_state(account_sid) VALUES (:account)
             ON CONFLICT(account_sid) DO UPDATE SET requested_at=clock_timestamp(),next_attempt_at=clock_timestamp()''',account=profile.account_sid)
         identity.audit(db,actor['id'],'voice.numbers_sync_requested')
@@ -62,7 +63,8 @@ def save_settings(campaign_id:UUID,body:policy.CallingSettings,request:Request):
     if profile is None:raise HTTPException(503,'La connexion Twilio doit être configurée.')
     payload={'action':'calling.settings_changed',**body.model_dump(mode='json')}
     with request.app.state.engine.begin() as db:
-        actor=identity.admin(db,request)
+        actor=identity.authenticate(db,request)
+        campaigns.administrator(actor)
         campaigns.access(db,actor,campaign_id,edit=True)
         previous=campaigns.replay(db,actor,campaign_id,body.request_id,payload)
         if previous is not None:return {'settings':previous['after']}

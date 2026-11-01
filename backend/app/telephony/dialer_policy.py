@@ -38,8 +38,8 @@ class CallingSettings(Body):
 
     @model_validator(mode='after')
     def consistent(self):
-        if self.enabled and (self.default_number_id is None or not self.hours):
-            raise ValueError('Choisissez un numéro par défaut et des horaires avant d’activer le composeur.')
+        if self.enabled and self.default_number_id is None:
+            raise ValueError('Choisissez le numéro émetteur de la campagne.')
         self.hours=sorted(self.hours,key=lambda h:(h.weekday,h.start))
         if any(a.weekday==b.weekday and a.end>b.start for a,b in zip(self.hours,self.hours[1:])):
             raise ValueError('Les horaires se chevauchent.')
@@ -84,9 +84,9 @@ def regional_number(db,profile,campaign_id,destination):
 def campaign_allowed(db,user,campaign_id,now,automatic=False):
     campaign=campaigns.access(db,user,campaign_id)
     config=settings(db,campaign_id)
-    if automatic and (not config or not config['enabled'] or not config['hours']):
-        raise HTTPException(409,'Le composeur et ses horaires doivent être configurés pour cette campagne.')
-    if config and (automatic or config['hours']) and not within_hours(config['hours'],campaign['timezone'],now):
+    if automatic and (not config or not config['enabled']):
+        raise HTTPException(409,'Un administrateur doit choisir le numéro émetteur de cette campagne.')
+    if config and config['hours'] and not within_hours(config['hours'],campaign['timezone'],now):
         raise HTTPException(409,'Cette campagne est hors de ses horaires d’appel.')
     return campaign
 

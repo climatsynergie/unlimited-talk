@@ -386,6 +386,30 @@ try:
     batch_call=next_call(agents[0],batch_browser,batch_state)
     assert batch_call['intent']['contact_id']==str(eligible)
     agents[0].request('POST','/api/telephony/dialer/control',dict(action='stop',browser_id=str(batch_browser),generation=batch_state['generation']))
-    print('Dialer HTTP/PG: due callback ownership/priority, regional owned callers, three parallel claims, pause/consume race, booking holds, lease expiry and global attempt limits: PASS')
+    simple=admin.request('POST','/api/campaigns',dict(name='Numéro simple '+uuid4().hex,timezone='America/Toronto'),201)
+    admin.request('PUT','/api/campaigns/'+simple['id']+'/agents/'+str(agents[2].id),dict(is_active=True))
+    simple_contact=seed(simple,destination(99))
+    # Choosing an owned campaign caller is a routine admin setting: an existing
+    # MFA session remains valid without another login after fifteen minutes.
+    with engine.begin() as db:
+        session_created=query(db,'SELECT created_at FROM staging.identity_sessions WHERE token_hash=:hash',hash=digest(admin.token)).scalar_one()
+        query(db,"UPDATE staging.identity_sessions SET created_at=clock_timestamp()-interval '20 minutes' WHERE token_hash=:hash",hash=digest(admin.token))
+    try:
+        admin.request('PUT','/api/telephony/campaigns/'+simple['id']+'/calling',dict(request_id=str(uuid4()),version=0,enabled=True,default_number_id=numbers['+14165550200'],hours=[],rules=[]))
+    finally:
+        with engine.begin() as db:query(db,'UPDATE staging.identity_sessions SET created_at=:created WHERE token_hash=:hash',created=session_created,hash=digest(admin.token))
+    simple_browser=uuid4();simple_state=start(agents[2],simple_browser,simple)
+    simple_call=next_call(agents[2],simple_browser,simple_state)
+    assert simple_call['intent']['contact_id']==str(simple_contact)
+    history=agents[2].request('GET','/api/telephony/calls?'+urlencode(dict(q=destination(99))))
+    assert len(history['items'])==1 and history['items'][0]['contact_name']=='Contact composeur'
+    assert history['items'][0]['campaign_name']==simple['name'] and history['items'][0]['caller_number']=='+14165550200'
+    assert agents[2].request('GET','/api/telephony/calls?'+urlencode(dict(destination=destination(99),recordings_only='true')))['items']==[]
+    assert agents[2].request('GET','/api/telephony/calls?'+urlencode(dict(q="%' OR true --")))['items']==[]
+    agents[1].request('GET','/api/telephony/calls?actor_id='+str(agents[2].id),expected=403)
+    agents[2].request('GET','/api/telephony/call-agents',expected=403)
+    agents[2].request('GET','/api/telephony/calls?from_at=2026-11-02T00:00:00Z&until_at=2026-11-01T00:00:00Z',expected=400)
+    agents[2].request('POST','/api/telephony/dialer/control',dict(action='stop',browser_id=str(simple_browser),generation=simple_state['generation']))
+    print('Dialer HTTP/PG: due callback ownership/priority, regional owned callers, three parallel claims, pause/consume race, booking holds, lease expiry, global attempt limits, simple campaign setup and filtered private history: PASS')
 finally:
     server.should_exit=True;thread.join(5);engine.dispose()
