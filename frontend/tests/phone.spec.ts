@@ -19,7 +19,11 @@ declare global {
   }
 }
 const userId = "00000000-0000-0000-0000-000000000011";
-async function setup(page: Page, enabled = true) {
+async function setup(
+  page: Page,
+  enabled = true,
+  role: "admin" | "agent" = "admin",
+) {
   const state = {
     enabled,
     reservations: 0,
@@ -42,12 +46,15 @@ async function setup(page: Page, enabled = true) {
           id: userId,
           email: "phone@example.invalid",
           display_name: "Admin téléphone",
-          role: "admin",
+          role,
           is_active: true,
         },
         mfa_enrollment_required: false,
       },
     }),
+  );
+  await page.route("**/api/telephony/active-calls", (route) =>
+    route.fulfill({ json: { items: [], active_count: 0, answered_count: 0 } }),
   );
   await page.route("**/api/telephony/calls*", (route) =>
     route.fulfill({ json: { items: [], next_cursor: null } }),
@@ -115,6 +122,40 @@ async function setup(page: Page, enabled = true) {
   });
   return state;
 }
+
+test("un compte agent dispose du téléphone et garde la conversation pendant la consultation du calendrier", async ({
+  page,
+}) => {
+  const state = await setup(page, true, "agent");
+  await page.route("**/api/calendar?*", (route) =>
+    route.fulfill({
+      json: {
+        name: "Unlimited Talks",
+        viewer_id: userId,
+        items: [],
+        has_more: false,
+      },
+    }),
+  );
+  await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+14165550101");
+  await page.getByRole("button", { name: "Appeler", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
+    .toBe(1);
+  await expect(
+    page.getByRole("heading", { name: "Appels en cours", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Calendrier", exact: true }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Appel en cours", exact: true }),
+  ).toBeVisible();
+  expect(state.reservations).toBe(1);
+  expect(await page.evaluate(() => window.phoneProof.disconnected)).toBe(0);
+  await page.getByRole("button", { name: "Raccrocher", exact: true }).click();
+});
 
 test("appel désactivé : commandes visibles, aucun SDK chargé ni jeton demandé", async ({
   page,

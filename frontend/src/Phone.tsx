@@ -148,111 +148,110 @@ export function PhoneBar() {
   );
 }
 export function PhonePanel({
-  admin,
   input,
   beforeStart,
 }: {
-  admin: boolean;
   input: string;
   beforeStart: () => void;
 }) {
   const { state, controller, busy } = usePhone();
   useEffect(() => {
-    if (admin) void controller.refresh();
-  }, [admin, controller]);
+    void controller.refresh();
+  }, [controller]);
   return (
     <section
       className="panel audio-panel audio-call-status"
       aria-labelledby="calls-heading"
     >
       <h2 id="calls-heading">Appels téléphoniques</h2>
-      {!admin ? (
-        <p>
-          Les appels seront disponibles après leur activation pour votre compte.
-        </p>
-      ) : (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (
+            !state.loaded ||
+            !state.enabled ||
+            busy ||
+            !state.dialNumber.trim()
+          )
+            return;
+          beforeStart();
+          void controller.start(input);
+        }}
+      >
+        <Field
+          label="Numéro à appeler"
+          name="dial_number"
+          type="tel"
+          autoComplete="off"
+          inputMode="tel"
+          placeholder="+1 514 555 0123"
+          maxLength={40}
+          value={state.dialNumber}
+          disabled={busy}
+          onChange={(event) => controller.setDialNumber(event.target.value)}
+          hint="Saisissez le numéro avec son indicatif : +1 pour le Canada, +44 pour le Royaume-Uni."
+        />
+        {!state.loaded ? (
+          <p role="status">Vérification du téléphone…</p>
+        ) : !state.enabled ? (
+          <p>Les appels ne sont pas encore activés.</p>
+        ) : null}
+        {state.enabled ? (
+          <p className="audio-hint">
+            Durée maximale par appel :{" "}
+            {Math.floor(state.maxDurationSeconds / 60)} minutes. Les
+            conversations sont enregistrées.
+          </p>
+        ) : null}
+        {state.error ? <Notice error>{state.error}</Notice> : null}
+        {state.result ? (
+          <p role="status">{results[state.result] || "Appel terminé."}</p>
+        ) : null}
+        {busy && !state.local ? (
+          <p>
+            Une réservation est conservée. Aucun nouvel appel ne sera lancé
+            avant sa résolution.
+          </p>
+        ) : null}
+        <div className="audio-actions">
+          <button
+            type="submit"
+            className="button primary"
+            disabled={
               !state.loaded ||
               !state.enabled ||
               busy ||
               !state.dialNumber.trim()
-            )
-              return;
-            beforeStart();
-            void controller.start(input);
-          }}
-        >
-          <Field
-            label="Numéro à appeler"
-            name="dial_number"
-            type="tel"
-            autoComplete="off"
-            inputMode="tel"
-            placeholder="+1 514 555 0123"
-            maxLength={40}
-            value={state.dialNumber}
-            disabled={busy}
-            onChange={(event) => controller.setDialNumber(event.target.value)}
-            hint="Saisissez le numéro avec son indicatif : +1 pour le Canada, +44 pour le Royaume-Uni."
-          />
-          {!state.loaded ? (
-            <p role="status">Vérification du téléphone…</p>
-          ) : !state.enabled ? (
-            <p>Les appels ne sont pas encore activés.</p>
-          ) : null}
-          {state.error ? <Notice error>{state.error}</Notice> : null}
-          {state.result ? (
-            <p role="status">{results[state.result] || "Appel terminé."}</p>
-          ) : null}
-          {busy && !state.local ? (
-            <p>
-              Une réservation est conservée. Aucun nouvel appel ne sera lancé
-              avant sa résolution.
-            </p>
-          ) : null}
-          <div className="audio-actions">
-            <button
-              type="submit"
-              className="button primary"
-              disabled={
-                !state.loaded ||
-                !state.enabled ||
-                busy ||
-                !state.dialNumber.trim()
-              }
-            >
-              Appeler
-            </button>
+            }
+          >
+            Appeler
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => void controller.refresh()}
+          >
+            Actualiser le téléphone
+          </button>
+          {state.intent?.state === "reserved" &&
+          !state.local &&
+          state.intent.owned_session !== false ? (
             <button
               type="button"
               className="button secondary"
-              onClick={() => void controller.refresh()}
+              onClick={() => void controller.cancelPreparation()}
             >
-              Actualiser le téléphone
+              Annuler la préparation
             </button>
-            {state.intent?.state === "reserved" &&
-            !state.local &&
-            state.intent.owned_session !== false ? (
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => void controller.cancelPreparation()}
-              >
-                Annuler la préparation
-              </button>
-            ) : null}
-          </div>
-          {busy ? (
-            <p className="audio-hint">
-              Vous pouvez consulter les contacts et le calendrier pendant la
-              conversation.
-            </p>
           ) : null}
-        </form>
-      )}
+        </div>
+        {busy ? (
+          <p className="audio-hint">
+            Vous pouvez consulter les contacts et le calendrier pendant la
+            conversation.
+          </p>
+        ) : null}
+      </form>
     </section>
   );
 }

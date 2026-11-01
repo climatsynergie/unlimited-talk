@@ -5,8 +5,8 @@ from sqlalchemy import URL, create_engine
 
 
 def make_engine():
-    # General live mode remains forbidden; an explicit bounded test requires its
-    # complete private profile and the runtime role before creating any engine.
+    # Calling modes require a complete private, environment-bound profile and
+    # the runtime role before creating any engine.
     expected = {'APP_ENV': 'staging', 'DB_NAME': 'unlimited_talk_staging'}
     if any(os.environ.get(key) != value for key, value in expected.items()):
         raise RuntimeError('Invalid staging environment')

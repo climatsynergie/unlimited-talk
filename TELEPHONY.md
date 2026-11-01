@@ -574,3 +574,65 @@ Le lot du schéma 9 prépare les files, attributions, horaires et suivis manuels
 décrits dans [INBOUND.md](INBOUND.md). Il ne modifie aucun numéro ni route Twilio.
 La réception et les messages vocaux ne sont pas encore connectés ; la saisie
 explicite du numéro ne change pas les limites du profil de test sortant.
+
+## Première livraison des appels agents
+
+Le profil privé version 2, mode `manual`, remplace la liste de destinataires
+autorisés du profil version 1. Les comptes agents sont créés par les invitations
+normales de l'application. Un agent connecté peut saisir un numéro E.164 ou
+appeler depuis une fiche de campagne ; son microphone sélectionné reste conservé
+pendant la navigation. Un administrateur voit les appels actifs et les conversations
+établies. La connexion, les rôles, la protection CSRF et la MFA administrateur
+restent obligatoires après le retrait de l'authentification HTTP du proxy.
+
+La réservation conserve le numéro saisi, l'agent et sa session. La notification
+Twilio signée consomme cette réservation une seule fois, puis le serveur construit
+le `<Dial>` à partir du numéro conservé. Les paramètres du navigateur ou d'une
+notification ne peuvent pas remplacer le destinataire. Un agent ne peut conserver
+qu'un appel actif ; deux agents ne peuvent pas appeler le même numéro en parallèle.
+Les restrictions globales « Ne pas contacter » et « Non intéressé » sont contrôlées
+avant réservation et à nouveau avant autorisation. Une session révoquée ne peut
+plus consommer sa réservation. La capacité simultanée est contrôlée dans PostgreSQL
+à travers les instances de l'API, sous verrou transactionnel par compte Twilio.
+
+Le profil définit au plus 20 appels simultanés et une durée maximale comprise entre
+60 et 600 secondes. La conversion opérateur choisit 20 lignes et 600 secondes par
+appel. Le navigateur affiche cette durée ; Twilio l'applique. Le jeton SDK couvre
+la préparation et la conversation, reste limité à une réservation et n'est jamais
+stocké dans le navigateur. Les enregistrements double canal conservent leur
+archivage privé et les droits de lecture par agent/administrateur.
+
+Procédure opérateur après le déploiement **attesté** de l'image portant
+`io.unlimitedtalk.voice-manual=1`, avec la révision complète réellement active :
+
+```sh
+python3 /root/unlimited-talk-voice-tools/control_manual_voice.py prepare --revision SHA_COMPLET
+python3 /root/unlimited-talk-voice-tools/control_manual_voice.py check --revision SHA_COMPLET
+python3 /root/unlimited-talk-voice-tools/control_manual_voice.py public-access --revision SHA_COMPLET
+python3 /root/unlimited-talk-voice-tools/control_manual_voice.py enable --revision SHA_COMPLET
+```
+
+Ces commandes ne lancent aucun appel, ne migrent aucune base et ne changent aucun
+numéro ni routage Twilio existant. Elles vérifient l'image immuable de la livraison,
+le schéma 9, les workers, le rôle PostgreSQL et TLS, le stockage privé, la passerelle
+de récupération et la configuration fournisseur. La conversion exige zéro appel
+actif et zéro enregistrement en attente, sauvegarde le profil version 1, conserve
+les permissions privées et recrée les trois services Voice avec la même image.
+Un échec de conversion restaure le profil précédent ; un échec d'activation tente
+de rétablir le mode fermé. La configuration publique Caddy est validée avant
+rechargement et restaurée si les contrôles d'accès échouent. Les notifications
+non signées restent refusées ; les endpoints internes de santé ne sont pas publics.
+
+Avant un déploiement ultérieur, fermer les appels avec l'action `disable` de ce
+même outil. Le profil version 2 doit rester associé à une image qui le comprend :
+ne pas revenir à une ancienne image version 1 sans restauration opérateur du profil
+et sans résolution préalable des appels et archives.
+
+Acceptation physique prévue avec trois comptes agents indépendants : trois
+navigateurs/casques et trois lignes destinataires disponibles, démarrages proches,
+trois conversations visibles côté administrateur, audio dans les deux sens,
+raccrochages indépendants, puis trois historiques et enregistrements privés
+écoutables. Les simulations HTTP/PostgreSQL et navigateur ne prouvent pas cet audio
+ni la capacité réelle du fournisseur. La capacité à vingt agents, le composeur
+automatique, la réception audio et la messagerie vocale restent à livrer et à tester.
+Les SMS sont exclus de cette livraison sur demande de l'utilisateur.

@@ -22,7 +22,7 @@ from uuid import UUID
 
 from app.identity.service import query
 from app.telephony import service
-from app.telephony.twilio_voice import ControlledVoiceProfile, client_identity, sid
+from app.telephony.twilio_voice import VoiceProfile, ControlledVoiceProfile, client_identity, sid
 
 logger = logging.getLogger(__name__)
 ACTIVE = frozenset({'authorized', 'ringing', 'answered'})
@@ -54,7 +54,10 @@ class PendingCall:
     def check(self, profile):
         if (not isinstance(self.id, UUID) or not isinstance(self.actor_id, UUID)
                 or self.profile_hash != service.profile_hash(profile) or self.account_sid != profile.account_sid
-                or self.caller_number != profile.caller_number or self.destination != profile.approved_destination
+                or self.caller_number != profile.caller_number
+                or not re.fullmatch(r'\+[1-9][0-9]{8,14}', self.destination)
+                or self.destination == profile.caller_number
+                or (isinstance(profile, ControlledVoiceProfile) and self.destination != profile.approved_destination)
                 or not sid(self.parent_call_sid, 'CA')
                 or (self.child_call_sid is not None and (not sid(self.child_call_sid, 'CA')
                                                         or self.child_call_sid == self.parent_call_sid))):
@@ -80,7 +83,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class ReadOnlyCalls:
     def __init__(self, profile: ControlledVoiceProfile, send=None, gateway=None, token=None):
-        if not isinstance(profile, ControlledVoiceProfile):
+        if not isinstance(profile, VoiceProfile):
             raise ProviderReadError('invalid_profile')
         self.profile = profile
         self.base = 'https://api.twilio.com/2010-04-01/Accounts/' + profile.account_sid

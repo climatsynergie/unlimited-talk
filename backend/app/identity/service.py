@@ -30,12 +30,13 @@ def public_user(row):
             for key in ('id', 'email', 'display_name', 'role', 'is_active')}
 
 
-def limited(engine, operation, identity):
+def limited(engine, operation, identity, *, limit=10, seconds=900, global_limit=200):
     """Independent committed counters survive bad-password transaction rollback."""
     exceeded = False
     with engine.begin() as db:
         query(db, 'DELETE FROM staging.identity_rate_limits WHERE expires_at<now()-interval \'1 day\'')
-        for bucket, limit, seconds in [('global', 200, 60), (operation + ':' + digest(identity), 10, 900)]:
+        for bucket, limit, seconds in [('voice-global' if operation == 'voice-reserve' else 'global', global_limit, 60),
+                                       (operation + ':' + digest(identity), limit, seconds)]:
             row = query(db, '''INSERT INTO staging.identity_rate_limits(bucket,attempts,expires_at)
                 VALUES (:bucket,1,now()+make_interval(secs=>:seconds))
                 ON CONFLICT(bucket) DO UPDATE SET
@@ -44,7 +45,7 @@ def limited(engine, operation, identity):
                 RETURNING attempts''', bucket=bucket, seconds=seconds).scalar_one()
             exceeded |= row > limit
     if exceeded:
-        raise HTTPException(429, 'Trop de tentatives. Réessayez plus tard.', headers={'Retry-After': '900'})
+        raise HTTPException(429, 'Trop de tentatives. Réessayez plus tard.', headers={'Retry-After': str(seconds)})
 
 
 def new_session(db, user, verified, previous=None):
@@ -161,7 +162,7 @@ def enroll_start(db, user, cipher):
           secret=cipher.encrypt(secret.encode()).decode(), id=user['id'])
     audit(db,user['id'],'mfa.enrollment_started',user['id'])
     return {'secret': secret, 'provisioning_uri': pyotp.TOTP(secret).provisioning_uri(
-        name=user['email'],issuer_name='Unlimited Talks Préproduction')}
+        name=user['email'],issuer_name='Unlimited Talks')}
 
 
 def enroll_finish(db, user, code, cipher):

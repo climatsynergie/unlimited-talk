@@ -1,11 +1,11 @@
-"""An explicit, bounded test profile is required before any Voice API is armed."""
+"""Strict private profiles bind calling modes to this application and provider."""
 from dataclasses import fields
 import json
 import os
 from pathlib import Path
 import stat
 
-from app.telephony.twilio_voice import ControlledVoiceProfile
+from app.telephony.twilio_voice import ControlledVoiceProfile, ManualVoiceProfile
 
 
 def private_bytes(path):
@@ -26,7 +26,7 @@ def load_profile():
     mode = os.environ.get('COMMUNICATIONS_MODE', '')
     if mode == 'disabled':
         return None
-    if mode not in {'controlled_test', 'webhooks_only', 'recovery_only'}:
+    if mode not in {'controlled_test', 'manual', 'webhooks_only', 'recovery_only'}:
         raise RuntimeError('Mode de téléphonie non autorisé.')
     try:
         if (os.environ.get('APP_ENV') != 'staging' or os.environ.get('DB_USER') != 'ut_staging_runtime'
@@ -34,13 +34,17 @@ def load_profile():
             raise ValueError
         raw = private_bytes(os.environ['VOICE_TEST_PROFILE_FILE'])
         value = json.loads(raw)
-        if not isinstance(value, dict) or set(value) != {'version', 'mode'} | {field.name for field in fields(ControlledVoiceProfile)}:
+        if not isinstance(value, dict) or type(value.get('version')) is not int:
             raise ValueError
-        if type(value['version']) is not int or value['version'] != 1 or value['mode'] != 'controlled_test':
+        profile_type = {1: ControlledVoiceProfile, 2: ManualVoiceProfile}.get(value['version'])
+        expected_mode = 'manual' if profile_type is ManualVoiceProfile else 'controlled_test'
+        if (profile_type is None or value.get('mode') != expected_mode
+                or set(value) != {'version', 'mode'} | {field.name for field in fields(profile_type)}
+                or (mode in {'controlled_test', 'manual'} and mode != expected_mode)):
             raise ValueError
         value.pop('version')
         value.pop('mode')
-        profile = ControlledVoiceProfile(**value)
+        profile = profile_type(**value)
         if profile.public_origin != os.environ['APP_ORIGIN']:
             raise ValueError
         return profile

@@ -45,7 +45,7 @@ def secret(value):
 
 
 @dataclass(frozen=True, repr=False)
-class ControlledVoiceProfile:
+class VoiceProfile:
     account_sid: str
     api_key_sid: str
     api_key_secret: str
@@ -54,7 +54,6 @@ class ControlledVoiceProfile:
     shared_key_secret: str
     public_origin: str
     caller_number: str
-    approved_destination: str
 
     def __post_init__(self):
         if not all(sid(value, prefix) for value, prefix in (
@@ -82,11 +81,37 @@ class ControlledVoiceProfile:
             valid = False
         if not valid:
             raise VoiceConfigurationError('Origine HTTPS publique invalide.')
-        for value in (self.caller_number, self.approved_destination):
+        for value in (self.caller_number,):
             if not isinstance(value, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', value):
                 raise VoiceConfigurationError('Numéro du profil téléphonique invalide.')
+
+
+@dataclass(frozen=True, repr=False)
+class ControlledVoiceProfile(VoiceProfile):
+    approved_destination: str
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not isinstance(self.approved_destination, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', self.approved_destination):
+            raise VoiceConfigurationError('Numéro du profil téléphonique invalide.')
         if self.caller_number == self.approved_destination:
             raise VoiceConfigurationError('Le destinataire doit être différent du numéro Twilio.')
+
+
+@dataclass(frozen=True, repr=False)
+class ManualVoiceProfile(VoiceProfile):
+    max_concurrent_calls: int = 20
+    max_duration_seconds: int = 600
+
+    def __post_init__(self):
+        super().__post_init__()
+        if (type(self.max_concurrent_calls) is not int or not 1 <= self.max_concurrent_calls <= 20
+                or type(self.max_duration_seconds) is not int or not 60 <= self.max_duration_seconds <= 600):
+            raise VoiceConfigurationError('Limites du profil téléphonique invalides.')
+
+
+def call_duration(profile):
+    return profile.max_duration_seconds if isinstance(profile, ManualVoiceProfile) else MAX_TEST_CALL_SECONDS
 
 
 def client_identity(agent_id: UUID, intent_id: UUID):
@@ -95,15 +120,16 @@ def client_identity(agent_id: UUID, intent_id: UUID):
     return 'ut_' + agent_id.hex + '_' + intent_id.hex
 
 
-def browser_token(profile: ControlledVoiceProfile, agent_id: UUID, intent_id: UUID):
+def browser_token(profile: VoiceProfile, agent_id: UUID, intent_id: UUID):
     identity = client_identity(agent_id, intent_id)
     token = AccessToken(profile.account_sid, profile.api_key_sid, profile.api_key_secret,
-                        identity=identity, ttl=TOKEN_TTL_SECONDS, region='us1')
+                        identity=identity, ttl=call_duration(profile) + 180 if isinstance(profile, ManualVoiceProfile)
+                        else TOKEN_TTL_SECONDS, region='us1')
     token.add_grant(VoiceGrant(outgoing_application_sid=profile.twiml_app_sid, incoming_allow=False))
     return token.to_jwt()
 
 
-def webhook_url(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | None = None):
+def webhook_url(profile: VoiceProfile, kind: str, intent_id: UUID | None = None):
     if (kind not in HOOK_KINDS or (kind in FIXED_HOOK_KINDS and intent_id is not None)
             or (kind in INTENT_HOOK_KINDS and not isinstance(intent_id, UUID))):
         raise VoiceConfigurationError('Route téléphonique invalide.')
@@ -127,7 +153,7 @@ def signature_metadata(profile, signature, signing_settings):
         raise VoiceWebhookError('Paramètres de signature téléphonique invalides.') from None
 
 
-def authenticate_webhook(profile: ControlledVoiceProfile, kind: str, intent_id: UUID | None,
+def authenticate_webhook(profile: VoiceProfile, kind: str, intent_id: UUID | None,
                          body: bytes, content_type: str, signature: str, signing_settings: str):
     """Authenticate all form values against a configured URL, never proxy headers.
 
@@ -195,17 +221,25 @@ def authenticate_probe(profile, body, content_type, signature, signing_settings,
     authenticate_webhook(profile, 'probe', None, body, content_type, signature, signing_settings)
 
 
-def controlled_call_twiml(profile: ControlledVoiceProfile, intent_id: UUID):
+def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None):
     """Render only AFTER the durable intent gate; no client-supplied To exists."""
+    if isinstance(profile, ManualVoiceProfile):
+        if (not isinstance(destination, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', destination)
+                or destination == profile.caller_number):
+            raise VoiceConfigurationError('Destinataire de la réservation invalide.')
+    else:
+        if destination is not None and destination != profile.approved_destination:
+            raise VoiceConfigurationError('Destinataire de la réservation invalide.')
+        destination = profile.approved_destination
     response = VoiceResponse()
     dial = response.dial(caller_id=profile.caller_number, timeout=20,
-                         time_limit=MAX_TEST_CALL_SECONDS, answer_on_bridge=True,
+                         time_limit=call_duration(profile), answer_on_bridge=True,
                          record='record-from-answer-dual',
                          recording_status_callback=webhook_url(profile, 'recording', intent_id),
                          recording_status_callback_method='POST',
                          recording_status_callback_event='completed',
                          action=webhook_url(profile, 'finish', intent_id), method='POST')
-    dial.number(profile.approved_destination,
+    dial.number(destination,
                 status_callback=webhook_url(profile, 'status', intent_id),
                 status_callback_method='POST',
                 status_callback_event='initiated ringing answered completed')

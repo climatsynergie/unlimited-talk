@@ -4,6 +4,7 @@ import { api, ApiError, date, message } from "./api";
 import { CallbackForm } from "./Callbacks";
 import { AppointmentForm } from "./Calendar";
 import { Field, Modal, Notice, Submit } from "./ui";
+import { usePhone } from "./Phone";
 
 type Campaign = {
   id: string;
@@ -1062,6 +1063,10 @@ function CardDetail({
   onMove: (card: Card, stage: Stage) => void;
   onChanged: () => void;
 }) {
+  const { controller, state: phone, busy: calling } = usePhone();
+  useEffect(() => {
+    void controller.refresh();
+  }, [controller]);
   const [data, setData] = useState<Detail | null>(null);
   const [booking, setBooking] = useState(false);
   const [callback, setCallback] = useState(false);
@@ -1223,6 +1228,23 @@ function CardDetail({
             role="group"
             aria-label="Actions du contact"
           >
+            <button
+              type="button"
+              className="button primary"
+              disabled={
+                !phone.loaded ||
+                !phone.enabled ||
+                calling ||
+                busy ||
+                data.contact.do_not_contact ||
+                data.contact.non_interested
+              }
+              onClick={() =>
+                void controller.start(undefined, data.contact.phone)
+              }
+            >
+              Appeler ce contact
+            </button>
             {callback ? (
               <section>
                 <h3>Programmer un rappel</h3>

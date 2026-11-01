@@ -20,6 +20,16 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  await page.route("**/api/telephony/test/session", (route) =>
+    route.fulfill({
+      json: {
+        enabled: false,
+        destination: null,
+        max_duration_seconds: 180,
+        active: null,
+      },
+    }),
+  );
 });
 
 test("archive en attente, actualisation et lecture privée sans préchargement", async ({

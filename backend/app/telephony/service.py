@@ -1,6 +1,7 @@
 """PostgreSQL owns authorization, one-time consumption and provider history.
 
-This controlled path never selects imported contacts or calls the REST Calls API.
+This path never calls the REST Calls API. Known contacts' restrictions are
+checked before reservation and again before authorization.
 Only the first authenticated Voice webhook can receive Dial instructions. Lost
 responses remain authorized/uncertain until a terminal provider event; no timer
 silently reuses a consumed reservation.
@@ -12,7 +13,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from app.identity.service import query, audit
-from app.telephony.twilio_voice import client_identity, sid
+from app.telephony.twilio_voice import ManualVoiceProfile, client_identity, sid
 
 ACTIVE = {'reserved', 'authorized', 'ringing', 'answered'}
 TERMINAL = {'finished', 'cancelled', 'expired'}
@@ -26,8 +27,15 @@ def fingerprint(value):
 
 
 def profile_hash(profile):
-    return fingerprint({key: getattr(profile, key) for key in ('account_sid', 'api_key_sid', 'twiml_app_sid',
-                        'shared_key_id', 'public_origin', 'caller_number', 'approved_destination')})
+    binding = {key: getattr(profile, key) for key in ('account_sid', 'api_key_sid', 'twiml_app_sid',
+                        'shared_key_id', 'public_origin', 'caller_number')}
+    # Destinations belong to immutable reservations. Capacity changes must not
+    # orphan callbacks or private archive jobs for previously authorized calls.
+    if isinstance(profile, ManualVoiceProfile):
+        binding['mode'] = 'manual'
+    else:
+        binding['approved_destination'] = profile.approved_destination
+    return fingerprint(binding)
 
 
 def event(db, intent_id, kind, details):
@@ -42,21 +50,37 @@ def public(row):
 
 
 def validate_destination(value, profile):
-    # General manual origination is a separate delivery. The explicit number
-    # must match this controlled profile before any intent/token can be created.
-    # Never accept an arbitrary input and silently call a different recipient.
-    if value is None:
+    # Legacy controlled profiles keep their original recipient restriction.
+    # Manual profiles always require an explicit E.164 destination.
+    if value is None and not isinstance(profile, ManualVoiceProfile):
         return profile.approved_destination  # preceding browser compatibility
-    if not re.fullmatch(r'\+[1-9][0-9]{8,14}', value):
+    if not isinstance(value, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', value):
         raise HTTPException(400, 'Saisissez un numéro international valide, par exemple +15145550123.')
-    if value != profile.approved_destination:
+    if isinstance(profile, ManualVoiceProfile):
+        if value == profile.caller_number:
+            raise HTTPException(400, 'Le numéro à appeler doit être différent de votre numéro émetteur.')
+    elif value != profile.approved_destination:
         raise HTTPException(400, 'Les appels vers ce numéro ne sont pas encore activés.')
     return value
 
 
-def reserve(db, actor, identifier, profile):
-    # authenticate/admin already holds the actor row lock. Database unique
+def unrestricted_contact(db, destination):
+    # Serialize with CRM restrictions and recheck again at redemption. No
+    # imported contact is required for manual dialling, but known opt-outs win.
+    row = query(db, 'SELECT do_not_contact,non_interested FROM staging.contacts WHERE phone=:phone FOR UPDATE',
+                phone=destination).mappings().first()
+    return not row or not (row['do_not_contact'] or row['non_interested'])
+
+
+def reserve(db, actor, identifier, profile, destination=None):
+    # authenticate already holds the actor row lock. Database unique
     # indexes arbitrate competing users and sessions, including the same target.
+    destination = validate_destination(destination, profile)
+    if not unrestricted_contact(db, destination):
+        raise HTTPException(400, 'Ce contact est marqué « Ne pas contacter » ou « Non intéressé ».')
+    # Admission is short and global to this provider account. PostgreSQL unique
+    # indexes retain the actor/destination guarantees even across API replicas.
+    query(db, 'SELECT pg_advisory_xact_lock(hashtextextended(:account,74192010))', account=profile.account_sid)
     expired = query(db, '''UPDATE staging.voice_intents SET state='expired',finished_at=clock_timestamp()
         WHERE state='reserved' AND expires_at<=clock_timestamp() RETURNING id''').scalars().all()
     for old_id in expired:
@@ -65,18 +89,24 @@ def reserve(db, actor, identifier, profile):
     binding = profile_hash(profile)
     if previous:
         if (previous['actor_id'] != actor['id'] or previous['session_hash'] != actor['session_hash']
-                or previous['profile_hash'] != binding or previous['state'] != 'reserved'):
+                or previous['profile_hash'] != binding or previous['state'] != 'reserved'
+                or previous['destination'] != destination):
             raise HTTPException(409, 'Cette réservation ne peut pas être réutilisée.')
         return previous
+    if isinstance(profile, ManualVoiceProfile):
+        count = query(db, '''SELECT count(*) FROM staging.voice_intents WHERE account_sid=:account
+            AND state IN ('reserved','authorized','ringing','answered')''', account=profile.account_sid).scalar_one()
+        if count >= profile.max_concurrent_calls:
+            raise HTTPException(409, 'Toutes les lignes sont occupées. Réessayez lorsqu’un appel se termine.')
     row = query(db, '''INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,
         account_sid,application_sid,caller_number,destination,expires_at)
         VALUES (:id,:actor,:session,:profile,:account,:application,:caller,:destination,
                 clock_timestamp()+interval '2 minutes') RETURNING *''',
         id=identifier, actor=actor['id'], session=actor['session_hash'], profile=binding,
         account=profile.account_sid, application=profile.twiml_app_sid,
-        caller=profile.caller_number, destination=profile.approved_destination).mappings().one()
+        caller=profile.caller_number, destination=destination).mappings().one()
     event(db, identifier, 'reserved', {})
-    audit(db, actor['id'], 'voice.test_reserved', identifier)
+    audit(db, actor['id'], 'voice.reserved' if isinstance(profile, ManualVoiceProfile) else 'voice.test_reserved', identifier)
     return row
 
 
@@ -102,7 +132,7 @@ def bound(row, profile):
 
 def consume(db, profile, params):
     identifier = UUID(params['Intent'])  # The entire form was authenticated first.
-    lookup = query(db, 'SELECT actor_id,session_hash FROM staging.voice_intents WHERE id=:id', id=identifier).mappings().first()
+    lookup = query(db, 'SELECT actor_id,session_hash,destination FROM staging.voice_intents WHERE id=:id', id=identifier).mappings().first()
     if lookup is None:
         return False
     # Keep the same user -> session -> intent lock order as human operations.
@@ -111,10 +141,14 @@ def consume(db, profile, params):
         WHERE token_hash=:hash AND user_id=:actor AND mfa_verified AND expires_at>clock_timestamp()
           AND last_seen_at>clock_timestamp()-interval '30 minutes' FOR UPDATE''',
         hash=lookup['session_hash'], actor=lookup['actor_id']).first()
+    allowed_contact = unrestricted_contact(db, lookup['destination'])
     row = bound(query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id FOR UPDATE', id=identifier).mappings().first(), profile)
     if row['state'] != 'reserved':
         return False  # Even the same CallSid cannot obtain a second Dial.
-    valid = (user and user['is_active'] and user['role'] == 'admin' and user['mfa_secret'] and session
+    allowed_role = user and ((isinstance(profile, ManualVoiceProfile) and user['role'] in {'admin','agent'})
+                            or user['role'] == 'admin')
+    valid = (user and user['is_active'] and allowed_role and session and allowed_contact
+             and (user['role'] != 'admin' or user['mfa_secret'])
              and params['From'] == 'client:' + client_identity(row['actor_id'], identifier)
              and query(db, 'SELECT expires_at>clock_timestamp() FROM staging.voice_intents WHERE id=:id', id=identifier).scalar_one())
     if not valid:
@@ -220,9 +254,9 @@ def notify(db, profile, kind, identifier, params):
         raise HTTPException(400, 'Type de notification invalide.')
 
 
-def history(db, identifier):
+def history(db, identifier, actor=None):
     row = query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id', id=identifier).mappings().first()
-    if not row:
+    if not row or (actor is not None and actor['role'] != 'admin' and row['actor_id'] != actor['id']):
         raise HTTPException(404, 'Réservation introuvable.')
     events = query(db, '''SELECT id,kind,details,created_at FROM staging.voice_events
         WHERE intent_id=:id ORDER BY id DESC LIMIT 100''', id=identifier).mappings().all()

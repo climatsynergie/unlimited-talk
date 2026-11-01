@@ -62,6 +62,16 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  await page.route("**/api/telephony/test/session", (route) =>
+    route.fulfill({
+      json: {
+        enabled: false,
+        destination: null,
+        max_duration_seconds: 180,
+        active: null,
+      },
+    }),
+  );
 });
 
 test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", async ({

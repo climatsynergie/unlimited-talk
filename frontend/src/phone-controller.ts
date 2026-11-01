@@ -37,6 +37,8 @@ export type PhoneState = {
   enabled: boolean;
   destination: string | null;
   dialNumber: string;
+  maxDurationSeconds: number;
+  inputDevice: string;
   phase:
     | "idle"
     | "preparing"
@@ -73,6 +75,8 @@ export class PhoneController {
     enabled: false,
     destination: null,
     dialNumber: "",
+    maxDurationSeconds: 180,
+    inputDevice: "",
     phase: "idle",
     intent: null,
     local: false,
@@ -144,6 +148,10 @@ export class PhoneController {
       this.update({
         loaded: true,
         enabled: session.enabled,
+        maxDurationSeconds: Math.max(
+          60,
+          Math.min(600, session.max_duration_seconds || 180),
+        ),
         destination: session.active?.destination ?? this.state.destination,
       });
       if (this.pending !== null && !this.state.intent) return;
@@ -211,7 +219,11 @@ export class PhoneController {
     if (this.closed || this.state.phase !== "idle") return;
     this.update({ dialNumber: value.slice(0, 40), error: "" });
   }
-  async start(input = "", number = this.state.dialNumber) {
+  setInputDevice(value: string) {
+    if (this.closed || this.state.phase !== "idle") return;
+    this.update({ inputDevice: value });
+  }
+  async start(input = this.state.inputDevice, number = this.state.dialNumber) {
     if (
       this.closed ||
       !this.state.loaded ||
@@ -292,9 +304,12 @@ export class PhoneController {
         call.on(event, () => {
           if (generation === this.generation) this.interrupted();
         });
-      // A second local ceiling complements the provider's immutable 180s cap.
+      // The provider enforces the configured limit; allow signalling teardown.
       if (this.watchdog !== null) clearTimeout(this.watchdog);
-      this.watchdog = setTimeout(() => this.hangup(), 210_000);
+      this.watchdog = setTimeout(
+        () => this.hangup(),
+        (this.state.maxDurationSeconds + 30) * 1000,
+      );
     } catch (error) {
       if (this.closed || generation !== this.generation) return;
       ++this.generation;

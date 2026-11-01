@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, Notice } from "./ui";
 import { CallHistory } from "./CallHistory";
 import { PhonePanel, usePhone } from "./Phone";
+import { LiveCalls } from "./LiveCalls";
 
 type Microphone = {
   context?: AudioContext;
@@ -25,14 +26,15 @@ function audioError(error: unknown): string {
 }
 
 export function Workstation({ admin }: { admin: boolean }) {
-  const { busy: calling } = usePhone();
+  const { busy: calling, state: phone, controller } = usePhone();
   const [microState, setMicroState] = useState<MicroState>("idle");
   const [level, setLevel] = useState(0);
   const [detected, setDetected] = useState(false);
   const [microStatus, setMicroStatus] = useState("Microphone arrêté.");
   const [error, setError] = useState("");
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [deviceId, setDeviceId] = useState("");
+  const deviceId = phone.inputDevice;
+  const setDeviceId = (value: string) => controller.setInputDevice(value);
   const [playing, setPlaying] = useState(false);
   const [played, setPlayed] = useState(false);
   const [heard, setHeard] = useState(false);
@@ -371,13 +373,13 @@ export function Workstation({ admin }: { admin: boolean }) {
         </section>
       </div>
       <PhonePanel
-        admin={admin}
         input={deviceId}
         beforeStart={() => {
           stopMicrophone();
           stopOutput();
         }}
       />
+      {admin ? <LiveCalls /> : null}
       <CallHistory disabled={calling} />
     </>
   );

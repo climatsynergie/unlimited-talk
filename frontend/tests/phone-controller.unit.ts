@@ -36,12 +36,14 @@ class FakeDevice implements MediaDevice {
   call = new FakeCall();
   destroyed = 0;
   connections: string[] = [];
+  inputs: string[] = [];
   error = () => {};
   onError(listener: () => void) {
     this.error = listener;
   }
-  async connect(id: string) {
+  async connect(id: string, input: string) {
     this.connections.push(id);
+    this.inputs.push(input);
     return this.call;
   }
   destroy() {
@@ -419,4 +421,20 @@ test("numéro refusé par le serveur : correction immédiate, aucune substitutio
   assert.match(f.controller.state.error, /ce numéro/);
   assert.equal(f.creations(), 0);
   assert.equal(cancellations, 0);
+});
+
+test("durée normale et microphone conservé : aucun raccrochage après le plafond du mode de validation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  f.session.max_duration_seconds = 600;
+  await f.controller.refresh();
+  f.controller.setDialNumber("+14165550101");
+  f.controller.setInputDevice("selected-headset");
+  await f.controller.start();
+  assert.deepEqual(f.device.inputs, ["selected-headset"]);
+  t.mock.timers.tick(210_000);
+  assert.equal(f.device.call.disconnected, 0);
+  t.mock.timers.tick(420_000);
+  assert.equal(f.device.call.disconnected, 1);
+  f.controller.dispose();
 });

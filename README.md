@@ -10,13 +10,16 @@ separate PostgreSQL database. The business application is under development.
 - Separate runtime and migration roles.
 - Docker-based local development and a separate managed-database deployment.
 - Non-root API, bounded connection pools and read-only container filesystems.
-- Communications disabled. No provider credentials or customer data included.
+- Communications disabled by default; explicit private profiles enable agent calls.
+- No provider credentials or customer data included.
 
 Individual authentication and the React account/admin interface are implemented.
 Private contact imports, campaigns/pipelines, the shared calendar and agent-owned
-callbacks are implemented. A controlled Voice API and its additive migration are
-prepared on the telephony branch; live communications remain
-disabled. See [TELEPHONY.md](TELEPHONY.md) for the current Twilio integration boundary.
+callbacks are implemented. Agent calls support explicit international numbers,
+one active call per agent, shared destination exclusion, private recordings and
+administrator supervision. Incoming queue settings and manual missed-call follow-up
+are implemented; incoming media routing and automatic dialling remain unfinished.
+See [TELEPHONY.md](TELEPHONY.md) for activation and the acceptance-test boundary.
 
 ## Local development
 
@@ -29,8 +32,8 @@ docker compose up -d --wait --wait-timeout 180
 curl --fail http://127.0.0.1:8110/health/ready
 ```
 
-API documentation is at `http://127.0.0.1:8110/docs`. This is API documentation,
-not the agent interface. PostgreSQL is not published on a host port.
+The agent interface is at `http://127.0.0.1:8110/connexion`. Interactive API
+documentation is disabled. PostgreSQL is not published on a host port.
 
 Secret files are generated locally and never committed. The local secret
 directory is private. Use Docker Compose's normal local credential handling only

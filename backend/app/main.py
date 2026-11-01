@@ -51,13 +51,14 @@ async def lifespan(app):
     app.state.identity_origin = validate_origin(os.environ['APP_ORIGIN'],os.environ.get('DB_DEPLOYMENT','local'))
     app.state.identity_cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
     app.state.voice_profile = load_profile()
-    app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') == 'controlled_test'
+    app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') in {'controlled_test', 'manual'}
     app.state.engine = make_engine()
     yield
     app.state.engine.dispose()
 
 
-app = FastAPI(title='Unlimited Talks — Staging', version='0.8.0', lifespan=lifespan)
+app = FastAPI(title='Unlimited Talks', version='0.9.0', lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(identity_router)
 app.include_router(contacts_router)
 app.include_router(campaigns_router)

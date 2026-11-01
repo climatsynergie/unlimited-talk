@@ -23,7 +23,7 @@ from app.database import make_engine
 from app.identity.security import COOKIE, CSRF_COOKIE, digest, new_token
 from app.identity.service import query
 from app.main import app, lifespan
-from app.telephony.twilio_voice import ControlledVoiceProfile, client_identity, webhook_url
+from app.telephony.twilio_voice import ControlledVoiceProfile, ManualVoiceProfile, client_identity, webhook_url
 
 assert os.environ['DB_HOST'] == 'db' and os.environ.get('DB_DEPLOYMENT', 'local') == 'local'
 assert os.environ['COMMUNICATIONS_MODE'] == 'disabled'
@@ -142,7 +142,7 @@ try:
     assert http('POST','/api/telephony/test/intents',json.dumps({'id':str(uuid4())}).encode(),{'Origin':origin,'Content-Type':'application/json'})[0] == 401
     agent = Browser('agent')
     agent.reserve(expected=403)
-    agent.request('GET','/api/telephony/test/session',expected=403)
+    assert agent.request('GET','/api/telephony/test/session')['enabled'] is False
     assert http('GET','/api/telephony/test/session')[0]==401
     unenrolled = Browser(verified=False)
     unenrolled.reserve(expected=403)
@@ -459,7 +459,72 @@ try:
             assert error.orig.sqlstate=='42501'
         else:
             raise AssertionError('Voice history permissions are too broad')
-    print('Voice HTTP/PG: authorization, signed callbacks, recovery races, durable private recording archive, cursor history and protected audio playback: PASS')
+    # Three independently authenticated agents, three simultaneous destinations.
+    # This proves application concurrency using signed synthetic provider events;
+    # the acceptance test still needs physical microphones and PSTN recipients.
+    profile = ManualVoiceProfile('AC'+uuid4().hex, 'SK'+'b'*32, 'c'*32, 'AP'+'d'*32,
+        'webhooks_sharedkey_'+'e'*26, 'f'*32, 'https://voice.example.invalid', '+14165550100', 3, 600)
+    app.state.voice_profile = profile
+    agents = [Browser('agent') for _ in range(3)]
+    supervisor = Browser()
+    ids = [uuid4() for _ in agents]
+    destinations = ['+14165550111', '+14165550112', '+442079460001']
+    def manual_reserve(index):
+        return agents[index].request('POST','/api/telephony/test/intents',
+            {'id':str(ids[index]),'destination':destinations[index]},201)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        admitted = list(pool.map(manual_reserve, range(3)))
+    assert [r['intent']['destination'] for r in admitted] == destinations
+    for agent in agents:
+        assert agent.request('GET','/api/telephony/test/session')['enabled'] is True
+        assert agent.request('GET','/api/telephony/test/session')['destination'] is None
+        agent.request('GET','/api/telephony/active-calls',expected=403)
+    overflow = Browser('agent')
+    overflow.request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':'+14165550115'},409)
+    agents[0].request('POST','/api/telephony/test/intents',{'id':str(ids[0]),'destination':destinations[1]},409)
+    agents[1].request('GET','/api/telephony/test/intents/'+str(ids[0]),expected=404)
+    agents[1].request('POST','/api/telephony/test/intents/'+str(ids[0])+'/cancel',{},404)
+    for index in range(3):
+        parent, xml = voice(agents[index], ids[index])
+        assert xml.find('Dial/Number').text == destinations[index]
+        assert xml.find('Dial').get('timeLimit') == '600'
+        child = 'CA'+uuid4().hex
+        signed('status', ids[index], dict(CallSid=child,ParentCallSid=parent,From=profile.caller_number,
+            To=destinations[index],CallStatus='in-progress',SequenceNumber='1'))
+    snapshot = supervisor.request('GET','/api/telephony/active-calls')
+    mine = {item['id'] for item in snapshot['items'] if item['state']=='answered'}
+    assert set(map(str,ids)) <= mine and snapshot['answered_count'] >= 3
+    # End all three and preserve each agent's own recording ownership.
+    for index in range(3):
+        current = row(ids[index])
+        signed('recording', ids[index],dict(CallSid=current['parent_call_sid'],RecordingSid='RE'+uuid4().hex,
+            RecordingStatus='completed',RecordingSource='DialVerb',RecordingDuration='12',RecordingChannels='2'))
+        signed('finish', ids[index],dict(CallSid=current['parent_call_sid'],DialCallSid=current['child_call_sid'],DialCallStatus='completed'))
+        own = agents[index].request('GET','/api/telephony/test/intents/'+str(ids[index]))
+        assert own['intent']['state']=='finished' and len(own['recordings'])==1
+    # The same destination cannot be called concurrently, even by another agent.
+    duplicate_id = uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',{'id':str(duplicate_id),'destination':destinations[0]},201)
+    agents[1].request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':destinations[0]},409)
+    agents[0].request('POST','/api/telephony/test/intents/'+str(duplicate_id)+'/cancel',{})
+    # Global contact restrictions apply before reservation AND after a late opt-out.
+    blocked = '+14165550119'; contact = uuid4()
+    with engine.begin() as db:
+        query(db,"INSERT INTO staging.contacts(id,phone,profile,do_not_contact) VALUES (:id,:phone,'{}',true)",id=contact,phone=blocked)
+    agents[0].request('POST','/api/telephony/test/intents',{'id':str(uuid4()),'destination':blocked},400)
+    with engine.begin() as db:
+        query(db,'UPDATE staging.contacts SET do_not_contact=false WHERE id=:id',id=contact)
+    late = uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',{'id':str(late),'destination':blocked},201)
+    with engine.begin() as db:
+        query(db,'UPDATE staging.contacts SET non_interested=true WHERE id=:id',id=contact)
+    assert voice(agents[0],late)[1].find('Dial') is None and row(late)['state']=='cancelled'
+    revoked_id = uuid4()
+    agents[1].request('POST','/api/telephony/test/intents',{'id':str(revoked_id),'destination':destinations[1]},201)
+    with engine.begin() as db:
+        query(db,'DELETE FROM staging.identity_sessions WHERE token_hash=:token',token=digest(agents[1].token))
+    assert voice(agents[1],revoked_id)[1].find('Dial') is None and row(revoked_id)['state']=='cancelled'
+    print('Voice HTTP/PG: legacy compatibility, three-agent parallel calls, immutable destinations, opt-outs, revocation, private recording ownership and recovery: PASS')
 finally:
     server.should_exit=True
     thread.join(5)
