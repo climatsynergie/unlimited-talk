@@ -48,7 +48,13 @@ class ManualControlTests(unittest.TestCase):
 
     def test_outer_auth_removal_preserves_hooks_and_private_read_gateway(self):
         from prepare_voice_runtime import render_hooks
-        original = (scripts.parent/'infrastructure/caddy/Caddyfile').read_text()
+        # CI deliberately mounts only tests and operator scripts, never host
+        # proxy configuration. Use a synthetic bootstrap policy here; the real
+        # candidate is separately validated by Caddy on the target host.
+        original = ('{$STAGING_DOMAIN} {\n\troute {\n'
+            '\t\timport /etc/caddy/staging-access.caddy\n'
+            '\t\treverse_proxy 127.0.0.1:8110 {\n\t\t\theader_up -Authorization\n\t\t}\n'
+            '\t}\n}\n')
         hooks = render_hooks(original)+'\nimport /etc/caddy/unlimited-talk-voice-read.caddy\n'
         candidate = module.public_caddy(hooks)
         self.assertNotIn('import /etc/caddy/staging-access.caddy',candidate)
