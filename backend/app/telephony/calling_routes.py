@@ -65,7 +65,7 @@ def save_settings(campaign_id:UUID,body:policy.CallingSettings,request:Request):
         actor=identity.admin(db,request)
         campaigns.access(db,actor,campaign_id,edit=True)
         previous=campaigns.replay(db,actor,campaign_id,body.request_id,payload)
-        if previous is not None:return previous
+        if previous is not None:return {'settings':previous['after']}
         before=snapshot(db,campaign_id)
         if before['version']!=body.version:raise HTTPException(409,'Ces réglages ont changé. Actualisez la campagne.')
         for identifier in {body.default_number_id,*[r.number_id for r in body.rules]}-{None}:

@@ -193,6 +193,13 @@ try:
     config(a,numbers['+14165550200'],rules=[rule,dict(number_id=numbers['+442079460002'],country='GB',prefix='')])
     config(b,numbers['+442079460002'])
     current=admin.request('GET','/api/telephony/campaigns/'+a['id']+'/calling')['settings']
+    # Retrying a saved configuration after a lost HTTP response returns the
+    # original response shape and does not increment its optimistic version.
+    saved_request={**current,'request_id':str(uuid4())}
+    saved=admin.request('PUT','/api/telephony/campaigns/'+a['id']+'/calling',saved_request)
+    assert admin.request('PUT','/api/telephony/campaigns/'+a['id']+'/calling',saved_request)==saved
+    admin.request('PUT','/api/telephony/campaigns/'+a['id']+'/calling',{**saved_request,'enabled':False},409)
+    current=saved['settings']
     agents[0].request('PUT','/api/telephony/campaigns/'+a['id']+'/calling',dict(request_id=str(uuid4()),version=current['version'],enabled=True,
         default_number_id=numbers['+14165550200'],hours=all_hours(),rules=[]),403)
     config(a,str(uuid4()),expected=409)
