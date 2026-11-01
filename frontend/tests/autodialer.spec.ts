@@ -52,6 +52,26 @@ async function setup(page: Page, role = "agent") {
     rules: [] as { number_id: string; country: string; prefix: string }[],
   };
   const controls: string[] = [];
+  const notes: {
+    id: string;
+    contact: string;
+    content: string;
+    created_at: string;
+    actor_name: string;
+  }[] = [];
+  const moves: { contact: string; stage: string }[] = [];
+  const moveRequests: string[] = [];
+  const appliedMoves = new Set<string>();
+  const appointments: Record<string, unknown>[] = [];
+  const stages = [
+    { id: "stage-new", name: "À appeler", kind: "new" },
+    { id: "stage-other", name: "Autre", kind: "other" },
+    { id: "stage-appointment", name: "RDV booké", kind: "appointment" },
+    { id: "stage-restricted", name: "Non intéressé", kind: "non_interested" },
+  ];
+  const versions = new Map<string, number>();
+  const stageByContact = new Map<string, string>();
+  const failures = { note: false, move: false };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body =
@@ -128,7 +148,7 @@ async function setup(page: Page, role = "agent") {
         destination: nextCount === 1 ? "+14165550111" : "+14165550112",
         caller_number: "+14165550200",
         campaign_id: campaign,
-        contact_id: "00000000-0000-0000-0000-000000000051",
+        contact_id: `00000000-0000-0000-0000-${String(50 + nextCount).padStart(12, "0")}`,
         callback_id:
           nextCount === 1 ? "00000000-0000-0000-0000-000000000061" : null,
         automatic: true,
@@ -195,6 +215,92 @@ async function setup(page: Page, role = "agent") {
         attempts_per_day: 2,
         retry_hours: 2,
       };
+    } else if (path === `/api/campaigns/${campaign}/board`) {
+      result = {
+        campaign: {
+          id: campaign,
+          name: "Campagne Canada",
+          timezone: "America/Toronto",
+          is_active: true,
+          version: 0,
+        },
+        stages: stages.map((stage, position) => ({
+          ...stage,
+          position,
+          color: "violet",
+          total: 0,
+          items: [],
+        })),
+      };
+    } else if (path.startsWith(`/api/campaigns/${campaign}/contacts/`)) {
+      const parts = path.split("/");
+      const contact = parts[5];
+      const action = parts[6];
+      if (action === "notes") {
+        if (failures.note)
+          return route.fulfill({
+            status: 503,
+            json: { detail: "Enregistrement indisponible, réessayez." },
+          });
+        notes.push({
+          ...body,
+          contact,
+          created_at: new Date().toISOString(),
+          actor_name: "Agent composeur",
+        });
+        result = { id: body.id };
+      } else if (action === "move") {
+        moveRequests.push(body.request_id);
+        if (!appliedMoves.has(body.request_id)) {
+          expect(body.version).toBe(versions.get(contact) || 0);
+          stageByContact.set(contact, body.stage_id);
+          versions.set(contact, body.version + 1);
+          moves.push({ contact, stage: body.stage_id });
+          appliedMoves.add(body.request_id);
+        }
+        if (failures.move)
+          return route.fulfill({
+            status: 503,
+            json: { detail: "Réponse interrompue après le déplacement." },
+          });
+        result = {};
+      } else {
+        result = {
+          contact: {
+            contact_id: contact,
+            phone: "+14165550111",
+            profile: {
+              display_name: `Client ${Number(contact.slice(-2)) - 50}`,
+              city: "Montréal",
+            },
+            stage_id: stageByContact.get(contact) || "stage-new",
+            version: versions.get(contact) || 0,
+            queue_position: "1",
+            do_not_contact: false,
+            non_interested: false,
+            contact_updated_at: new Date().toISOString(),
+          },
+          notes: notes.filter((note) => note.contact === contact),
+          events: [],
+          notes_has_more: false,
+          events_has_more: false,
+        };
+      }
+    } else if (path === "/api/calendar/resolve") {
+      result = {
+        options: [
+          {
+            starts_at: "2026-11-03T15:00:00Z",
+            utc_offset_minutes: -300,
+            label: "Toronto",
+          },
+        ],
+      };
+    } else if (path === "/api/calendar" && body) {
+      appointments.push(body);
+      stageByContact.set(body.contact_id, "stage-appointment");
+      versions.set(body.contact_id, (versions.get(body.contact_id) || 0) + 1);
+      result = { id: body.id };
     } else
       return route.fulfill({
         status: 404,
@@ -214,6 +320,11 @@ async function setup(page: Page, role = "agent") {
   return {
     rows,
     controls,
+    notes,
+    moves,
+    moveRequests,
+    appointments,
+    failures,
     get nextCount() {
       return nextCount;
     },
@@ -293,6 +404,165 @@ test("agent : un résultat serveur terminé déclenche le contact suivant sans n
   await expect(
     page.getByRole("complementary", { name: "Appel en cours", exact: true }),
   ).toBeVisible();
+});
+
+test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l’enchaînement continue", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await expect(
+    sheet.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Raccrocher", exact: true }),
+  ).toBeEnabled();
+  await sheet
+    .getByRole("textbox", { name: "Ajouter une note", exact: true })
+    .fill("Client propriétaire, souhaite un rendez-vous.");
+  const first = [...f.rows.values()][0];
+  first.state = "finished";
+  first.outcome = "completed";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  await expect.poll(() => f.nextCount).toBe(2);
+  await expect(
+    page.getByText(/Vous complétez encore la fiche du contact précédent/),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  f.failures.note = true;
+  await sheet
+    .getByRole("button", { name: "Enregistrer la note", exact: true })
+    .click();
+  await expect(sheet.getByRole("alert")).toContainText(
+    "Enregistrement indisponible",
+  );
+  await expect(
+    sheet.getByRole("textbox", { name: "Ajouter une note", exact: true }),
+  ).toHaveValue("Client propriétaire, souhaite un rendez-vous.");
+  f.failures.note = false;
+  await sheet
+    .getByRole("button", { name: "Enregistrer la note", exact: true })
+    .click();
+  await expect.poll(() => f.notes.length).toBe(1);
+  expect(f.notes[0].contact).toBe(first.contact_id);
+  expect(f.notes[0].content).toBe(
+    "Client propriétaire, souhaite un rendez-vous.",
+  );
+  await expect(
+    sheet.getByRole("heading", { name: "Client 2", exact: true }),
+  ).toBeVisible();
+  await expect(
+    sheet.getByRole("textbox", { name: "Ajouter une note", exact: true }),
+  ).toBeEmpty();
+  await sheet
+    .getByRole("combobox", { name: "Étape du pipeline", exact: true })
+    .selectOption("stage-other");
+  f.failures.move = true;
+  await sheet
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  await expect(sheet.getByRole("alert")).toContainText("Réponse interrompue");
+  f.failures.move = false;
+  await sheet
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  await expect.poll(() => f.moveRequests.length).toBe(2);
+  expect(f.moveRequests[0]).toBe(f.moveRequests[1]);
+  await expect.poll(() => f.moves.length).toBe(1);
+  expect(f.moves[0]).toEqual({
+    contact: [...f.rows.values()][1].contact_id,
+    stage: "stage-other",
+  });
+  await expect(
+    sheet.getByRole("combobox", { name: "Étape du pipeline", exact: true }),
+  ).toHaveValue("stage-other");
+  await sheet
+    .getByRole("combobox", { name: "Étape du pipeline", exact: true })
+    .selectOption("stage-restricted");
+  await sheet
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  await expect(
+    sheet.getByRole("region", {
+      name: "Confirmer la restriction",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(f.moves).toHaveLength(1);
+  await sheet
+    .getByRole("button", {
+      name: "Confirmer pour toutes les campagnes",
+      exact: true,
+    })
+    .click();
+  await expect.poll(() => f.moves.length).toBe(2);
+});
+
+test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage à RDV booké", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await sheet
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.controls.at(-1)).toBe("hold");
+  await expect(
+    page.getByRole("button", { name: "Raccrocher", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.screenshot({
+    path: "/tmp/ut-call-sheet-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const report = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(report.violations.map((v) => v.id)).toEqual([]);
+  await page.screenshot({
+    path: "/tmp/ut-call-sheet-mobile.png",
+    fullPage: true,
+  });
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-03T10:00");
+  await sheet
+    .getByLabel("Notes du rendez-vous", { exact: true })
+    .fill("Détails de la demande du client.");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  expect(f.appointments[0]).toMatchObject({
+    campaign_id: campaign,
+    contact_id: [...f.rows.values()][0].contact_id,
+    local_start: "2026-11-03T10:00",
+    timezone: "America/Toronto",
+    duration_minutes: 30,
+    notes: "Détails de la demande du client.",
+  });
+  await expect(
+    sheet.getByRole("combobox", { name: "Étape du pipeline", exact: true }),
+  ).toHaveValue("stage-appointment");
+  await expect.poll(() => f.controls.at(-1)).toBe("release");
+  expect(f.nextCount).toBe(1);
 });
 
 test("administrateur : un numéro suffit, sans horaires ni règles régionales", async ({

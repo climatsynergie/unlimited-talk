@@ -424,6 +424,8 @@ export default function VisualCalendar({ userId }: { userId: string }) {
               allDaySlot={false}
               slotDuration="00:30:00"
               slotHeaderFormat={clockFormat}
+              slotHeaderClass="calendar-slot-label"
+              dayHeaderClass="calendar-day-label"
               scrollTime="08:00:00"
               slotMinHeight={28}
               dayMaxEvents={3}

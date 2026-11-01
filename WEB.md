@@ -198,3 +198,13 @@ midnight end is exclusive. Calendar pages fetch automatically up to 1,000 events
 if more exist, the UI explicitly offers the next batch instead of silently
 hiding appointments. Visible calendars refresh every 30 seconds, preserving
 the existing view while background data loads.
+
+The dialer displays the current contact sheet inline, so the global hang-up
+button remains available while an agent writes notes or books an appointment.
+An unfinished note, appointment/callback form or pending mutation keeps that
+sheet attached to its original contact if the next call starts. A notice explains
+why the previous sheet remains visible; finishing or cancelling the edit follows
+the current call again. Drafts live only in the mounted page, and notes require
+an explicit save. Imported profile fields remain read-only; this is not yet a
+structured qualification questionnaire. Appointment notes are saved with the
+appointment, and booking uses the existing atomic appointment/pipeline update.

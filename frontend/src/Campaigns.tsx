@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { api, ApiError, date, message } from "./api";
 import { CallbackForm } from "./Callbacks";
 import { AppointmentForm } from "./Calendar";
@@ -1036,15 +1036,20 @@ export function CallContactDialog({
   contactId,
   admin,
   onClose,
+  inline = false,
+  onEditingChange,
 }: {
   campaignId: string;
   contactId: string;
   admin: boolean;
   onClose: () => void;
+  inline?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const moveRequest = useRef<{ key: string; id: string } | null>(null);
   useEffect(() => {
     const abort = new AbortController();
     setError("");
@@ -1057,23 +1062,76 @@ export function CallContactDialog({
       });
     return () => abort.abort();
   }, [campaignId, revision]);
-  if (!board || error)
+  if (!board)
     return (
-      <Modal title="Fiche de l’appel" onClose={onClose}>
+      <ContactFrame inline={inline} title="Fiche de l’appel" onClose={onClose}>
         {error ? <Notice error>{error}</Notice> : <p>Chargement du contact…</p>}
-      </Modal>
+        {error ? (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setRevision((n) => n + 1)}
+          >
+            Réessayer de charger la fiche
+          </button>
+        ) : null}
+      </ContactFrame>
     );
   return (
     <CardDetail
-      key={`${contactId}-${revision}`}
+      key={`${campaignId}-${contactId}`}
       campaign={board.campaign}
       identifier={contactId}
       stages={board.stages}
       admin={admin}
+      inline={inline}
+      confirmRestrictions
+      reloadKey={revision}
+      loadError={error}
+      onEditingChange={onEditingChange}
       onClose={onClose}
-      onMove={() => setRevision((n) => n + 1)}
+      onMove={async (card, stage) => {
+        const key = `${campaignId}:${contactId}:${card.version}:${stage.id}`;
+        if (moveRequest.current?.key !== key)
+          moveRequest.current = { key, id: crypto.randomUUID() };
+        await api(`/campaigns/${campaignId}/contacts/${contactId}/move`, {
+          method: "POST",
+          body: {
+            request_id: moveRequest.current.id,
+            stage_id: stage.id,
+            version: card.version,
+          },
+        });
+        moveRequest.current = null;
+        setRevision((n) => n + 1);
+      }}
       onChanged={() => setRevision((n) => n + 1)}
     />
+  );
+}
+
+function ContactFrame({
+  inline,
+  title,
+  onClose,
+  busy,
+  children,
+}: {
+  inline?: boolean;
+  title: string;
+  onClose: () => void;
+  busy?: boolean;
+  children: ReactNode;
+}) {
+  return inline ? (
+    <section className="call-contact-sheet" aria-label="Fiche du contact">
+      <h3 className="call-contact-name">{title}</h3>
+      {children}
+    </section>
+  ) : (
+    <Modal title={title} onClose={onClose} busy={busy}>
+      {children}
+    </Modal>
   );
 }
 
@@ -1085,14 +1143,24 @@ function CardDetail({
   onClose,
   onMove,
   onChanged,
+  inline = false,
+  reloadKey = 0,
+  onEditingChange,
+  confirmRestrictions = false,
+  loadError = "",
 }: {
   campaign: Campaign;
   identifier: string;
   stages: Stage[];
   admin: boolean;
   onClose: () => void;
-  onMove: (card: Card, stage: Stage) => void;
+  onMove: (card: Card, stage: Stage) => void | Promise<void>;
   onChanged: () => void;
+  inline?: boolean;
+  reloadKey?: number;
+  onEditingChange?: (editing: boolean) => void;
+  confirmRestrictions?: boolean;
+  loadError?: string;
 }) {
   const { controller, state: phone, busy: calling } = usePhone();
   useEffect(() => {
@@ -1108,6 +1176,8 @@ function CardDetail({
   const [error, setError] = useState("");
   const [restore, setRestore] = useState(false);
   const [remove, setRemove] = useState(false);
+  const [note, setNote] = useState("");
+  const [pendingStage, setPendingStage] = useState<Stage | null>(null);
   const noteId = useRef(crypto.randomUUID());
   const actionId = useRef(crypto.randomUUID());
   useEffect(() => {
@@ -1116,14 +1186,34 @@ function CardDetail({
       signal: abort.signal,
     })
       .then((r) => {
-        setData(r);
-        setTarget(r.contact.stage_id);
+        if (!abort.signal.aborted) {
+          setData(r);
+          setTarget(r.contact.stage_id);
+        }
       })
       .catch((e) => {
         if (!abort.signal.aborted) setError(message(e));
       });
     return () => abort.abort();
-  }, [campaign.id, identifier, revision]);
+  }, [campaign.id, identifier, revision, reloadKey]);
+  useEffect(() => {
+    onEditingChange?.(
+      !!note.trim() || booking || callback || busy || !!pendingStage,
+    );
+  }, [note, booking, callback, busy, pendingStage, onEditingChange]);
+  async function moveTo(stage: Stage) {
+    if (!data || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onMove(data.contact, stage);
+      setPendingStage(null);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function addNote(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
@@ -1140,6 +1230,7 @@ function CardDetail({
         body,
       });
       noteId.current = crypto.randomUUID();
+      setNote("");
       form.reset();
       setRevision((n) => n + 1);
     } catch (e) {
@@ -1203,12 +1294,14 @@ function CardDetail({
     }
   }
   return (
-    <Modal
+    <ContactFrame
+      inline={inline}
       title={data ? name(data.contact) : "Fiche contact"}
       onClose={onClose}
       busy={busy || booking || callback}
     >
       {error ? <Notice error>{error}</Notice> : null}
+      {loadError ? <Notice error>{loadError}</Notice> : null}
       <button
         className="button secondary"
         disabled={busy}
@@ -1380,11 +1473,45 @@ function CardDetail({
             }
             onClick={() => {
               const stage = stages.find((s) => s.id === target);
-              if (stage) onMove(data.contact, stage);
+              if (stage) {
+                if (
+                  confirmRestrictions &&
+                  ["non_interested", "do_not_contact"].includes(stage.kind)
+                )
+                  setPendingStage(stage);
+                else void moveTo(stage);
+              }
             }}
           >
             Déplacer vers cette étape
           </button>
+          {pendingStage ? (
+            <section
+              className="confirmation-panel"
+              aria-label="Confirmer la restriction"
+            >
+              <h3>{pendingStage.name}</h3>
+              <p>
+                Cette restriction s’applique à toutes les campagnes du contact.
+              </p>
+              <div className="actions">
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => setPendingStage(null)}
+                >
+                  Annuler
+                </button>
+                <button
+                  className="button danger"
+                  disabled={busy}
+                  onClick={() => void moveTo(pendingStage)}
+                >
+                  Confirmer pour toutes les campagnes
+                </button>
+              </div>
+            </section>
+          ) : null}
           <h3>Notes partagées</h3>
           {!data.notes.length ? (
             <p>Aucune note pour ce contact.</p>
@@ -1416,6 +1543,7 @@ function CardDetail({
                 <textarea
                   disabled={busy}
                   name="content"
+                  value={note}
                   required
                   maxLength={5000}
                   onInvalid={(e) =>
@@ -1424,7 +1552,8 @@ function CardDetail({
                     )
                   }
                   onInput={(e) => e.currentTarget.setCustomValidity("")}
-                  onChange={() => {
+                  onChange={(e) => {
+                    setNote(e.target.value);
                     noteId.current = crypto.randomUUID();
                   }}
                 />
@@ -1530,6 +1659,6 @@ function CardDetail({
           ) : null}
         </>
       )}
-    </Modal>
+    </ContactFrame>
   );
 }

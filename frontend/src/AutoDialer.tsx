@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, message } from "./api";
 import { usePhone } from "./Phone";
 import { CallingSettingsDialog } from "./CallingSettings";
@@ -108,6 +108,27 @@ export function AutoDialerPanel({
     booking: "Suspendu pendant la saisie du rendez-vous",
   };
   const active = state.intent || state.lastIntent;
+  const shownCampaign = contact?.campaign || active?.campaign_id;
+  const shownContact = contact?.id || active?.contact_id;
+  const editingContact = useCallback(
+    (editing: boolean) => {
+      setContact((previous) => {
+        if (!editing || !shownCampaign || !shownContact) return null;
+        if (
+          previous?.campaign === shownCampaign &&
+          previous.id === shownContact
+        )
+          return previous;
+        return { campaign: shownCampaign, id: shownContact };
+      });
+    },
+    [shownCampaign, shownContact],
+  );
+  const previousContact =
+    !!contact &&
+    !!active &&
+    (contact.campaign !== active.campaign_id ||
+      contact.id !== active.contact_id);
   const selectedCampaign = campaigns.find(
     (campaign) => campaign.id === state.campaignId,
   );
@@ -263,22 +284,12 @@ export function AutoDialerPanel({
           {active.caller_number ? (
             <p>Numéro émetteur : {active.caller_number}</p>
           ) : null}
-          {active.campaign_id && active.contact_id ? (
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() =>
-                setContact({
-                  campaign: active.campaign_id!,
-                  id: active.contact_id!,
-                })
-              }
-            >
-              Ouvrir la fiche et les rendez-vous
-            </button>
-          ) : null}
         </div>
-      ) : null}
+      ) : (
+        <p className="audio-hint">
+          La fiche du client apparaîtra ici dès le début d’un appel.
+        </p>
+      )}
       {settings && state.campaignId ? (
         <CallingSettingsDialog
           campaignId={state.campaignId}
@@ -288,11 +299,21 @@ export function AutoDialerPanel({
           }}
         />
       ) : null}
-      {contact ? (
+      {previousContact ? (
+        <Notice>
+          Vous complétez encore la fiche du contact précédent. Enregistrez la
+          note ou terminez le formulaire pour afficher le contact de l’appel en
+          cours.
+        </Notice>
+      ) : null}
+      {shownCampaign && shownContact ? (
         <CallContactDialog
-          campaignId={contact.campaign}
-          contactId={contact.id}
+          key={`${shownCampaign}-${shownContact}`}
+          campaignId={shownCampaign}
+          contactId={shownContact}
           admin={admin}
+          inline
+          onEditingChange={editingContact}
           onClose={() => setContact(null)}
         />
       ) : null}

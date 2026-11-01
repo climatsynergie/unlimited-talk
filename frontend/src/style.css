@@ -2324,6 +2324,8 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   overflow: hidden;
   border: 1px solid #e8e1ef;
   border-radius: 10px;
+  padding: 8px;
+  background: #fff;
   --fc-monarch-primary: #7350bc;
   --fc-monarch-primary-foreground: #fff;
   --fc-monarch-background: #fff;
@@ -2331,6 +2333,25 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   --fc-monarch-muted-foreground: #6b6079;
   --fc-monarch-faint-foreground: #71667f;
   --fc-monarch-outline: #7350bc;
+}
+.calendar-canvas > div {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.calendar-canvas .calendar-slot-label {
+  padding-inline: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.calendar-canvas .calendar-day-label {
+  padding: 10px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.calendar-canvas .calendar-day-label *,
+.calendar-canvas .calendar-slot-label * {
+  font-size: inherit;
+  line-height: inherit;
 }
 .calendar-canvas.view-week {
   overflow-x: auto;
@@ -2358,16 +2379,62 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 .calendar-event-content {
   min-width: 0;
   max-height: 100%;
-  padding: 3px 4px;
+  padding: 4px 6px;
   display: grid;
   gap: 2px;
   overflow: hidden;
   line-height: 1.25;
 }
+.calendar-canvas:is(.view-day, .view-week) .calendar-event-content {
+  gap: 1px;
+  padding: 2px 5px;
+}
+.calendar-canvas:is(.view-day, .view-week) .calendar-event-content small,
+.calendar-canvas:is(.view-day, .view-week) .calendar-event-status {
+  display: none;
+}
 .calendar-event-content strong {
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-contact-sheet {
+  margin-top: 20px;
+  padding: 20px;
+  min-width: 0;
+  border: 1px solid #e5deed;
+  border-radius: 12px;
+  background: #fff;
+}
+.call-contact-name {
+  margin: 0 0 16px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.call-contact-sheet .contact-profile {
+  margin-block: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px 20px;
+}
+.call-contact-sheet .contact-profile dt {
+  margin-top: 0;
+}
+.call-contact-sheet .contact-profile dd {
+  margin-bottom: 0;
+}
+.call-contact-sheet h3:not(.call-contact-name) {
+  margin: 20px 0 12px;
+}
+.call-contact-sheet .campaign-stage-picker {
+  margin-top: 20px;
+}
+.call-contact-sheet .contact-notes {
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 12px;
 }
 .calendar-event-content small,
 .calendar-event-time,
