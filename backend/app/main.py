@@ -29,9 +29,9 @@ from app.database import make_engine
 
 logger = logging.getLogger('uvicorn.error')
 
-# Archive workers require schema 8. The preceding compatibility image accepts
-# both schemas and remains the rollback target without removing Voice history.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0008_recordings'})
+# Accept the next additive inbound schema before introducing its tables/routes.
+# This delivery remains a real rollback target after that migration commits.
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0008_recordings', '0009_inbound'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "

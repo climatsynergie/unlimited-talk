@@ -154,6 +154,12 @@ database effects. Durable queue/agent reservations, follow-up persistence, admin
 settings and the browser receiving flow still need their implementation and
 integration proof before incoming call handling can be considered delivered.
 
+The schema-8 compatibility delivery accepts the next additive `0009_inbound`
+revision and carries `io.unlimitedtalk.inbound-compatible=1`. Deploy this delivery
+before any inbound migration so an application rollback still serves contacts,
+campaigns, appointments and call history. It also includes the editable number
+field. It creates no inbound tables and activates no telephone traffic.
+
 ## Reliability boundaries
 
 Eligibility checks and claims must be atomic across agents, workers and
