@@ -153,7 +153,7 @@ export function AutoDialerPanel({
           {labels[mode]}
         </span>
       </div>
-      <p>
+      <p className="automatic-description">
         Les rappels dus de vos campagnes sont prioritaires. Les autres contacts
         suivent la file de la campagne choisie.
       </p>
@@ -168,7 +168,7 @@ export function AutoDialerPanel({
             : "Un administrateur doit choisir le numéro émetteur de cette campagne. La liste se met à jour automatiquement après son enregistrement."}
         </Notice>
       ) : null}
-      <label>
+      <label className="automatic-campaign">
         Campagne d’appel
         <select
           value={state.campaignId}

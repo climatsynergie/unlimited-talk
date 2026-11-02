@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, date, message } from "./api";
-import { Modal, Notice, Submit } from "./ui";
+import { Icon, Modal, Notice, Submit } from "./ui";
 import { local, when, Timezone } from "./Scheduling";
 
 type Status = "scheduled" | "completed" | "cancelled";
@@ -517,7 +517,7 @@ export function Callbacks({
           Actualiser
         </button>
       </div>
-      <p>
+      <p className="callback-help">
         Pour programmer un rappel, ouvrez une fiche dans sa campagne. Les
         rappels arrivés à échéance sont présentés en premier.
       </p>
@@ -531,43 +531,65 @@ export function Callbacks({
       <div className="callback-list" aria-busy={loading}>
         {items.map((row) => (
           <button
-            className={`appointment-card ${row.status === "cancelled" ? "status-cancelled" : row.status === "completed" ? "status-completed" : ""}`}
+            type="button"
+            className={`appointment-card callback-card callback-${row.status} ${row.status === "scheduled" && row.blocked_reason ? "callback-blocked" : row.status === "scheduled" && row.is_due ? "callback-due" : ""}`}
             key={row.id}
             onClick={() => setSelected(row.id)}
           >
-            <strong>{name(row)}</strong>
-            <span>
-              {when(row.due_at, row.timezone)} · {row.timezone}
+            <span className="callback-card-heading">
+              <strong>{name(row)}</strong>
+              <span className="callback-badge">
+                {row.status === "scheduled" && row.blocked_reason
+                  ? "Bloqué"
+                  : row.status === "scheduled" && row.is_due
+                    ? "À rappeler"
+                    : statuses[row.status]}
+              </span>
             </span>
-            <span>
-              {row.campaign_name} · {row.owner_name}
+            <span className="callback-schedule">
+              <Icon name="clock" />
+              <span>{when(row.due_at, row.timezone)}</span>
             </span>
-            <small>
-              {row.status === "scheduled" && row.blocked_reason
-                ? `Bloqué : ${reasons[row.blocked_reason] || "Vérification nécessaire"}`
-                : row.status === "scheduled" && row.is_due
-                  ? "Échéance atteinte — rappel prioritaire pour cet agent"
-                  : statuses[row.status]}
-            </small>
+            <span className="callback-zone">{row.timezone}</span>
+            <span className="callback-meta">
+              <span>
+                <Icon name="campaign" />
+                {row.campaign_name}
+              </span>
+              <span>
+                <Icon name="users" />
+                {row.owner_name}
+              </span>
+            </span>
+            {row.status === "scheduled" && row.blocked_reason ? (
+              <small className="callback-reason">
+                Bloqué :{" "}
+                {reasons[row.blocked_reason] || "Vérification nécessaire"}
+              </small>
+            ) : null}
           </button>
         ))}
       </div>
-      <div className="actions">
+      <nav
+        className="actions callback-pagination"
+        aria-label="Pagination des rappels"
+      >
         <button
-          className="button secondary"
+          className="button secondary small"
           disabled={!offset || loading}
           onClick={() => setOffset((n) => Math.max(0, n - 100))}
         >
           Résultats précédents
         </button>
+        <span>Page {Math.floor(offset / 100) + 1}</span>
         <button
-          className="button secondary"
+          className="button secondary small"
           disabled={!hasMore || loading}
           onClick={() => setOffset((n) => n + 100)}
         >
           Résultats suivants
         </button>
-      </div>
+      </nav>
       {hasMore ? (
         <p>D’autres rappels sont disponibles sur la page suivante.</p>
       ) : null}

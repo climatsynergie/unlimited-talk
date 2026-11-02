@@ -304,20 +304,27 @@ export function CallHistory({
           />
           Avec enregistrement
         </label>
-        <button type="submit" className="button primary" disabled={busy}>
-          Rechercher les appels
-        </button>
-        <button
-          type="button"
-          className="text-button"
-          disabled={busy}
-          onClick={() => {
-            setDraft(emptyFilters);
-            applyFilters({ ...emptyFilters });
-          }}
-        >
-          Réinitialiser
-        </button>
+        <div className="call-history-filter-actions">
+          <button
+            type="submit"
+            className="button primary small"
+            aria-label="Rechercher les appels"
+            disabled={busy}
+          >
+            Rechercher
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            disabled={busy}
+            onClick={() => {
+              setDraft(emptyFilters);
+              applyFilters({ ...emptyFilters });
+            }}
+          >
+            Réinitialiser
+          </button>
+        </div>
       </form>
       {filters.destination ? (
         <p className="call-filter-summary">
