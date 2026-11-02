@@ -164,15 +164,17 @@ export function Notice({
 export function Submit({
   busy,
   disabled = false,
+  tone = "primary",
   children,
 }: {
   busy: boolean;
   disabled?: boolean;
+  tone?: "primary" | "success";
   children: ReactNode;
 }) {
   return (
     <button
-      className="button primary"
+      className={`button ${tone}`}
       type="submit"
       disabled={busy || disabled}
       aria-busy={busy}

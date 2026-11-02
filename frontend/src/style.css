@@ -14,6 +14,10 @@
   font-size: 14px;
   --purple: #5145cd;
   --purple-dark: #4035b3;
+  --blue: #1d4ed8;
+  --blue-dark: #1e40af;
+  --green: #15803d;
+  --green-dark: #166534;
   --muted: #737587;
   --line: #e9e9ef;
   --radius: 14px;
@@ -57,7 +61,7 @@ summary:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid #aaa2f5;
+  outline: 3px solid #2563eb;
   outline-offset: 3px;
 }
 button {
@@ -374,17 +378,28 @@ select,
   width: 16px;
 }
 .primary {
-  background: var(--purple);
-  border-color: var(--purple);
+  background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
-  box-shadow: 0 3px 8px #5145cd15;
+  box-shadow: 0 3px 8px #1d4ed815;
 }
 .primary:hover:not(:disabled) {
-  background: var(--purple-dark);
-  border-color: var(--purple-dark);
+  background: var(--blue-dark);
+  border-color: var(--blue-dark);
+}
+.success {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  box-shadow: 0 3px 8px #15803d15;
+}
+.success:hover:not(:disabled) {
+  background: var(--green-dark);
+  border-color: var(--green-dark);
 }
 form > .primary,
-.auth-card > .primary {
+.auth-card > .primary,
+form > .success {
   width: 100%;
   margin-top: 4px;
   justify-content: space-between;
@@ -397,6 +412,15 @@ form > .primary,
 }
 .secondary:hover:not(:disabled) {
   background: #f6f5fa;
+}
+.info {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: var(--blue-dark);
+}
+.info:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #60a5fa;
 }
 .danger {
   background: #b14452;

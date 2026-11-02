@@ -1435,7 +1435,7 @@ function CardDetail({
           >
             <button
               type="button"
-              className="button primary"
+              className="button success"
               disabled={
                 !phone.loaded ||
                 !phone.enabled ||
@@ -1478,7 +1478,7 @@ function CardDetail({
               !data.contact.do_not_contact &&
               !data.contact.non_interested ? (
               <button
-                className="button secondary"
+                className="button info"
                 disabled={busy || detailLoading}
                 onClick={() => setCallback(true)}
               >
@@ -1521,7 +1521,7 @@ function CardDetail({
               !data.contact.do_not_contact &&
               !data.contact.non_interested ? (
               <button
-                className="button primary"
+                className="button success"
                 disabled={busy || detailLoading}
                 onClick={() => {
                   setBusy(true);

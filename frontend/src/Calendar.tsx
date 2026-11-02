@@ -321,6 +321,7 @@ export function AppointmentForm({
       <div className="actions">
         <Submit
           busy={busy}
+          tone="success"
           disabled={
             resolving ||
             !choices.length ||

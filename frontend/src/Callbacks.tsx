@@ -248,6 +248,7 @@ export function CallbackForm({
       <div className="actions">
         <Submit
           busy={busy}
+          tone="success"
           disabled={resolving || !choices.length || offset === ""}
         >
           {row ? "Enregistrer le rappel" : "Confirmer le rappel"}

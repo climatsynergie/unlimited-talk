@@ -255,7 +255,7 @@ export function PhonePanel({
         <div className="audio-actions">
           <button
             type="submit"
-            className="button primary"
+            className="button success"
             disabled={
               !state.loaded ||
               !state.enabled ||

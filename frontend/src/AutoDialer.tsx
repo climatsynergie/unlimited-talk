@@ -214,7 +214,7 @@ export function AutoDialerPanel({
         ) : null}
         <button
           type="button"
-          className="button primary dialer-start"
+          className="button success dialer-start"
           disabled={
             !state.enabled ||
             !state.loaded ||
