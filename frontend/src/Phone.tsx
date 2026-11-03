@@ -101,6 +101,19 @@ export function PhoneProvider({
     };
   }, [controller]);
   useEffect(() => {
+    if (
+      !state.automaticRunning ||
+      state.phase !== "idle" ||
+      state.automaticNextAt === null
+    )
+      return;
+    const timer = setTimeout(
+      () => void controller.automaticTick(),
+      Math.max(0, Math.ceil(state.automaticNextAt - performance.now())),
+    );
+    return () => clearTimeout(timer);
+  }, [controller, state.automaticRunning, state.automaticNextAt, state.phase]);
+  useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => void controller.refresh(), 2000);
     function warning(event: BeforeUnloadEvent) {
@@ -156,6 +169,13 @@ const results: Record<string, string> = {
 };
 export function PhoneBar() {
   const { state, controller, busy } = usePhone();
+  if (!busy && state.automaticRunning && state.automaticNextAt !== null)
+    return (
+      <AutomaticWait
+        until={state.automaticNextAt}
+        onWait={() => void controller.pauseAutomatic()}
+      />
+    );
   if (!busy) return null;
   return (
     <aside className="phone-bar" aria-label="Appel en cours">
@@ -181,6 +201,49 @@ export function PhoneBar() {
         onClick={() => void controller.refresh()}
       >
         Vérifier l’appel
+      </button>
+    </aside>
+  );
+}
+function AutomaticWait({
+  until,
+  onWait,
+}: {
+  until: number;
+  onWait: () => void;
+}) {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(performance.now()), 200);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((until - now) / 1_000));
+  return (
+    <aside className="phone-bar automatic-wait" aria-label="Prochain appel">
+      <div>
+        <strong>
+          {seconds > 0 ? (
+            <>
+              Prochain appel dans{" "}
+              <span role="timer" aria-live="off">
+                {seconds} s
+              </span>
+            </>
+          ) : (
+            "Préparation de l’appel suivant…"
+          )}
+        </strong>
+        <p role="status">
+          Cliquez sur « Attendre » pour compléter la fiche ou rappeler avant de
+          reprendre les appels.
+        </p>
+      </div>
+      <button
+        type="button"
+        className="button danger automatic-wait-button"
+        onClick={onWait}
+      >
+        Attendre
       </button>
     </aside>
   );

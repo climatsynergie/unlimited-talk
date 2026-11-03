@@ -511,6 +511,7 @@ function automaticFixture() {
         },
         dialer: { ...row },
       };
+      f.rows.set(body.id, result.intent);
       if (nextGate) await nextGate;
       return result;
     },
@@ -545,7 +546,9 @@ function automaticFixture() {
   };
 }
 
-test("composeur : lancement explicite, un seul appel puis enchaînement après résultat serveur", async (t) => {
+test("composeur : cinq secondes complètes après la fin serveur, jamais après le seul média", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
   const f = automaticFixture();
   t.after(() => f.controller.dispose());
   await f.controller.refresh();
@@ -559,15 +562,119 @@ test("composeur : lancement explicite, un seul appel puis enchaînement après r
   await f.controller.automaticTick();
   assert.equal(f.nextCount, 1);
   const id = f.device.connections[0];
+  f.device.call.emit("disconnect");
+  await setImmediate();
+  now = 60_000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticNextAt, null);
   f.rows.set(id, {
     ...f.rows.get(id)!,
     state: "finished",
     outcome: "completed",
   });
   await f.controller.refresh();
+  assert.equal(f.controller.state.automaticNextAt, 65_000);
+  now = 64_999;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticNextAt, 65_000);
+  now = 65_000;
   await f.controller.automaticTick();
   assert.equal(f.nextCount, 2);
   assert.equal(f.device.connections.length, 2);
+});
+
+test("composeur : Attendre annule le départ suivant, permet un appel manuel et exige une reprise", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  now = 4_999;
+  await f.controller.pauseAutomatic();
+  now = 60_000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticNextAt, null);
+  assert.equal(f.controller.state.automaticRunning, false);
+  await f.controller.start("", "+14165550101");
+  assert.equal(f.device.connections.length, 2);
+  assert.equal(f.nextCount, 1);
+  const manual = f.device.connections[1];
+  f.rows.set(manual, {
+    ...f.rows.get(manual)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 2);
+});
+
+test("composeur : perte de présence pendant les cinq secondes interdit tout départ tardif", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  f.failHeartbeat();
+  await f.controller.automaticTick();
+  now = 10_000;
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticNextAt, null);
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.nextCount, 1);
+});
+
+test("composeur : un RDV pendant le décompte conserve le délai, une restauration exige une reprise", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "completed",
+  });
+  await f.controller.refresh();
+  const hold = await f.controller.beginBooking("campaign");
+  now = 1_000;
+  await f.controller.endBooking(hold);
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticNextAt, 5_000);
+  f.controller.dispose();
+  f.controller.activate();
+  now = 10_000;
+  await f.controller.refreshAutomatic();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticNextAt, null);
+  assert.equal(f.controller.state.automaticRunning, false);
 });
 
 test("composeur : pause pendant une réponse de réservation perdue, aucun SDK ni appel tardif", async (t) => {

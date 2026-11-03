@@ -79,6 +79,7 @@ export type PhoneState = {
   automatic: Dialer | null;
   automaticLoaded: boolean;
   automaticRunning: boolean;
+  automaticNextAt: number | null;
   automaticBusy: boolean;
   automaticMessage: string;
   automaticError: string;
@@ -131,6 +132,7 @@ export class PhoneController {
     automatic: null,
     automaticLoaded: false,
     automaticRunning: false,
+    automaticNextAt: null,
     automaticBusy: false,
     automaticMessage: "",
     automaticError: "",
@@ -183,6 +185,7 @@ export class PhoneController {
   }
   private settle(row: Intent) {
     if (!terminal(row)) return false;
+    const automatic = row.automatic || this.state.intent?.automatic;
     ++this.generation;
     this.identifier = null;
     this.pending = null;
@@ -197,6 +200,7 @@ export class PhoneController {
       local: false,
       error: "",
       result: row.outcome || row.state,
+      automaticNextAt: automatic ? performance.now() + 5_000 : null,
     });
     return true;
   }
@@ -299,6 +303,11 @@ export class PhoneController {
       automatic: row,
       automaticLoaded: true,
       automaticRunning: this.automaticArmed && row.mode === "running",
+      automaticNextAt:
+        row.browser_id === this.browserId &&
+        (row.mode === "running" || row.mode === "booking")
+          ? this.state.automaticNextAt
+          : null,
     });
   }
   async refreshAutomatic() {
@@ -345,6 +354,7 @@ export class PhoneController {
       this.applyAutomatic(result.dialer);
       this.update({
         campaignId,
+        automaticNextAt: null,
         automaticMessage: "Recherche du prochain contact ou rappel dû…",
       });
     } catch (error) {
@@ -366,6 +376,7 @@ export class PhoneController {
     this.update({
       automaticRunning: false,
       automaticBusy: true,
+      automaticNextAt: null,
       automaticMessage: stop
         ? "Enchaînement arrêté."
         : "Enchaînement en pause.",
@@ -486,6 +497,7 @@ export class PhoneController {
         this.bookingArmed = false;
         this.update({
           automaticRunning: false,
+          automaticNextAt: null,
           automaticError:
             "Composeur suspendu après une perte de connexion. Vérifiez l’appel avant de reprendre.",
         });
@@ -506,7 +518,11 @@ export class PhoneController {
       !this.state.enabled ||
       this.state.phase !== "idle" ||
       this.pending ||
-      (!automatic && this.automaticArmed)
+      (!automatic && this.automaticArmed) ||
+      (automatic &&
+        (!this.automaticArmed ||
+          (this.state.automaticNextAt !== null &&
+            performance.now() < this.state.automaticNextAt)))
     )
       return;
     // Strip only presentation characters. Extensions, letters and control
@@ -537,6 +553,7 @@ export class PhoneController {
       result: "",
       intent: null,
       destination,
+      automaticNextAt: null,
     });
     let attemptedConnect = false;
     try {
@@ -789,6 +806,7 @@ export class PhoneController {
       local: false,
       automaticRunning: false,
       automaticBusy: false,
+      automaticNextAt: null,
       phase: this.identifier ? "checking" : "idle",
     });
   }

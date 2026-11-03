@@ -34,9 +34,16 @@ exclus de la file ordinaire.
 
 **Mettre en pause** et **Arrêter l’enchaînement** empêchent le prochain appel ;
 la conversation déjà autorisée continue. **Raccrocher** termine le média actuel.
-Le résultat serveur doit confirmer la fin avant un nouvel appel. Le clic de prise
-de rendez-vous suspend aussi le composeur et le classement automatique pendant la
-saisie ; enregistrer ou annuler la saisie rend la main au composeur seulement s’il
+Le résultat serveur doit confirmer la fin avant un nouvel appel. Après chaque
+appel automatique, un compte à rebours de cinq secondes précède la réservation
+du contact suivant. Le bandeau reste visible pendant la navigation interne.
+Son bouton rouge **Attendre** met l’enchaînement en pause sans réserver le contact
+suivant ; l’agent peut compléter la fiche ou rappeler manuellement, puis utiliser
+**Reprendre les appels**. Sans clic, le composeur continue à la fin du délai.
+Le premier appel et une reprise explicite ne demandent pas ce délai.
+
+Le clic de prise de rendez-vous suspend aussi le composeur et le classement
+automatique pendant la saisie ; enregistrer ou annuler la saisie rend la main au composeur seulement s’il
 était actif auparavant et n’a pas été mis en pause entre-temps.
 
 La navigation interne conserve le téléphone. Un rechargement, une session expirée,

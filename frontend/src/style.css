@@ -1077,7 +1077,7 @@ tbody tr:hover {
 }
 .account-security strong {
   font-size: 11px;
-  color: #8c799c;
+  color: #6b587d;
 }
 .account-security p {
   font-size: 10px;
@@ -2920,6 +2920,33 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 .phone-bar p {
   margin: 5px 0 0;
   color: #4c4664;
+}
+.automatic-wait {
+  border-color: #e6b8be;
+  border-left: 5px solid #b14452;
+  box-shadow: 0 6px 20px #7f1d1d0a;
+}
+.automatic-wait > div > strong {
+  font-size: 16px;
+}
+.automatic-wait [role="timer"] {
+  color: var(--blue-dark);
+  font-variant-numeric: tabular-nums;
+}
+.automatic-wait p {
+  font-size: 12px;
+}
+.automatic-wait-button {
+  min-height: 56px;
+  min-width: 180px;
+  font-size: 18px;
+  padding: 14px 28px;
+}
+@media (max-width: 760px) {
+  .automatic-wait-button {
+    width: 100%;
+    min-width: 0;
+  }
 }
 .phone-destination {
   font-size: 1.15rem;

@@ -157,6 +157,7 @@ function Account({
             <input
               className="sr-only"
               name="username"
+              aria-label="Adresse courriel du compte"
               value={identity.user.email}
               autoComplete="username"
               readOnly

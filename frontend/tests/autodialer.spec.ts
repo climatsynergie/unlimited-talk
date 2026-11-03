@@ -450,12 +450,14 @@ test("agent : rappel prioritaire, pause sans raccrochage puis reprise explicite"
   await page
     .getByRole("button", { name: "Reprendre les appels", exact: true })
     .click();
-  await expect.poll(() => f.nextCount).toBe(2);
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
 });
 
-test("agent : un résultat serveur terminé déclenche le contact suivant sans nouveau clic", async ({
+test("agent : après la fin serveur, aucun appel avant cinq secondes puis reprise automatique", async ({
   page,
 }) => {
+  await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
   const f = await setup(page);
   await start(page);
   expect(
@@ -465,11 +467,89 @@ test("agent : un résultat serveur terminé déclenche le contact suivant sans n
   row.state = "finished";
   row.outcome = "no-answer";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
-  await expect.poll(() => f.nextCount).toBe(2);
+  const wait = page.getByRole("complementary", {
+    name: "Prochain appel",
+    exact: true,
+  });
+  await expect(wait).toBeVisible();
+  await expect(wait.getByRole("timer")).toHaveText("5 s");
+  await page.clock.runFor(4_999);
+  expect(f.nextCount).toBe(1);
+  await page.clock.runFor(1);
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
   await page.getByRole("link", { name: "Mon compte", exact: true }).click();
   await expect(
     page.getByRole("complementary", { name: "Appel en cours", exact: true }),
   ).toBeVisible();
+});
+
+test("agent : Attendre reste visible pendant la navigation et bloque jusqu’à Reprendre les appels", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const f = await setup(page);
+  await start(page);
+  const first = [...f.rows.values()][0];
+  first.state = "finished";
+  first.outcome = "completed";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  const wait = page.getByRole("complementary", {
+    name: "Prochain appel",
+    exact: true,
+  });
+  await expect(wait).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/ut-between-calls-desktop.png",
+    fullPage: true,
+  });
+  await page.getByRole("link", { name: "Mon compte", exact: true }).click();
+  await expect(wait).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const report = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(
+    report.violations.map((v) => ({
+      id: v.id,
+      nodes: v.nodes.map((n) => ({
+        target: n.target,
+        summary: n.failureSummary,
+      })),
+    })),
+  ).toEqual([]);
+  await page.screenshot({
+    path: "/tmp/ut-between-calls-mobile.png",
+    fullPage: true,
+  });
+  await wait.getByRole("button", { name: "Attendre", exact: true }).click();
+  await expect.poll(() => f.controls.at(-1)).toBe("pause");
+  await page.clock.fastForward(30_000);
+  expect(f.nextCount).toBe(1);
+  await expect(wait).toHaveCount(0);
+  await page.getByRole("link", { name: "Poste d’appel", exact: true }).click();
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await expect(
+    sheet.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  await sheet
+    .getByRole("textbox", { name: "Ajouter une note", exact: true })
+    .fill("Le client demande des informations après l’appel.");
+  await sheet
+    .getByRole("button", { name: "Enregistrer la note", exact: true })
+    .click();
+  await expect.poll(() => f.notes.length).toBe(1);
+  await page
+    .getByRole("button", { name: "Reprendre les appels", exact: true })
+    .click();
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
 });
 
 test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l’enchaînement continue", async ({
@@ -495,7 +575,7 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
-  await expect.poll(() => f.nextCount).toBe(2);
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
   await expect(
     page.getByText(/Vous complétez encore la fiche de l’appel précédent/),
   ).toBeVisible();
@@ -628,7 +708,7 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
-  await expect.poll(() => f.nextCount).toBe(2);
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
   await expect(
     sheet.getByRole("heading", { name: "Client 2", exact: true }),
   ).toBeVisible();
@@ -662,7 +742,7 @@ test("qualification : une nouvelle tentative sur le même contact repart de sa f
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
-  await expect.poll(() => f.nextCount).toBe(2);
+  await expect.poll(() => f.nextCount, { timeout: 12_000 }).toBe(2);
   await expect(
     sheet.getByRole("combobox", { name: field.label, exact: true }),
   ).toHaveValue("");
