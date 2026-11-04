@@ -35,7 +35,7 @@ exclus de la file ordinaire.
 **Mettre en pause** et **Arrêter l’enchaînement** empêchent le prochain appel ;
 la conversation déjà autorisée continue. **Raccrocher** termine le média actuel.
 Le résultat serveur doit confirmer la fin avant un nouvel appel. Après chaque
-appel automatique, un compte à rebours de cinq secondes précède la réservation
+appel automatique, un compte à rebours de dix secondes précède la réservation
 du contact suivant. Le bandeau reste visible pendant la navigation interne.
 Son bouton rouge **Attendre** met l’enchaînement en pause sans réserver le contact
 suivant ; l’agent peut compléter la fiche ou rappeler manuellement, puis utiliser

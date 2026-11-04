@@ -200,7 +200,7 @@ export class PhoneController {
       local: false,
       error: "",
       result: row.outcome || row.state,
-      automaticNextAt: automatic ? performance.now() + 5_000 : null,
+      automaticNextAt: automatic ? performance.now() + 10_000 : null,
     });
     return true;
   }

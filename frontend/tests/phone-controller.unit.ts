@@ -546,7 +546,7 @@ function automaticFixture() {
   };
 }
 
-test("composeur : cinq secondes complètes après la fin serveur, jamais après le seul média", async (t) => {
+test("composeur : dix secondes complètes après la fin serveur, jamais après le seul média", async (t) => {
   let now = 0;
   t.mock.method(performance, "now", () => now);
   const f = automaticFixture();
@@ -574,12 +574,12 @@ test("composeur : cinq secondes complètes après la fin serveur, jamais après 
     outcome: "completed",
   });
   await f.controller.refresh();
-  assert.equal(f.controller.state.automaticNextAt, 65_000);
-  now = 64_999;
+  assert.equal(f.controller.state.automaticNextAt, 70_000);
+  now = 69_999;
   await f.controller.automaticTick();
   assert.equal(f.nextCount, 1);
-  assert.equal(f.controller.state.automaticNextAt, 65_000);
-  now = 65_000;
+  assert.equal(f.controller.state.automaticNextAt, 70_000);
+  now = 70_000;
   await f.controller.automaticTick();
   assert.equal(f.nextCount, 2);
   assert.equal(f.device.connections.length, 2);
@@ -600,7 +600,7 @@ test("composeur : Attendre annule le départ suivant, permet un appel manuel et 
     outcome: "completed",
   });
   await f.controller.refresh();
-  now = 4_999;
+  now = 9_999;
   await f.controller.pauseAutomatic();
   now = 60_000;
   await f.controller.automaticTick();
@@ -622,7 +622,7 @@ test("composeur : Attendre annule le départ suivant, permet un appel manuel et 
   assert.equal(f.nextCount, 2);
 });
 
-test("composeur : perte de présence pendant les cinq secondes interdit tout départ tardif", async (t) => {
+test("composeur : perte de présence pendant les dix secondes interdit tout départ tardif", async (t) => {
   let now = 0;
   t.mock.method(performance, "now", () => now);
   const f = automaticFixture();
@@ -666,7 +666,7 @@ test("composeur : un RDV pendant le décompte conserve le délai, une restaurati
   await f.controller.endBooking(hold);
   await f.controller.automaticTick();
   assert.equal(f.nextCount, 1);
-  assert.equal(f.controller.state.automaticNextAt, 5_000);
+  assert.equal(f.controller.state.automaticNextAt, 10_000);
   f.controller.dispose();
   f.controller.activate();
   now = 10_000;
