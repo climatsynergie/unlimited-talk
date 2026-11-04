@@ -603,6 +603,6 @@ test("refus manuel 409 et 404 : raison visible, saisie disponible et nouvel appe
   await input.press("Enter");
   await expect.poll(() => state.reservations).toBe(1);
   await expect
-    .poll(() => page.evaluate(() => window.phoneProof.connections.length))
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
     .toBe(1);
 });
