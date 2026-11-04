@@ -426,6 +426,46 @@ test("numéro refusé par le serveur : correction immédiate, aucune substitutio
   assert.equal(cancellations, 0);
 });
 
+test("refus de réservation : message exact, aucune annulation fictive et tentative suivante possible", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  const original = f.api.reserve;
+  let cancellations = 0;
+  f.api.cancel = async () => {
+    cancellations++;
+    throw { status: 404 };
+  };
+  await f.controller.refresh();
+  for (const status of [403, 404, 409, 422, 429]) {
+    f.api.reserve = async () => {
+      throw Object.assign(new Error(`Refus précis ${status}`), { status });
+    };
+    await f.controller.start("", "+14165550101");
+    assert.equal(f.controller.state.phase, "idle");
+    assert.equal(f.controller.state.error, `Refus précis ${status}`);
+    assert.equal(f.creations(), 0);
+  }
+  assert.equal(cancellations, 0);
+  f.api.reserve = original;
+  await f.controller.start("", "+14165550101");
+  assert.equal(f.creations(), 1);
+});
+
+test("saisie libre : la campagne automatique sélectionnée ne modifie pas l’appel manuel", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  f.controller.setCampaignId("automatic-campaign");
+  const reserve = f.api.reserve;
+  let campaign: string | undefined;
+  f.api.reserve = async (id, signal, destination, source) => {
+    campaign = source;
+    return reserve(id, signal, destination, source);
+  };
+  await f.controller.start("", "+14165550101");
+  assert.equal(campaign, undefined);
+});
+
 test("durée normale et microphone conservé : aucun raccrochage après le plafond du mode de validation", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const f = fixture();

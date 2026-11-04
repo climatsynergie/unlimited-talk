@@ -34,6 +34,8 @@ def ready(expected,version=None):
 
 ready(200,'0010_dialer')
 try:
+    sql("UPDATE staging.alembic_version SET version_num='0011_long_recordings'")
+    ready(200,'0011_long_recordings')
     sql("UPDATE staging.alembic_version SET version_num='0009_inbound'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0008_recordings'")

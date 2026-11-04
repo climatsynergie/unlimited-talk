@@ -16,6 +16,7 @@ LABEL io.unlimitedtalk.inbound-config="1"
 LABEL io.unlimitedtalk.voice-manual="1"
 LABEL io.unlimitedtalk.dialer-compatible="1"
 LABEL io.unlimitedtalk.dialer="1"
+LABEL io.unlimitedtalk.schema11-compatible="1"
 ENV APP_REVISION=$GIT_REVISION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app

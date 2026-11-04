@@ -287,7 +287,8 @@ try:
     with engine.begin() as db:query(db,"UPDATE staging.voice_dialer_sessions SET lease_until=clock_timestamp()-interval '1 second' WHERE actor_id=:id",id=agents[1].id)
     assert voice(agents[1],identifier)[1].find('Dial') is None
     assert next_call(agents[1],browsers[1],states[1])['idle']=='presence_expired'
-    # Global cooldown and daily quota survive campaign switches.
+    # Automatic cooldown/daily quota survive campaign switches, while explicit
+    # manual redials remain possible without silently inheriting a campaign.
     quota_zone='Etc/GMT+12' if datetime.now(timezone.utc).hour<12 else 'UTC'
     quota=admin.request('POST','/api/campaigns',dict(name='Quota '+uuid4().hex,timezone=quota_zone),201)
     admin.request('PUT','/api/campaigns/'+quota['id']+'/agents/'+str(agents[1].id),dict(is_active=True))
@@ -296,12 +297,19 @@ try:
     first_id=uuid4()
     agents[1].request('POST','/api/telephony/test/intents',dict(id=str(first_id),destination=destination(90),campaign_id=quota['id']),201)
     finish(agents[1],first_id)
-    agents[1].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(90),campaign_id=b['id']),409)
-    with engine.begin() as db:query(db,"UPDATE staging.voice_intents SET consumed_at=clock_timestamp()-interval '3 hours' WHERE id=:id",id=first_id)
+    quota_browser=uuid4();quota_state=start(agents[1],quota_browser,quota)
+    assert 'intent' not in next_call(agents[1],quota_browser,quota_state)
+    agents[1].request('POST','/api/telephony/dialer/control',dict(action='pause',browser_id=str(quota_browser),generation=quota_state['generation']))
     second_id=uuid4()
     agents[1].request('POST','/api/telephony/test/intents',dict(id=str(second_id),destination=destination(90),campaign_id=b['id']),201)
     finish(agents[1],second_id)
-    agents[1].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(90),campaign_id=quota['id']),409)
+    quota_state=start(agents[1],quota_browser,quota)
+    assert 'intent' not in next_call(agents[1],quota_browser,quota_state)
+    agents[1].request('POST','/api/telephony/dialer/control',dict(action='pause',browser_id=str(quota_browser),generation=quota_state['generation']))
+    free_id=uuid4()
+    free=agents[1].request('POST','/api/telephony/test/intents',dict(id=str(free_id),destination=destination(90)),201)
+    assert free['intent']['campaign_id'] is None and free['intent']['caller_number']==profile.caller_number
+    finish(agents[1],free_id)
     # A callback rescheduled during the actual call keeps its pending date and
     # callback stage; a late result cannot mark that new schedule completed.
     changed=seed(b,destination(80));changed_callback=schedule(agents[2],b,changed)

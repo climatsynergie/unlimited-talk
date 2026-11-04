@@ -558,3 +558,51 @@ test("numéro non autorisé : refus lisible et aucun chargement du SDK", async (
   await expect(input).toHaveValue("+44 20 7946 0123");
   expect(state.sdkLoads).toBe(0);
 });
+
+test("refus manuel 409 et 404 : raison visible, saisie disponible et nouvel appel possible", async ({
+  page,
+}) => {
+  const state = await setup(page, true, "agent");
+  let cancellations = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      /\/intents\/[^/]+\/cancel$/.test(new URL(request.url()).pathname)
+    )
+      cancellations++;
+  });
+  let status = 409;
+  const reject = async (route: import("@playwright/test").Route) =>
+    route.fulfill({
+      status,
+      json: {
+        detail:
+          status === 409
+            ? "Ce contact possède un rappel programmé plus tard."
+            : "Cette campagne ne vous est pas attribuée.",
+      },
+    });
+  await page.route("**/api/telephony/test/intents", reject);
+  await page.goto("/poste-appel");
+  const input = page.getByLabel("Numéro à appeler", { exact: true });
+  await input.fill("+14165550101");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toContainText(
+    "rappel programmé plus tard",
+  );
+  await expect(input).toBeEnabled();
+  status = 404;
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toContainText(
+    "campagne ne vous est pas attribuée",
+  );
+  await expect(input).toBeEnabled();
+  expect(cancellations).toBe(0);
+  expect(state.sdkLoads).toBe(0);
+  await page.unroute("**/api/telephony/test/intents", reject);
+  await input.press("Enter");
+  await expect.poll(() => state.reservations).toBe(1);
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof.connections.length))
+    .toBe(1);
+});

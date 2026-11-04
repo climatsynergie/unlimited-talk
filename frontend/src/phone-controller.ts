@@ -509,7 +509,7 @@ export class PhoneController {
   async start(
     input = this.state.inputDevice,
     number = this.state.dialNumber,
-    campaignId = this.state.campaignId,
+    campaignId = "",
     automatic = false,
   ) {
     if (
@@ -556,6 +556,7 @@ export class PhoneController {
       automaticNextAt: null,
     });
     let attemptedConnect = false;
+    let reservationAccepted = false;
     try {
       const reserved =
         automatic && this.automaticTransport && this.state.automatic
@@ -607,6 +608,7 @@ export class PhoneController {
         });
         return;
       }
+      reservationAccepted = true;
       if (
         automatic &&
         (!this.automaticArmed || automaticEpoch !== this.automaticEpoch)
@@ -687,13 +689,15 @@ export class PhoneController {
       ++this.generation;
       this.release();
       if (
-        !attemptedConnect &&
+        !reservationAccepted &&
         error instanceof Error &&
         "status" in error &&
-        error.status === 400
+        typeof error.status === "number" &&
+        error.status >= 400 &&
+        error.status < 500
       ) {
-        // An explicit server refusal committed no reservation. Preserve the
-        // typed number and let the user correct it without an invented call.
+        // A rejected reservation created no call to cancel. Show its actual
+        // explanation, then recover any existing call reported by the server.
         this.identifier = null;
         this.pending = null;
         this.update({
@@ -702,6 +706,7 @@ export class PhoneController {
           local: false,
           error: error.message,
         });
+        await this.refresh();
         return;
       }
       this.update({

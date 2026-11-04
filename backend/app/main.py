@@ -34,7 +34,7 @@ logger = logging.getLogger('uvicorn.error')
 
 # Automatic calling requires schema 10; the preceding compatibility image
 # continues serving the existing business features after an application rollback.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0010_dialer'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0010_dialer', '0011_long_recordings'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "

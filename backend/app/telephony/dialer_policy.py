@@ -119,13 +119,8 @@ def callback_for(db,contact_id):
 def prepare_context(db,actor,profile,destination,campaign_id=None,automatic=None):
     now=query(db,'SELECT clock_timestamp()').scalar_one()
     contact=query(db,'SELECT * FROM staging.contacts WHERE phone=:phone',phone=destination).mappings().first()
-    if campaign_id is None and contact:
-        memberships=query(db,'''SELECT m.campaign_id FROM staging.campaign_contacts m JOIN staging.campaigns c ON c.id=m.campaign_id
-            WHERE m.contact_id=:contact AND m.is_active AND c.is_active AND (:admin OR EXISTS(
-                SELECT 1 FROM staging.campaign_agents ag WHERE ag.campaign_id=m.campaign_id AND ag.user_id=:actor AND ag.is_active))
-            ORDER BY m.campaign_id LIMIT 2''',contact=contact['id'],admin=actor['role']=='admin',actor=actor['id']).scalars().all()
-        if len(memberships)>1:raise HTTPException(400,'Choisissez la campagne d’origine de cet appel.')
-        if memberships:campaign_id=memberships[0]
+    # Free-entry manual calls stay manual. Only an explicit campaign action or
+    # automatic queue binds a call to a campaign and its caller-ID rules.
     campaign=campaign_allowed(db,actor,campaign_id,now,automatic is not None) if campaign_id else None
     # Every caller locks user -> dialer (if automatic) -> campaign -> canonical
     # contact -> callback -> account admission -> intent. Completion uses the
@@ -180,4 +175,5 @@ def authorize_context(db,actor,row,profile):
         if selected['number']!=row['caller_number']:return False
     elif row['caller_number']!=profile.caller_number:return False
     query(db,'SELECT pg_advisory_xact_lock(hashtextextended(:account,74192010))',account=profile.account_sid)
-    return attempt_limits(db,profile,row['destination'],row['attempt_timezone'],now)[1] is None
+    return (row['dialer_generation'] is None or
+        attempt_limits(db,profile,row['destination'],row['attempt_timezone'],now)[1] is None)

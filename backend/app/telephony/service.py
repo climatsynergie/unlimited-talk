@@ -104,10 +104,11 @@ def reserve(db, actor, identifier, profile, destination=None, *, campaign_id=Non
         return previous
     if isinstance(profile, ManualVoiceProfile):
         now=query(db,'SELECT clock_timestamp()').scalar_one()
-        zone,reason,_=dialer_policy.attempt_limits(db,profile,destination,context['attempt_timezone'],now)
-        if reason:
-            raise HTTPException(409,'Ce numéro a atteint deux tentatives aujourd’hui ou doit attendre deux heures entre appels.')
-        context['attempt_timezone']=zone
+        if automatic is not None:
+            zone,reason,_=dialer_policy.attempt_limits(db,profile,destination,context['attempt_timezone'],now)
+            if reason:
+                raise HTTPException(409,'Le composeur a atteint deux tentatives aujourd’hui ou doit attendre deux heures entre appels à ce numéro.')
+            context['attempt_timezone']=zone
         count = query(db, '''SELECT count(*) FROM staging.voice_intents WHERE account_sid=:account
             AND state IN ('reserved','authorized','ringing','answered')''', account=profile.account_sid).scalar_one()
         if count >= profile.max_concurrent_calls:

@@ -52,8 +52,11 @@ Les fenêtres concurrentes ne peuvent pas contrôler simultanément le même age
 
 Les restrictions globales, l’attribution et le propriétaire/date du
 rappel sont revérifiés au moment de l’autorisation signée. Un numéro destinataire
-ne peut recevoir que deux tentatives autorisées par jour local, espacées d’au
-moins deux heures, même en changeant de campagne. Le premier fuseau enregistré
+ne peut recevoir automatiquement que deux tentatives autorisées par jour local,
+espacées d’au moins deux heures, même en changeant de campagne. Un rappel manuel
+explicite reste possible sans ce délai ni ce quota automatique. Les restrictions
+du contact, le propriétaire d’un rappel et l’exclusion des appels simultanés restent
+vérifiés. Le premier fuseau enregistré
 pour ce numéro reste la référence du quota. Les réservations annulées avant
 autorisation ne comptent pas comme tentatives.
 
