@@ -16,6 +16,7 @@ from app.identity.service import query, audit
 from app.identity.security import IDLE_SECONDS
 from app.telephony.twilio_voice import ManualVoiceProfile, client_identity, sid
 from app.telephony import dialer_policy
+from app.telephony.media_limits import MAX_RECORDING_SECONDS
 
 ACTIVE = {'reserved', 'authorized', 'ringing', 'answered'}
 TERMINAL = {'finished', 'cancelled', 'expired'}
@@ -259,7 +260,7 @@ def notify(db, profile, kind, identifier, params):
         recording = params.get('RecordingSid')
         if not sid(recording, 'RE') or params.get('RecordingStatus') != 'completed':
             raise HTTPException(400, 'Enregistrement invalide.')
-        duration = integer(params.get('RecordingDuration'), 600)
+        duration = integer(params.get('RecordingDuration'), MAX_RECORDING_SECONDS)
         channels = integer(params.get('RecordingChannels'), 2)
         if channels != 2:
             raise HTTPException(400, 'Enregistrement double canal requis.')

@@ -216,12 +216,37 @@ try:
     with engine.begin() as db:query(db,"UPDATE staging.callbacks SET due_at=clock_timestamp()-interval '1 minute' WHERE id=:id",id=callback)
     future_contact=seed(a,destination(2));enroll(b,future_contact)
     future_callback=schedule(agents[1],b,future_contact)
-    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(2),campaign_id=a['id']),409)
+    flexible=uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(flexible),destination=destination(2),campaign_id=a['id']),201)
+    finish(agents[0],flexible)
+    assert agents[1].request('GET','/api/callbacks/'+str(future_callback))['callback']['status']=='scheduled'
+    # Manual calls do not require a membership or an assigned campaign. A
+    # forbidden campaign is omitted without exposing its data or blocking dial.
+    other_campaign=admin.request('POST','/api/campaigns',dict(name='Privée '+uuid4().hex,timezone='UTC'),201)
+    for selected in [a['id'],other_campaign['id'],str(uuid4())]:
+        free=uuid4()
+        response=agents[0].request('POST','/api/telephony/test/intents',dict(id=str(free),destination=destination(95),campaign_id=selected),201)
+        if selected!=a['id']:assert response['intent']['campaign_id'] is None
+        finish(agents[0],free)
+    elsewhere=seed(b,destination(97))
+    free=uuid4()
+    response=agents[0].request('POST','/api/telephony/test/intents',dict(id=str(free),destination=destination(97),campaign_id=a['id']),201)
+    assert response['intent']['campaign_id'] is None and response['intent']['contact_id']==str(elsewhere)
+    finish(agents[0],free)
+    # Non-interest is a queue exclusion, not a manual dial prohibition.
+    not_interested=seed(a,destination(96))
+    with engine.begin() as db:query(db,'UPDATE staging.contacts SET non_interested=true WHERE id=:id',id=not_interested)
+    free=uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(free),destination=destination(96),campaign_id=a['id']),201)
+    finish(agents[0],free)
     ordinary=[seed(a,destination(i)) for i in range(10,18)]
     # The due callback's campaign remains authoritative, even while the agent's
     # selected ordinary campaign is outside its own configured calling hours.
     tomorrow_weekday=(datetime.now(timezone.utc).weekday()+1)%7
     config(a,numbers['+14165550200'],hours=[dict(weekday=tomorrow_weekday,start=0,end=1440)],rules=[rule])
+    outside_hours=uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(outside_hours),destination=destination(98),campaign_id=a['id']),201)
+    finish(agents[0],outside_hours)
     browser=uuid4();state=start(agents[0],browser,a)
     wanted=uuid4();first=next_call(agents[0],browser,state,wanted)
     assert first['intent']['callback_id']==str(callback) and first['intent']['campaign_id']==b['id']

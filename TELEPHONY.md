@@ -595,12 +595,37 @@ avant réservation et à nouveau avant autorisation. Une session révoquée ne p
 plus consommer sa réservation. La capacité simultanée est contrôlée dans PostgreSQL
 à travers les instances de l'API, sous verrou transactionnel par compte Twilio.
 
-Le profil définit au plus 20 appels simultanés et une durée maximale comprise entre
-60 et 600 secondes. La conversion opérateur choisit 20 lignes et 600 secondes par
-appel. Le navigateur affiche cette durée ; Twilio l'applique. Le jeton SDK couvre
-la préparation et la conversation, reste limité à une réservation et n'est jamais
-stocké dans le navigateur. Les enregistrements double canal conservent leur
-archivage privé et les droits de lecture par agent/administrateur.
+Le profil définit au plus 20 appels simultanés. Chaque appel normal dispose de
+30 minutes maximum (`<Dial timeLimit="1800">`) ; le navigateur prévoit aussi ce
+plafond, avec une marge de fermeture du média. Le mode de validation contrôlée
+conserve ses 3 minutes. Le champ historique `max_duration_seconds` du profil
+version 2 reste lisible pour la compatibilité des retours arrière ; le plafond
+normal est défini par `MAX_MANUAL_CALL_SECONDS`. Le jeton SDK couvre la préparation
+et ces 30 minutes, reste limité à une réservation, sans appels entrants ni
+stockage persistant côté navigateur.
+
+Les appels manuels sont possibles sans import préalable, sans campagne et sans
+quota quotidien ou délai de rappel. Le contexte d'une campagne accessible permet
+de choisir son numéro émetteur et conserver son historique ; une campagne
+indisponible n'empêche pas l'appel manuel. Les horaires, attributions et rappels
+programmés ne bloquent pas cette action. Un rappel d'un autre agent ou prévu plus
+tard reste conservé. « Non intéressé » exclut uniquement le composeur automatique ;
+« Ne pas contacter » interdit toujours la réservation et l'autorisation manuelles.
+
+Le schéma 11 élargit les métadonnées audio jusqu'à 30 minutes et utilise `bigint`
+pour la taille. L'archiveur transfère les WAV double canal par blocs via un fichier
+temporaire privé, supprimé dès son ouverture, sur le volume `recording_scratch`.
+Un seul fichier est traité à la fois (au plus 57,7 Mo). Les transferts multipart
+restent privés et la copie complète est vérifiée par SHA-256 avant validation
+PostgreSQL. La lecture autorisée utilise des flux et plages HTTP pour parcourir
+les enregistrements longs. Aucun lien public ou contenu audio n'est journalisé.
+
+Déployer d'abord la version de compatibilité schéma 10 portant
+`io.unlimitedtalk.schema11-compatible=1`, puis cette version schéma 11 par le
+workflow attesté habituel. Le déployeur refuse la migration si l'image précédente
+ne peut pas lire le nouveau schéma ou si le volume privé de l'archiveur manque.
+Les appels actifs et composeurs en marche continuent d'empêcher le déploiement ;
+les historiques et les droits de lecture par agent/administrateur sont conservés.
 
 Procédure opérateur après le déploiement **attesté** de l'image portant
 `io.unlimitedtalk.voice-manual=1`, avec la révision complète réellement active :
@@ -614,7 +639,7 @@ python3 /root/unlimited-talk-voice-tools/control_manual_voice.py enable --revisi
 
 Ces commandes ne lancent aucun appel, ne migrent aucune base et ne changent aucun
 numéro ni routage Twilio existant. Elles vérifient l'image immuable de la livraison,
-le schéma 10, les workers, le rôle PostgreSQL et TLS, le stockage privé, la passerelle
+le schéma 10 ou 11, les workers, le rôle PostgreSQL et TLS, le stockage privé, la passerelle
 de récupération et la configuration fournisseur. La conversion exige zéro appel
 actif et zéro enregistrement en attente, sauvegarde le profil version 1, conserve
 les permissions privées et recrée les trois services Voice avec la même image.

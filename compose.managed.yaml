@@ -315,6 +315,8 @@ services:
     read_only: true
     tmpfs:
     - /tmp:rw,noexec,nosuid,size=32m
+    volumes:
+    - recording_scratch:/var/spool/unlimited-talk-recordings
     cap_drop:
     - ALL
     security_opt:
@@ -322,6 +324,7 @@ services:
     pids_limit: 100
     environment:
       APP_ENV: staging
+      RECORDING_SCRATCH_DIR: /var/spool/unlimited-talk-recordings
       COMMUNICATIONS_MODE: recovery_only
       DB_DEPLOYMENT: managed
       DB_PRIVATE_CIDR: ${STAGING_DB_CIDR:?Set the private staging database CIDR}
@@ -422,4 +425,5 @@ secrets:
   broker_password:
     file: /etc/unlimited-talk-staging/container-secrets/broker_password
 volumes:
+  recording_scratch: {}
   broker_data: {}

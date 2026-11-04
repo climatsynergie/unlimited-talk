@@ -1,11 +1,12 @@
 """Authenticated private audio playback; no provider credentials or redirects."""
 import re
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from uuid import UUID
 from typing import Literal
 from fastapi import APIRouter,HTTPException,Request,Query
 from pydantic import AwareDatetime
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from app.identity import service as identity
 from app.identity.service import query
@@ -121,13 +122,25 @@ async def audio(recording_sid:str,request:Request):
     if not playback_slots.acquire(blocking=False):
         raise HTTPException(429,'Deux lectures audio sont déjà en cours. Réessayez dans un instant.')
     try:
-        try:
-            content=await run_in_threadpool(archive_storage.read,row['object_key'],row['checksum'],row['content_bytes'])
-        except Exception:
-            raise HTTPException(503,'La lecture est temporairement indisponible. Réessayez dans un instant.') from None
-        headers={'Accept-Ranges':'bytes','Content-Disposition':'inline; filename="enregistrement.wav"',
-                 'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
-        if status==206:headers['Content-Range']=f'bytes {start}-{end}/{len(content)}'
-        return Response(content[start:end+1],status_code=status,media_type='audio/wav',headers=headers)
-    finally:
+        chunks,close=await run_in_threadpool(archive_storage.open_range,
+            row['object_key'],row['checksum'],row['content_bytes'],start,end)
+    except Exception:
         playback_slots.release()
+        raise HTTPException(503,'La lecture est temporairement indisponible. Réessayez dans un instant.') from None
+    closed=False
+    lock=Lock()
+    def cleanup():
+        nonlocal closed
+        with lock:
+            if closed:return
+            closed=True
+            try:close()
+            finally:playback_slots.release()
+    def stream():
+        try:yield from chunks
+        finally:cleanup()
+    headers={'Accept-Ranges':'bytes','Content-Disposition':'inline; filename="enregistrement.wav"',
+             'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Length':str(end-start+1)}
+    if status==206:headers['Content-Range']=f'bytes {start}-{end}/{row["content_bytes"]}'
+    return StreamingResponse(stream(),status_code=status,media_type='audio/wav',headers=headers,
+                             background=BackgroundTask(cleanup))

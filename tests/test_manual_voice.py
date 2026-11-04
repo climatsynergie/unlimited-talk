@@ -27,7 +27,7 @@ class ManualVoiceTests(unittest.TestCase):
             self.assertEqual(validate_destination(number, self.profile), number)
             xml = ElementTree.fromstring(controlled_call_twiml(self.profile, uuid4(), number))
             self.assertEqual(xml.find('Dial/Number').text, number)
-            self.assertEqual(xml.find('Dial').get('timeLimit'), '600')
+            self.assertEqual(xml.find('Dial').get('timeLimit'), '1800')
         for bad in [None, '', self.profile.caller_number, '+14165550101\n', '+14165550101ext2', '14165550101']:
             with self.subTest(bad=bad), self.assertRaises(HTTPException):
                 validate_destination(bad, self.profile)
@@ -47,7 +47,7 @@ class ManualVoiceTests(unittest.TestCase):
     def test_token_covers_setup_and_the_configured_call_but_remains_intent_scoped(self):
         token = browser_token(self.profile, uuid4(), uuid4())
         claims = jwt.decode(token, self.profile.api_key_secret, algorithms=['HS256'], issuer=self.profile.api_key_sid)
-        self.assertEqual(claims['exp']-claims['nbf'], 780)
+        self.assertEqual(claims['exp']-claims['nbf'], 1980)
         self.assertFalse(claims['grants']['voice'].get('incoming', {}).get('allow', False))
         for key in ['max_concurrent_calls', 'max_duration_seconds']:
             for value in [True, 0, 10000]:

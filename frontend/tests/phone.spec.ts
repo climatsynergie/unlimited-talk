@@ -606,3 +606,42 @@ test("refus manuel 409 et 404 : raison visible, saisie disponible et nouvel appe
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
     .toBe(1);
 });
+
+test("appel normal long : aucune coupure après dix minutes", async ({
+  page,
+}) => {
+  const state = await setup(page, true, "agent");
+  await page.clock.install();
+  await page.route("**/api/telephony/test/session", (route) =>
+    route.fulfill({
+      json: {
+        enabled: true,
+        destination: "+14165550101",
+        max_duration_seconds: 1800,
+        active: null,
+      },
+    }),
+  );
+  await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+14165550101");
+  await page.getByRole("button", { name: "Appeler", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
+    .toBe(1);
+  state.rows.values().next().value!.state = "answered";
+  await page.evaluate(() => window.phoneProof.call!.emit("accept"));
+  await page.clock.fastForward(11 * 60 * 1000);
+  await expect(
+    page.getByRole("complementary", { name: "Appel en cours", exact: true }),
+  ).toContainText("En conversation");
+  expect(await page.evaluate(() => window.phoneProof.disconnected)).toBe(0);
+  await expect(
+    page.getByText(/Durée maximale par appel : 30 minutes/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Raccrocher", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof.disconnected))
+    .toBe(1);
+});

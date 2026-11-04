@@ -7,9 +7,11 @@ from dataclasses import dataclass
 import io
 import json
 import logging
+import os
 from pathlib import Path
 import ssl
 import time
+import tempfile
 import urllib.error
 import urllib.request
 from uuid import UUID, uuid4
@@ -19,6 +21,7 @@ from app.identity.service import query
 from app.telephony import archive_storage, service
 from app.telephony.reconciliation import configured_provider, NoRedirect
 from app.telephony.twilio_voice import sid
+from app.telephony.media_limits import MAX_RECORDING_SECONDS, STREAM_CHUNK_BYTES, LEGACY_BUFFER_BYTES
 
 logger = logging.getLogger(__name__)
 REASONS = frozenset({'provider_unavailable','provider_authentication_failed','recording_not_available',
@@ -43,7 +46,7 @@ class Job:
     def check(self):
         if (not sid(self.recording_sid,'RE') or not sid(self.call_sid,'CA')
                 or not isinstance(self.intent_id,UUID) or not isinstance(self.lease_token,UUID)
-                or type(self.duration) is not int or not 0 <= self.duration <= 600
+                or type(self.duration) is not int or not 0 <= self.duration <= MAX_RECORDING_SECONDS
                 or self.channels != 2 or type(self.channels) is not int
                 or type(self.attempts) is not int or not 1 <= self.attempts <= 1000000):
             raise ArchiveError('archive_job_invalid')
@@ -56,12 +59,45 @@ def inspect_wav(content, duration):
         with wave.open(io.BytesIO(content),'rb') as audio:
             frames=audio.getnframes()
             if (audio.getnchannels()!=2 or audio.getsampwidth()!=2 or audio.getframerate()!=8000
-                    or audio.getcomptype()!='NONE' or frames<=0 or frames>601*8000
+                    or audio.getcomptype()!='NONE' or frames<=0 or frames>(MAX_RECORDING_SECONDS+1)*8000
                     or abs(frames/8000-duration)>1.05 or len(audio.readframes(frames))!=frames*4):
                 raise ValueError
     except Exception:
         raise ArchiveError('recording_format_invalid') from None
     return 8000
+
+
+def inspect_wav_file(source, duration, progress=lambda: None):
+    source.seek(0, 2)
+    size = source.tell()
+    if not 44 <= size <= archive_storage.MAX_BYTES:
+        raise ArchiveError('recording_too_large')
+    source.seek(0)
+    try:
+        with wave.open(source, 'rb') as audio:
+            frames = audio.getnframes()
+            if (audio.getnchannels()!=2 or audio.getsampwidth()!=2 or audio.getframerate()!=8000
+                    or audio.getcomptype()!='NONE' or frames<=0 or frames>(MAX_RECORDING_SECONDS+1)*8000
+                    or abs(frames/8000-duration)>1.05):
+                raise ValueError
+            total = 0
+            while chunk := audio.readframes(STREAM_CHUNK_BYTES//4):
+                total += len(chunk)
+                progress()
+            if total != frames*4:
+                raise ValueError
+    except Exception:
+        raise ArchiveError('recording_format_invalid') from None
+    finally:
+        source.seek(0)
+    return 8000
+
+
+@dataclass(frozen=True)
+class StoredMedia:
+    size: int
+    checksum: str
+    sample_rate: int = 8000
 
 
 class RecordingReader:
@@ -72,7 +108,7 @@ class RecordingReader:
         if not sid(recording_sid,'RE'):
             raise ArchiveError('archive_job_invalid')
         suffix='/Recordings/'+recording_sid+('.wav?RequestedChannels=2' if media else '.json')
-        limit=archive_storage.MAX_BYTES if media else 65536
+        limit=LEGACY_BUFFER_BYTES if media else 65536
         request=urllib.request.Request(self.transport.base+suffix,method='GET',headers={
             'Authorization':self.transport.authorization,'Accept':'audio/wav' if media else 'application/json',
             'Cache-Control':'no-cache','User-Agent':'Unlimited-Talks-recording-archive/1'})
@@ -95,7 +131,7 @@ class RecordingReader:
         except Exception:
             raise ArchiveError('provider_unavailable') from None
 
-    def read(self,job):
+    def metadata(self,job):
         job.check()
         data=self._get(job.recording_sid)
         if (not isinstance(data,dict) or data.get('sid')!=job.recording_sid
@@ -104,9 +140,47 @@ class RecordingReader:
                 or data.get('channels')!=2 or type(data.get('channels')) is not int
                 or data.get('duration')!=str(job.duration) or data.get('encryption_details') not in (None,{})):
             raise ArchiveError('recording_identity_mismatch')
+
+    def read(self,job):
+        self.metadata(job)
         content=self._get(job.recording_sid,True)
         inspect_wav(content,job.duration)
         return content
+
+    def read_to_file(self, job, source, progress=lambda: None):
+        self.metadata(job)
+        if self.send is not None:
+            content = self._get(job.recording_sid, True)
+            source.write(content)
+        else:
+            url = self.transport.base+'/Recordings/'+job.recording_sid+'.wav?RequestedChannels=2'
+            request = urllib.request.Request(url, method='GET', headers={
+                'Authorization': self.transport.authorization, 'Accept': 'audio/wav',
+                'Cache-Control': 'no-cache', 'User-Agent': 'Unlimited-Talks-recording-archive/2'})
+            try:
+                opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+                with opener.open(request, timeout=15) as response:
+                    if response.status != 200:
+                        raise ArchiveError('recording_response_invalid')
+                    declared = response.headers.get('Content-Length')
+                    if declared is not None and (not declared.isdecimal() or int(declared)>archive_storage.MAX_BYTES):
+                        raise ArchiveError('recording_too_large')
+                    total = 0
+                    while chunk := response.read(STREAM_CHUNK_BYTES):
+                        total += len(chunk)
+                        if total > archive_storage.MAX_BYTES:
+                            raise ArchiveError('recording_too_large')
+                        source.write(chunk)
+                        progress()
+            except ArchiveError:
+                raise
+            except urllib.error.HTTPError as error:
+                raise ArchiveError({401:'provider_authentication_failed',403:'provider_authentication_failed',
+                    404:'recording_not_available'}.get(error.code,'provider_unavailable')) from None
+            except Exception:
+                raise ArchiveError('provider_unavailable') from None
+        source.flush()
+        return inspect_wav_file(source, job.duration, progress)
 
 
 def claim(engine,profile):
@@ -134,11 +208,19 @@ def claim(engine,profile):
 
 def finish(engine,profile,job,content,key,checksum):
     job.check()
-    rate=inspect_wav(content,job.duration)
+    if isinstance(content, StoredMedia):
+        if (content.checksum!=checksum or content.sample_rate!=8000 or
+                type(content.size) is not int or not 44<=content.size<=archive_storage.MAX_BYTES):
+            raise ArchiveError('archive_job_invalid')
+        rate=content.sample_rate
+        size=content.size
+    else:
+        rate=inspect_wav(content,job.duration)
+        size=len(content)
     if key!=archive_storage.object_key(job.intent_id,job.recording_sid,checksum):
         raise ArchiveError('archive_job_invalid')
     import hashlib
-    if hashlib.sha256(content).hexdigest()!=checksum:raise ArchiveError('archive_job_invalid')
+    if not isinstance(content, StoredMedia) and hashlib.sha256(content).hexdigest()!=checksum:raise ArchiveError('archive_job_invalid')
     with engine.begin() as db:
         # Match callback lock order: intent -> recording -> job.
         intent=query(db,'SELECT * FROM staging.voice_intents WHERE id=:id FOR UPDATE',id=job.intent_id).mappings().first()
@@ -154,9 +236,9 @@ def finish(engine,profile,job,content,key,checksum):
               key=key,hash=checksum,sid=job.recording_sid)
         query(db,'''UPDATE staging.voice_archive_jobs SET archived_at=clock_timestamp(),content_bytes=:size,
             sample_rate=:rate,lease_token=NULL,lease_until=NULL,last_error_code=NULL WHERE recording_sid=:sid''',
-            size=len(content),rate=rate,sid=job.recording_sid)
+            size=size,rate=rate,sid=job.recording_sid)
         service.event(db,job.intent_id,'recording.archived',{'recording_sid':job.recording_sid,
-            'checksum':checksum,'bytes':len(content)})
+            'checksum':checksum,'bytes':size})
         return 'archived'
 
 
@@ -176,7 +258,30 @@ def archive_once(engine,profile,reader=None,put=None):
     job=claim(engine,profile)
     if job is None:return 'idle'
     try:
-        content=(reader or RecordingReader(profile)).read(job)
+        reader=reader or RecordingReader(profile)
+        if put is None and hasattr(reader, 'read_to_file'):
+            touched = time.monotonic()
+            def progress():
+                nonlocal touched
+                now=time.monotonic()
+                if now-touched<30:return
+                with engine.begin() as db:
+                    alive=query(db,'''UPDATE staging.voice_archive_jobs
+                        SET lease_until=clock_timestamp()+interval '300 seconds'
+                        WHERE recording_sid=:sid AND lease_token=:token AND archived_at IS NULL
+                        RETURNING recording_sid''',sid=job.recording_sid,token=job.lease_token).first()
+                    if alive is None:raise ArchiveError('archive_job_invalid')
+                touched=now
+                Path('/tmp/voice-archive-heartbeat').touch()
+            # TemporaryFile is unlinked while open on Linux; process termination
+            # releases the disk space without retaining customer audio files.
+            with tempfile.TemporaryFile(dir=os.environ.get('RECORDING_SCRATCH_DIR','/tmp')) as source:
+                rate=reader.read_to_file(job,source,progress)
+                try:key,checksum,size=archive_storage.put_file(job.intent_id,job.recording_sid,source,progress)
+                except ArchiveError:raise
+                except Exception:raise ArchiveError('archive_storage_unavailable') from None
+                return finish(engine,profile,job,StoredMedia(size,checksum,rate),key,checksum)
+        content=reader.read(job)
         inspect_wav(content,job.duration)
         try:key,checksum=(put or archive_storage.put)(job.intent_id,job.recording_sid,content)
         except Exception:raise ArchiveError('archive_storage_unavailable') from None
@@ -193,6 +298,7 @@ def main():
     profile=load_profile()
     engine=make_engine() if profile is not None else None
     reader=RecordingReader(profile) if profile is not None else None
+    Path('/tmp/voice-archive-heartbeat').touch()
     try:
         while True:
             state='idle'

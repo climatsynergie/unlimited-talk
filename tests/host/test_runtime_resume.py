@@ -42,3 +42,11 @@ class RuntimeResumeTests(unittest.TestCase):
             else: rows['api']['Config']['Env'] = ['COMMUNICATIONS_MODE=live']
             with self.subTest(alteration=alteration), self.assertRaises(ValueError):
                 runtime.validate(rows, self.manifest, self.config)
+
+    def test_long_recording_release_recovers_without_migration_or_mode_change(self):
+        for name in runtime.APPLICATIONS:
+            self.rows[name]['Config']['Labels']['io.unlimitedtalk.schema'] = '0011_long_recordings'
+        self.assertEqual(runtime.validate(self.rows, self.manifest, self.config), 'manual')
+        self.rows['api']['Config']['Labels']['io.unlimitedtalk.schema'] = '9999_unknown'
+        with self.assertRaises(ValueError):
+            runtime.validate(self.rows, self.manifest, self.config)

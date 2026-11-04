@@ -11,7 +11,7 @@ from botocore.config import Config
 MAX_BYTES = 10 * 1024 * 1024
 
 
-def client():
+def client(*, multipart=False):
     config = json.loads(Path(os.environ['SPACES_CONFIG_FILE']).read_text())
     endpoint = urlsplit(config['endpoint'])
     local = os.environ.get('DB_DEPLOYMENT', 'local') == 'local'
@@ -24,7 +24,11 @@ def client():
     transport = boto3.client('s3', endpoint_url=config['endpoint'], region_name=config['region'],
         aws_access_key_id=config['access_key_id'], aws_secret_access_key=config['secret_access_key'],
         config=Config(connect_timeout=5, read_timeout=15, retries={'max_attempts': 1},
-                      s3={'addressing_style': 'path'}))
+                      s3={'addressing_style': 'path'},
+                      # Audio verifies the full object SHA-256 itself. S3-compatible
+                      # stores may return composite multipart SDK checksums.
+                      **({'request_checksum_calculation': 'when_required',
+                          'response_checksum_validation': 'when_required'} if multipart else {})))
     return transport, config['bucket']
 
 

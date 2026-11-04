@@ -110,6 +110,7 @@ export class PhoneController {
   private generation = 0;
   private closed = false;
   private refreshing = false;
+  private refreshAgain = false;
   private identifier: string | null = null;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
   private pending: number | null = null;
@@ -205,7 +206,11 @@ export class PhoneController {
     return true;
   }
   async refresh() {
-    if (this.closed || this.refreshing) return;
+    if (this.closed) return;
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return;
+    }
     this.refreshing = true;
     const generation = this.generation;
     let observedSession: Session | null = null;
@@ -218,7 +223,7 @@ export class PhoneController {
         enabled: session.enabled,
         maxDurationSeconds: Math.max(
           60,
-          Math.min(600, session.max_duration_seconds || 180),
+          Math.min(1800, session.max_duration_seconds || 180),
         ),
         destination: session.active?.destination ?? this.state.destination,
       });
@@ -281,6 +286,10 @@ export class PhoneController {
         });
     } finally {
       this.refreshing = false;
+      if (this.refreshAgain && !this.closed) {
+        this.refreshAgain = false;
+        void this.refresh();
+      }
     }
   }
   setDialNumber(value: string) {
@@ -677,7 +686,7 @@ export class PhoneController {
             this.interrupted();
           }
         });
-      // The provider enforces the configured limit; allow signalling teardown.
+      // Allow signalling teardown after the server's explicit duration limit.
       if (this.watchdog !== null) clearTimeout(this.watchdog);
       this.watchdog = setTimeout(
         () => this.hangup(),
@@ -805,6 +814,7 @@ export class PhoneController {
     this.closed = false;
     this.requests = new AbortController();
     this.refreshing = false;
+    this.refreshAgain = false;
     this.pending = null;
     this.automaticArmed = false;
     this.update({

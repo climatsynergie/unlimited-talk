@@ -482,6 +482,41 @@ test("durée normale et microphone conservé : aucun raccrochage après le plafo
   f.controller.dispose();
 });
 
+test("appel normal : trente minutes autorisées, dix minutes ne coupent pas", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  f.session.max_duration_seconds = 1800;
+  await f.controller.refresh();
+  assert.equal(f.controller.state.maxDurationSeconds, 1800);
+  await f.controller.start("", "+14165550101");
+  f.device.call.emit("accept");
+  t.mock.timers.tick(11 * 60 * 1000);
+  assert.equal(f.controller.state.phase, "connected");
+  assert.equal(f.device.call.disconnected, 0);
+  t.mock.timers.tick(20 * 60 * 1000);
+  assert.equal(f.device.call.disconnected, 1);
+});
+
+test("fin du média pendant une actualisation : résultat serveur repris sans prochain sondage", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.start("", "+14165550101");
+  const id = f.device.connections[0];
+  const gate = deferred<Session>();
+  f.api.session = () => gate.promise;
+  const stale = f.controller.refresh();
+  f.rows.set(id, { id, state: "finished", outcome: "completed" });
+  f.device.call.emit("disconnect");
+  f.api.session = async () => ({ ...f.session });
+  gate.resolve({ ...f.session });
+  await stale;
+  await setImmediate();
+  assert.equal(f.controller.state.phase, "idle");
+  assert.equal(f.controller.state.result, "completed");
+});
+
 function automaticFixture() {
   let row: Dialer = {
     mode: "stopped",

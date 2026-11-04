@@ -22,6 +22,7 @@ BASE = Path('/srv/unlimited-talk-staging')
 PROFILE = ROOT/'voice-runtime.json'
 OVERRIDE = ROOT/'voice-manual.yaml'
 SCHEMA = '0010_dialer'
+SCHEMAS = frozenset({SCHEMA, '0011_long_recordings'})
 COMMON = {'account_sid','api_key_sid','api_key_secret','twiml_app_sid','shared_key_id',
           'shared_key_secret','public_origin','caller_number'}
 OVERRIDE_BYTES = (json.dumps({'services': {'api': {'environment': {'COMMUNICATIONS_MODE': 'manual'}}}}, sort_keys=True)+'\n').encode()
@@ -29,11 +30,12 @@ OVERRIDE_BYTES = (json.dumps({'services': {'api': {'environment': {'COMMUNICATIO
 
 def labels_valid(labels, revision):
     required = {'org.opencontainers.image.source': 'https://github.com/climatsynergie/unlimited-talk',
-        'org.opencontainers.image.revision': valid_revision(revision), 'io.unlimitedtalk.schema': SCHEMA,
+        'org.opencontainers.image.revision': valid_revision(revision),
         'io.unlimitedtalk.voice-runtime': '1', 'io.unlimitedtalk.voice-browser': '1',
         'io.unlimitedtalk.voice-archive': '1', 'io.unlimitedtalk.inbound-config': '1',
         'io.unlimitedtalk.voice-manual': '1', 'io.unlimitedtalk.dialer': '1'}
-    if any(labels.get(key) != value for key, value in required.items()):
+    if (any(labels.get(key) != value for key, value in required.items())
+            or labels.get('io.unlimitedtalk.schema') not in SCHEMAS):
         raise ValueError('Attested manual Voice delivery required')
 
 
@@ -84,7 +86,7 @@ def private_profile_write(data):
 def health(revision):
     with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=10) as response:
         result = json.load(response)
-    if (result.get('status') != 'ready' or result.get('revision') != revision or result.get('migration') != SCHEMA
+    if (result.get('status') != 'ready' or result.get('revision') != revision or result.get('migration') not in SCHEMAS
             or result.get('communications') not in {'webhooks_only','manual'}
             or result.get('calling_enabled') is not (result['communications']=='manual')):
         raise ValueError('Unexpected deployed runtime')
@@ -140,7 +142,7 @@ engine=make_engine()
 try:
  with engine.connect() as db:
   db.execute(text('SET TRANSACTION READ ONLY'))
-  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one()=='0010_dialer'
+  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one() in {'0010_dialer','0011_long_recordings'}
   assert db.execute(text('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()')).scalar_one()
   assert db.execute(text('SELECT current_user')).scalar_one()=='ut_staging_runtime'
   assert not db.execute(text("SELECT pg_has_role(current_user,'ut_staging_migrator','MEMBER')")).scalar_one()
@@ -184,7 +186,7 @@ print(json.dumps({'gateway':True,'numbers':True}))
     if json.loads(run([*command,'exec','-T','voice-archiver','python','-'],data=code)) != {'gateway':True,'numbers':True}:
         raise ValueError('Recording gateway verification failed')
     runtime_probe(command,manual=True)
-    atomic(ROOT/'recording-runtime-verified.json', (json.dumps(dict(revision=revision,schema=SCHEMA,
+    atomic(ROOT/'recording-runtime-verified.json', (json.dumps(dict(revision=revision,schema=health(revision)['migration'],
         worker_healthy=True,private_database_tls=True,runtime_role=True,append_only_jobs=True,
         provider_read_gateway=True,private_storage_access=True))+'\n').encode())
 

@@ -417,7 +417,7 @@ try:
     # Storage corruption cannot be played, even under an authenticated session.
     transport.put_object(Bucket=bucket,Key=key,Body=b'changed',ACL='private')
     assert http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})[0]==503
-    transport.put_object(Bucket=bucket,Key=key,Body=content,ACL='private',ContentType='audio/wav')
+    transport.put_object(Bucket=bucket,Key=key,Body=content,ACL='private',ContentType='audio/wav',Metadata={'sha256':checksum})
     # The worker's complete path releases DB connections before both external
     # operations and retries a failed upload without losing the recording.
     second_recording='RE'+uuid4().hex
@@ -436,6 +436,29 @@ try:
         assert engine.pool.checkedout()==0
         return archive_storage.put(*args)
     assert archive.archive_once(engine,profile,MediaReader(),upload)=='archived'
+    # A 15-minute recording exceeds both former duration and 24MiB limits.
+    # Exercise production disk spool/multipart/verification and authenticated seek
+    # against real PostgreSQL and S3, without a provider request or telephone call.
+    long_recording='RE'+uuid4().hex
+    signed('recording',identifier,{**record_fields,'RecordingSid':long_recording,'RecordingDuration':'900'})
+    class LongMediaReader:
+        def read_to_file(self,job,source,progress):
+            assert job.duration==900 and engine.pool.checkedout()==0
+            with wave.open(source,'wb') as audio:
+                audio.setnchannels(2);audio.setsampwidth(2);audio.setframerate(8000)
+                for _ in range(900):
+                    audio.writeframes(b'\x00'*32000)
+                    progress()
+            return archive.inspect_wav_file(source,job.duration,progress)
+    assert archive.archive_once(engine,profile,LongMediaReader())=='archived'
+    with engine.begin() as db:
+        saved=query(db,'SELECT * FROM staging.voice_archive_jobs WHERE recording_sid=:sid',sid=long_recording).mappings().one()
+        assert saved['content_bytes']>24*1024*1024 and saved['archived_at'] is not None
+        long_size=saved['content_bytes']
+    status,chunk,headers=http('GET','/api/telephony/recordings/'+long_recording+'/audio',
+        headers={'Cookie':COOKIE+'='+admin_view.token,'Range':'bytes=-128'})
+    assert status==206 and chunk==b'\x00'*128
+    assert headers['Content-Range']==f'bytes {long_size-128}-{long_size-1}/{long_size}'
     # Agent ownership and stable cursor pagination are independent of whether
     # an agent is allowed to originate the controlled admin-only test.
     with engine.begin() as db:
@@ -501,13 +524,14 @@ try:
     for index in range(3):
         parent, xml = voice(agents[index], ids[index])
         assert xml.find('Dial/Number').text == destinations[index]
-        assert xml.find('Dial').get('timeLimit') == '600'
+        assert xml.find('Dial').get('timeLimit') == '1800'
         child = 'CA'+uuid4().hex
         signed('status', ids[index], dict(CallSid=child,ParentCallSid=parent,From=profile.caller_number,
             To=destinations[index],CallStatus='in-progress',SequenceNumber='1'))
     snapshot = supervisor.request('GET','/api/telephony/active-calls')
     mine = {item['id'] for item in snapshot['items'] if item['state']=='answered'}
     assert set(map(str,ids)) <= mine and snapshot['answered_count'] >= 3
+    assert agents[0].request('GET','/api/telephony/test/session')['max_duration_seconds']==1800
     # End all three and preserve each agent's own recording ownership.
     for index in range(3):
         current = row(ids[index])
@@ -531,7 +555,7 @@ try:
     late = uuid4()
     agents[0].request('POST','/api/telephony/test/intents',{'id':str(late),'destination':blocked},201)
     with engine.begin() as db:
-        query(db,'UPDATE staging.contacts SET non_interested=true WHERE id=:id',id=contact)
+        query(db,'UPDATE staging.contacts SET do_not_contact=true WHERE id=:id',id=contact)
     assert voice(agents[0],late)[1].find('Dial') is None and row(late)['state']=='cancelled'
     revoked_id = uuid4()
     agents[1].request('POST','/api/telephony/test/intents',{'id':str(revoked_id),'destination':'+14165550118'},201)

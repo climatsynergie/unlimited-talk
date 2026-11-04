@@ -8,7 +8,7 @@ from uuid import uuid4
 import wave
 from fastapi import HTTPException
 from app.telephony import archive_storage
-from app.telephony.recording_archive import ArchiveError,Job,RecordingReader,inspect_wav,archive_once
+from app.telephony.recording_archive import ArchiveError,Job,RecordingReader,inspect_wav,inspect_wav_file,archive_once
 from app.telephony.recording_routes import byte_range
 from app.telephony.twilio_voice import ControlledVoiceProfile
 
@@ -93,3 +93,82 @@ class RecordingArchiveTests(unittest.TestCase):
         for header in ['bytes=100-','bytes=5-3','bytes=-0','bytes=0-1,4-5','items=0-2','bytes=-']:
             with self.assertRaises(HTTPException) as e:byte_range(header,100)
             self.assertEqual(e.exception.status_code,416)
+
+    def test_streamed_long_media_is_validated_uploaded_private_and_seekable(self):
+        content=wav(seconds=900)
+        class BoundedBody(io.BytesIO):
+            def read(inner,size=-1):
+                self.assertGreater(size,0)
+                self.assertLessEqual(size,65536)
+                return super().read(size)
+        objects={};s3=MagicMock()
+        def upload(source,bucket,key,**kwargs):
+            self.assertEqual(kwargs['ExtraArgs']['ACL'],'private')
+            self.assertFalse(kwargs['Config'].use_threads)
+            objects[key]=(source.read(),kwargs['ExtraArgs']['Metadata'])
+            kwargs['Callback'](len(objects[key][0]))
+        def get(**kw):
+            data=objects[kw['Key']][0]
+            if 'Range' in kw:
+                first,last=map(int,kw['Range'][6:].split('-'))
+                return dict(Body=BoundedBody(data[first:last+1]),ContentLength=last-first+1,
+                            ContentRange=f'bytes {first}-{last}/{len(data)}')
+            return dict(Body=BoundedBody(data),ContentLength=len(data))
+        s3.upload_fileobj.side_effect=upload
+        s3.get_object.side_effect=get
+        s3.head_object.side_effect=lambda **kw:dict(ContentLength=len(objects[kw['Key']][0]),Metadata=objects[kw['Key']][1])
+        self.assertEqual(inspect_wav_file(io.BytesIO(content),900),8000)
+        with self.assertRaises(ArchiveError):inspect_wav_file(io.BytesIO(content[:-4]),900)
+        progress=MagicMock()
+        with patch.object(archive_storage,'client',return_value=(s3,'private-bucket')):
+            key,checksum,size=archive_storage.put_file(self.job.intent_id,self.job.recording_sid,io.BytesIO(content),progress)
+            self.assertEqual(size,len(content));self.assertGreater(size,24*1024*1024)
+            self.assertEqual(checksum,hashlib.sha256(content).hexdigest())
+            chunks,close=archive_storage.open_range(key,checksum,size,size-100,size-1)
+            self.assertEqual(b''.join(chunks),content[-100:]);close()
+            chunks,close=archive_storage.open_range(key,checksum,size,0,size-1)
+            self.assertEqual(hashlib.sha256(b''.join(chunks)).hexdigest(),checksum);close()
+            objects[key]=(b'X'+content[1:],objects[key][1])
+            with self.assertRaises(ValueError):archive_storage.verify(key,checksum,size)
+            with self.assertRaises(ValueError):archive_storage.read(key,checksum,size)
+        self.assertGreater(progress.call_count,400)
+
+    def test_streamed_provider_reader_validates_identity_and_media(self):
+        source=io.BytesIO()
+        self.assertEqual(self.reader().read_to_file(self.job,source),8000)
+        self.assertEqual(source.read(),self.content)
+        source=io.BytesIO()
+        with self.assertRaises(ArchiveError):
+            self.reader(self.metadata|{'call_sid':'CA'+'9'*32}).read_to_file(self.job,source)
+        self.assertEqual(source.getvalue(),b'')
+
+    def test_provider_media_download_reads_bounded_chunks_and_rejects_oversize(self):
+        class Response(io.BytesIO):
+            status=200
+            headers={}
+        class Media(Response):
+            def read(inner,size=-1):
+                self.assertGreater(size,0)
+                self.assertLessEqual(size,65536)
+                return super().read(size)
+        opener=MagicMock()
+        opener.open.side_effect=[Response(json.dumps(self.metadata).encode()),Media(self.content)]
+        progress=MagicMock();source=io.BytesIO()
+        with patch('app.telephony.recording_archive.urllib.request.build_opener',return_value=opener):
+            self.assertEqual(RecordingReader(self.profile).read_to_file(self.job,source,progress),8000)
+        self.assertEqual(source.read(),self.content);self.assertGreater(progress.call_count,0)
+        media=Media(b'');media.headers={'Content-Length':str(archive_storage.MAX_BYTES+1)}
+        opener.open.side_effect=[Response(json.dumps(self.metadata).encode()),media]
+        with patch('app.telephony.recording_archive.urllib.request.build_opener',return_value=opener):
+            with self.assertRaisesRegex(ArchiveError,'recording_too_large'):
+                RecordingReader(self.profile).read_to_file(self.job,io.BytesIO())
+
+    def test_range_metadata_mismatch_closes_transport_without_returning_audio(self):
+        checksum=hashlib.sha256(self.content).hexdigest()
+        key=archive_storage.object_key(self.job.intent_id,self.job.recording_sid,checksum)
+        s3=MagicMock();body=MagicMock()
+        s3.head_object.return_value=dict(ContentLength=len(self.content),Metadata={'sha256':checksum})
+        s3.get_object.return_value=dict(Body=body,ContentLength=5,ContentRange='bytes 0-4/999')
+        with patch.object(archive_storage,'client',return_value=(s3,'bucket')):
+            with self.assertRaises(ValueError):archive_storage.open_range(key,checksum,len(self.content),0,4)
+        body.close.assert_called_once();body.read.assert_not_called()

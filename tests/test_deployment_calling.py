@@ -189,3 +189,20 @@ class DeploymentCallingTests(unittest.TestCase):
                             module.calling_state(release)
                     else:
                         self.assertTrue(module.calling_state(release)['calling_enabled'])
+
+    def test_long_schema_requires_compatible_previous_image_before_calling_changes(self):
+        labels={'io.unlimitedtalk.schema':'0011_long_recordings'}
+        current={'org.opencontainers.image.revision':'a'*40,
+                 'org.opencontainers.image.source':'https://github.com/'+module.REPOSITORY}
+        with patch.object(module,'compose',return_value='a'*64), patch.object(module,'run',return_value=json.dumps(current)):
+            with self.assertRaises(ValueError):module.require_recording_compatibility(labels,self.previous)
+        self.assertTrue(self.enabled[self.previous]);self.assertEqual(self.events,[])
+        current['io.unlimitedtalk.schema11-compatible']='1'
+        with patch.object(module,'compose',return_value='a'*64), patch.object(module,'run',return_value=json.dumps(current)):
+            module.require_recording_compatibility(labels,self.previous)
+        self.assertTrue(self.enabled[self.previous]);self.assertEqual(self.events,[])
+
+    def test_existing_long_schema_requires_no_new_compatibility_transition(self):
+        with patch.object(module,'calling_state',return_value={'migration':'0011_long_recordings'}), patch.object(module,'run') as run:
+            module.require_recording_compatibility({'io.unlimitedtalk.schema':'0011_long_recordings'},self.previous)
+            run.assert_not_called()

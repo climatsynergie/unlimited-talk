@@ -18,6 +18,8 @@ from twilio.twiml.voice_response import VoiceResponse
 
 TOKEN_TTL_SECONDS = 300
 MAX_TEST_CALL_SECONDS = 180
+MAX_MANUAL_CALL_SECONDS = 30 * 60
+MANUAL_TOKEN_TTL_SECONDS = MAX_MANUAL_CALL_SECONDS + 180
 MAX_WEBHOOK_BYTES = 16384
 FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status', 'probe'})
 INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish'})
@@ -101,6 +103,8 @@ class ControlledVoiceProfile(VoiceProfile):
 @dataclass(frozen=True, repr=False)
 class ManualVoiceProfile(VoiceProfile):
     max_concurrent_calls: int = 20
+    # Legacy version-2 configuration input, retained for rollback compatibility.
+    # Agent conversation duration uses MAX_MANUAL_CALL_SECONDS.
     max_duration_seconds: int = 600
 
     def __post_init__(self):
@@ -111,7 +115,7 @@ class ManualVoiceProfile(VoiceProfile):
 
 
 def call_duration(profile):
-    return profile.max_duration_seconds if isinstance(profile, ManualVoiceProfile) else MAX_TEST_CALL_SECONDS
+    return MAX_MANUAL_CALL_SECONDS if isinstance(profile, ManualVoiceProfile) else MAX_TEST_CALL_SECONDS
 
 
 def client_identity(agent_id: UUID, intent_id: UUID):
@@ -123,7 +127,7 @@ def client_identity(agent_id: UUID, intent_id: UUID):
 def browser_token(profile: VoiceProfile, agent_id: UUID, intent_id: UUID):
     identity = client_identity(agent_id, intent_id)
     token = AccessToken(profile.account_sid, profile.api_key_sid, profile.api_key_secret,
-                        identity=identity, ttl=call_duration(profile) + 180 if isinstance(profile, ManualVoiceProfile)
+                        identity=identity, ttl=MANUAL_TOKEN_TTL_SECONDS if isinstance(profile, ManualVoiceProfile)
                         else TOKEN_TTL_SECONDS, region='us1')
     token.add_grant(VoiceGrant(outgoing_application_sid=profile.twiml_app_sid, incoming_allow=False))
     return token.to_jwt()

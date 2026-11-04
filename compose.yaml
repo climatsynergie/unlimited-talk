@@ -345,6 +345,8 @@ services:
     read_only: true
     tmpfs:
     - /tmp:rw,noexec,nosuid,size=32m
+    volumes:
+    - recording_scratch:/var/spool/unlimited-talk-recordings
     cap_drop:
     - ALL
     security_opt:
@@ -352,6 +354,7 @@ services:
     pids_limit: 100
     environment:
       APP_ENV: staging
+      RECORDING_SCRATCH_DIR: /var/spool/unlimited-talk-recordings
       COMMUNICATIONS_MODE: disabled
       DB_HOST: db
       DB_NAME: unlimited_talk_staging
@@ -384,6 +387,7 @@ networks:
     internal: true
   ingress: null
 volumes:
+  recording_scratch: {}
   staging_pgdata: null
   broker_data: {}
 secrets:

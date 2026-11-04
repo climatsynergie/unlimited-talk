@@ -121,25 +121,52 @@ def prepare_context(db,actor,profile,destination,campaign_id=None,automatic=None
     contact=query(db,'SELECT * FROM staging.contacts WHERE phone=:phone',phone=destination).mappings().first()
     # Free-entry manual calls stay manual. Only an explicit campaign action or
     # automatic queue binds a call to a campaign and its caller-ID rules.
-    campaign=campaign_allowed(db,actor,campaign_id,now,automatic is not None) if campaign_id else None
+    campaign=None
+    if campaign_id:
+        if automatic is not None:
+            campaign=campaign_allowed(db,actor,campaign_id,now,True)
+        else:
+            # Campaign context enriches an explicit manual call; it must not
+            # prevent dialling. Never attach a campaign the actor cannot view.
+            try:campaign=campaigns.access(db,actor,campaign_id)
+            except HTTPException:campaign_id=None
     # Every caller locks user -> dialer (if automatic) -> campaign -> canonical
     # contact -> callback -> account admission -> intent. Completion uses the
     # same order and never locks an intent before its CRM contact.
     if contact:
         contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=contact['id']).mappings().one()
-        if contact['do_not_contact'] or contact['non_interested']:
-            raise HTTPException(400,'Ce contact est marqué « Ne pas contacter » ou « Non intéressé ».')
-    card=campaigns.contact_access(db,campaign_id,contact['id']) if campaign and contact else None
-    if campaign and not card:raise HTTPException(400,'Ce numéro ne figure pas dans la campagne choisie.')
+        if contact['do_not_contact'] or (automatic is not None and contact['non_interested']):
+            raise HTTPException(400,'Ce contact est marqué « Ne pas contacter ».' if contact['do_not_contact']
+                else 'Ce contact est marqué « Non intéressé » et exclu du composeur automatique.')
+    card=None
+    if campaign and contact:
+        if automatic is not None:card=campaigns.contact_access(db,campaign_id,contact['id'])
+        else:
+            card=query(db,'SELECT * FROM staging.campaign_contacts WHERE campaign_id=:campaign AND contact_id=:contact AND is_active',
+                campaign=campaign_id,contact=contact['id']).mappings().first()
+    if automatic is not None and campaign and not card:
+        raise HTTPException(400,'Ce numéro ne figure pas dans la campagne choisie.')
+    routing_campaign_id=campaign_id
+    if automatic is None and not card:
+        # History keeps a campaign link only for an actual membership; a free
+        # number still uses an accessible campaign's caller selection.
+        campaign_id=None
+        campaign=None
     callback=callback_for(db,contact['id'] if contact else None)
-    if callback:
+    if callback and automatic is not None:
         if callback['owner_id']!=actor['id']:
             raise HTTPException(409,'Ce contact est réservé pour le rappel d’un autre agent.')
         if callback['due_at']>now:
             raise HTTPException(409,'Ce contact possède un rappel programmé plus tard.')
         if campaign_id!=callback['campaign_id']:
             raise HTTPException(400,'Appelez ce rappel depuis sa campagne d’origine.')
-    selected_id,caller=regional_number(db,profile,campaign_id,destination)
+    if callback and automatic is None and (callback['owner_id']!=actor['id'] or callback['due_at']>now
+            or campaign_id!=callback['campaign_id']):
+        callback=None
+    try:selected_id,caller=regional_number(db,profile,routing_campaign_id,destination)
+    except HTTPException:
+        if automatic is not None:raise
+        selected_id,caller=regional_number(db,profile,None,destination)
     if caller==destination:raise HTTPException(400,'Le numéro à appeler doit être différent du numéro émetteur.')
     return dict(campaign_id=campaign_id,contact_id=contact['id'] if contact else None,
         callback_id=callback['id'] if callback else None,callback_version=callback['version'] if callback else None,
@@ -157,16 +184,17 @@ def authorize_context(db,actor,row,profile):
                 or state['browser_id']!=row['dialer_browser_id'] or state['session_hash']!=row['session_hash']
                 or state['lease_until']<=now or (row['callback_id'] is None and state['campaign_id']!=row['campaign_id'])):
             return False
-    if row['campaign_id']:
-        campaign_allowed(db,actor,row['campaign_id'],now,row['dialer_generation'] is not None)
+    automatic=row['dialer_generation'] is not None
+    if row['campaign_id'] and automatic:
+        campaign_allowed(db,actor,row['campaign_id'],now,True)
     contact=query(db,'SELECT * FROM staging.contacts WHERE phone=:phone FOR UPDATE',phone=row['destination']).mappings().first()
     if row['contact_id'] and (not contact or contact['id']!=row['contact_id']):return False
     if contact:
-        if contact['do_not_contact'] or contact['non_interested']:
+        if contact['do_not_contact'] or (automatic and contact['non_interested']):
             return False
-        if row['campaign_id']:campaigns.contact_access(db,row['campaign_id'],contact['id'])
-        callback=callback_for(db,contact['id'])
-        if row['callback_id']:
+        if row['campaign_id'] and automatic:campaigns.contact_access(db,row['campaign_id'],contact['id'])
+        callback=callback_for(db,contact['id']) if automatic else None
+        if row['callback_id'] and automatic:
             if (not callback or callback['id']!=row['callback_id'] or callback['version']!=row['callback_version']
                     or callback['owner_id']!=actor['id'] or callback['due_at']>now):return False
         elif callback:return False
