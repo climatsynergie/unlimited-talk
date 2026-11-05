@@ -672,14 +672,16 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
     "Agent composeur",
   );
   await sheet
-    .getByRole("combobox", { name: field("owner").label, exact: true })
-    .selectOption("Oui");
+    .getByRole("group", { name: field("owner").label, exact: true })
+    .getByRole("radio", { name: "Oui", exact: true })
+    .check();
   await expect(
-    sheet.getByRole("combobox", { name: field("owners").label, exact: true }),
+    sheet.getByRole("group", { name: field("owners").label, exact: true }),
   ).toBeVisible();
   await sheet
-    .getByRole("combobox", { name: field("heat_pump").label, exact: true })
-    .selectOption("Oui, murale");
+    .getByRole("group", { name: field("heat_pump").label, exact: true })
+    .getByRole("radio", { name: "Oui, murale", exact: true })
+    .check();
   await expect(
     sheet.getByRole("textbox", {
       name: field("wall_pump_floors").label,
@@ -687,8 +689,9 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
     }),
   ).toBeVisible();
   await sheet
-    .getByRole("combobox", { name: field("heat_pump").label, exact: true })
-    .selectOption("Non");
+    .getByRole("group", { name: field("heat_pump").label, exact: true })
+    .getByRole("radio", { name: "Non", exact: true })
+    .check();
   await expect(
     sheet.getByRole("textbox", {
       name: field("wall_pump_floors").label,
@@ -713,8 +716,10 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
     sheet.getByRole("heading", { name: "Client 2", exact: true }),
   ).toBeVisible();
   await expect(
-    sheet.getByRole("combobox", { name: field("owner").label, exact: true }),
-  ).toHaveValue("");
+    sheet
+      .getByRole("group", { name: field("owner").label, exact: true })
+      .getByRole("radio", { checked: true }),
+  ).toHaveCount(0);
   await expect(
     sheet.getByRole("textbox", { name: field("city").label, exact: true }),
   ).toHaveValue("Montréal");
@@ -736,16 +741,19 @@ test("qualification : une nouvelle tentative sur le même contact repart de sa f
     (field) => field.key === "owner",
   )!;
   await sheet
-    .getByRole("combobox", { name: field.label, exact: true })
-    .selectOption("Oui");
+    .getByRole("group", { name: field.label, exact: true })
+    .getByRole("radio", { name: "Oui", exact: true })
+    .check();
   const first = [...f.rows.values()][0];
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
   await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
   await expect(
-    sheet.getByRole("combobox", { name: field.label, exact: true }),
-  ).toHaveValue("");
+    sheet
+      .getByRole("group", { name: field.label, exact: true })
+      .getByRole("radio", { checked: true }),
+  ).toHaveCount(0);
   expect(f.qualifications.size).toBe(0);
   expect(f.appointments).toHaveLength(0);
 });
@@ -947,4 +955,117 @@ test("refus du microphone : aucun composeur serveur ni appel", async ({
   );
   expect(f.controls).toEqual([]);
   expect(f.nextCount).toBe(0);
+});
+
+test("qualification : présences, isolation et Hydro enregistrés avec le RDV", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await fillQualification(sheet);
+  const progress = sheet.getByRole("progressbar", {
+    name: "Avancement de la qualification",
+  });
+  await expect(progress).toHaveAttribute(
+    "value",
+    (await progress.getAttribute("max")) || "",
+  );
+  await expect(
+    sheet
+      .getByRole("group", {
+        name: "Tous les propriétaires seront-ils présents au rendez-vous ?",
+        exact: true,
+      })
+      .getByRole("radio", { name: "Oui", exact: true }),
+  ).toBeChecked();
+  await expect(
+    sheet
+      .getByRole("group", {
+        name: "Les conjoints seront-ils présents au rendez-vous ?",
+        exact: true,
+      })
+      .getByRole("radio", { name: "Pas de conjoint", exact: true }),
+  ).toBeChecked();
+  await expect(
+    sheet.getByRole("textbox", {
+      name: "Facture d’électricité (Hydro)",
+      exact: true,
+    }),
+  ).toHaveValue("150 $ par mois");
+  const audit = await new AxeBuilder({ page })
+    .include(".contact-qualification")
+    .withTags(["wcag2a", "wcag2aa"])
+    .analyze();
+  expect(audit.violations).toEqual([]);
+  await page.screenshot({
+    path: "/tmp/ut-qualification-desktop.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: "/tmp/ut-qualification-mobile.png",
+    fullPage: true,
+  });
+  await sheet
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-10T10:00");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  expect(f.appointments[0]).toMatchObject({
+    qualification: validQualification,
+  });
+});
+
+test("qualification : ancien commentaire conservé sans deviner le choix isolation", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const first = [...f.rows.values()][0];
+  const legacy = JSON.parse(
+    readFileSync(
+      new URL("../../tests/qualification-v1-fixture.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  f.qualifications.set(first.contact_id, {
+    revision: "7",
+    qualification: legacy,
+  });
+  await page.reload();
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await expect(
+    sheet.getByRole("textbox", {
+      name: "Commentaire — isolation",
+      exact: true,
+    }),
+  ).toHaveValue(legacy.answers.insulation);
+  await expect(
+    sheet
+      .getByRole("group", {
+        name: "10. Isolation de la propriété et de l’entretoit",
+        exact: true,
+      })
+      .getByRole("radio", { checked: true }),
+  ).toHaveCount(0);
+  expect(f.qualifications.get(first.contact_id)?.qualification).toEqual(legacy);
 });

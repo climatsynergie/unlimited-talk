@@ -123,6 +123,8 @@ def create(body:Booking,request:Request):
             if previous['created_by']!=user['id'] or previous['request_hash']!=digest:
                 raise HTTPException(409,'Cet identifiant de rendez-vous a déjà été utilisé autrement.')
             return dict(payload(db,body.id),qualification=appointment_snapshot(db,body.id))
+        if body.qualification.schema_version!=SCHEMA['schema_version']:
+            raise HTTPException(422,'Rechargez la fiche du contact pour compléter le questionnaire actuel avant de confirmer le rendez-vous.')
         contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=body.contact_id).mappings().first()
         if contact is None:raise HTTPException(404,'Contact introuvable.')
         if contact['do_not_contact'] or contact['non_interested']:
@@ -163,6 +165,9 @@ def update(identifier:uuid.UUID,body:Update,request:Request):
         fields=('starts_at','ends_at','timezone','notes','status')
         before={k:row[k] for k in fields}
         previous_qualification=appointment_snapshot(db,identifier)
+        if (body.qualification is not None and previous_qualification is not None
+                and body.qualification.schema_version<previous_qualification['schema_version']):
+            raise HTTPException(422,'Conservez le questionnaire actuel de ce rendez-vous.')
         if previous_qualification is not None:before['qualification']=previous_qualification
         after=dict(starts_at=starts,ends_at=ends,timezone=body.timezone,notes=body.notes,status=body.status)
         if body.qualification is not None:

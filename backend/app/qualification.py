@@ -7,18 +7,21 @@ The indexed event projections are the source of truth, not free-text notes.
 import json
 import re
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from app.identity.service import query
 
-SCHEMA = json.loads(Path(__file__).with_name('qualification-v1.json').read_text())
+SCHEMAS = {version: json.loads(Path(__file__).with_name(f'qualification-v{version}.json').read_text())
+           for version in (1, 2)}
+SCHEMA = {**SCHEMAS[2], 'previous_versions': [SCHEMAS[1]]}
 FIELDS = SCHEMA['fields']
 
 
-def normalize(answers, *, complete=False):
-    if not isinstance(answers, dict) or set(answers) - {f['key'] for f in FIELDS}:
+def normalize(answers, *, schema_version=2, complete=False):
+    fields = SCHEMAS[schema_version]['fields']
+    if not isinstance(answers, dict) or set(answers) - {f['key'] for f in fields}:
         raise ValueError('Fiche de qualification invalide.')
     result = {}
-    for field in FIELDS:
+    for field in fields:
         condition = field['condition']
         if condition and result.get(condition[0]) not in condition[1]:
             continue
@@ -41,17 +44,17 @@ def normalize(answers, *, complete=False):
 
 class Qualification(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    schema_version: int = Field(strict=True, ge=1, le=1)
+    schema_version: int = Field(strict=True, ge=1, le=2)
     answers: dict[str, StrictStr] = Field(max_length=len(FIELDS))
 
-    @field_validator('answers')
-    @classmethod
-    def clean_answers(cls, value):
-        return normalize(value)
+    @model_validator(mode='after')
+    def clean_answers(self):
+        self.answers = normalize(self.answers, schema_version=self.schema_version)
+        return self
 
 
 def complete_snapshot(value):
-    return {'schema_version': value.schema_version, 'answers': normalize(value.answers, complete=True)}
+    return {'schema_version': value.schema_version, 'answers': normalize(value.answers, schema_version=value.schema_version, complete=True)}
 
 
 def is_complete(snapshot):

@@ -11,7 +11,7 @@ assert sql('SELECT version_num FROM staging.alembic_version') == '0010_dialer'
 sql("""INSERT INTO staging.identity_users(id,email,display_name,role,password_hash,is_active)
  VALUES ('00000000-0000-0000-0000-000000000011','long-recording-migration@example.invalid','Migration archive','agent','inactive-sentinel',false);
  INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,account_sid,application_sid,caller_number,destination,state,parent_call_sid,expires_at,consumed_at,finished_at)
- VALUES ('00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011',repeat('a',64),repeat('b',64),'AC'||repeat('a',32),'AP'||repeat('d',32),'+14165550100','+14165550101','finished','CA'||repeat('1',32),clock_timestamp(),clock_timestamp(),clock_timestamp());
+ VALUES ('00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000011',repeat('a',64),repeat('b',64),'AC'||repeat('a',32),'AP'||repeat('d',32),'+14165550100','+14165550101','finished','CA'||repeat('1',32),clock_timestamp()+interval '2 minutes',clock_timestamp(),clock_timestamp());
  INSERT INTO staging.voice_recordings(sid,intent_id,call_sid,duration,channels)
  VALUES ('RE'||repeat('1',32),'00000000-0000-0000-0000-000000000011','CA'||repeat('1',32),10,2);
  INSERT INTO staging.voice_archive_jobs(recording_sid) VALUES ('RE'||repeat('1',32));""")

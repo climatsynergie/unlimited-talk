@@ -663,3 +663,16 @@ les numéros régionaux sont décrits dans [AUTO_DIALER.md](AUTO_DIALER.md). La 
 média à vingt agents, la réception audio et la messagerie vocale restent à tester
 ou à livrer.
 Les SMS sont exclus de cette livraison sur demande de l'utilisateur.
+
+
+Le questionnaire de qualification version 2 ajoute la présence de tous les
+propriétaires et des conjoints, le choix « Refaite / Jamais refaite » pour
+l’isolation, son commentaire distinct et la facture Hydro avec montant/période.
+Ces réponses sont validées pour un RDV et conservées dans le même instantané
+immuable que les autres informations. La version 1 reste lisible et validable
+pour les fiches et RDV existants : aucun événement historique n’est réécrit.
+Lors de la préparation d’un nouveau RDV depuis une fiche version 1, le texte
+libre d’isolation passe dans son commentaire et l’agent choisit explicitement
+le nouveau statut. Une modification d’un ancien RDV conserve son questionnaire
+d’origine. Les choix courts utilisent des groupes radio natifs accessibles au
+clavier ; aucune réponse client n’est stockée dans le navigateur.

@@ -1,0 +1,254 @@
+{
+  "schema_version": 2,
+  "fields": [
+    {
+      "key": "owner",
+      "label": "1. Le client est-il propriétaire du logement ?",
+      "options": [
+        "Oui",
+        "Non"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "proprietaires"
+    },
+    {
+      "key": "owners",
+      "label": "2. Combien de personnes sont propriétaires du logement ?",
+      "options": [
+        "Seule propriétaire",
+        "2 propriétaires",
+        "3 propriétaires ou plus"
+      ],
+      "required": true,
+      "condition": [
+        "owner",
+        [
+          "Oui"
+        ]
+      ],
+      "group": "proprietaires"
+    },
+    {
+      "key": "owners_present",
+      "label": "Tous les propriétaires seront-ils présents au rendez-vous ?",
+      "options": [
+        "Oui",
+        "Non"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "proprietaires"
+    },
+    {
+      "key": "spouses_present",
+      "label": "Les conjoints seront-ils présents au rendez-vous ?",
+      "options": [
+        "Oui",
+        "Non",
+        "Pas de conjoint"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "proprietaires"
+    },
+    {
+      "key": "property_type",
+      "label": "3. Quel est le type de propriété ?",
+      "options": [
+        "Maison unifamiliale",
+        "Maison jumelée",
+        "Duplex",
+        "Triplex",
+        "Quadruplex",
+        "Condo / Appartement",
+        "Autre"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "logement"
+    },
+    {
+      "key": "floors",
+      "label": "4. Combien d’étages compte la propriété (hors sous-sol) ?",
+      "options": [
+        "1 étage",
+        "2 étages",
+        "3 étages",
+        "4 étages ou plus"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "logement"
+    },
+    {
+      "key": "basement",
+      "label": "5. La propriété dispose-t-elle d’un sous-sol ?",
+      "options": [
+        "Oui, fini",
+        "Oui, non-fini",
+        "Non"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "logement"
+    },
+    {
+      "key": "heating",
+      "label": "6. Quel est le système de chauffage de la propriété ?",
+      "options": [
+        "Plinthes électriques",
+        "Fournaise électrique",
+        "Thermopompe",
+        "Gaz naturel",
+        "Mazout (huile)",
+        "Chauffage au bois",
+        "Autre"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "equipement"
+    },
+    {
+      "key": "heating_comment",
+      "label": "Commentaire — chauffage",
+      "options": null,
+      "required": false,
+      "condition": null,
+      "group": "equipement"
+    },
+    {
+      "key": "heating_age",
+      "label": "7. Quel est l’âge du système de chauffage ?",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "equipement"
+    },
+    {
+      "key": "heat_pump",
+      "label": "8. La propriété est-elle équipée d’une thermopompe ?",
+      "options": [
+        "Oui, murale",
+        "Oui, centrale",
+        "Non"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "equipement"
+    },
+    {
+      "key": "heat_pump_comment",
+      "label": "Commentaire — thermopompe",
+      "options": null,
+      "required": false,
+      "condition": null,
+      "group": "equipement"
+    },
+    {
+      "key": "wall_pump_floors",
+      "label": "Si thermopompe murale : y en a-t-il à tous les étages de la maison ?",
+      "options": null,
+      "required": true,
+      "condition": [
+        "heat_pump",
+        [
+          "Oui, murale"
+        ]
+      ],
+      "group": "equipement"
+    },
+    {
+      "key": "heat_pump_age",
+      "label": "9. Depuis combien d’années la thermopompe est-elle installée ?",
+      "options": null,
+      "required": true,
+      "condition": [
+        "heat_pump",
+        [
+          "Oui, murale",
+          "Oui, centrale"
+        ]
+      ],
+      "group": "equipement"
+    },
+    {
+      "key": "insulation",
+      "label": "10. Isolation de la propriété et de l’entretoit",
+      "options": [
+        "Refaite",
+        "Jamais refaite"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "isolation"
+    },
+    {
+      "key": "insulation_comment",
+      "label": "Commentaire — isolation",
+      "options": null,
+      "required": false,
+      "condition": null,
+      "group": "isolation"
+    },
+    {
+      "key": "attic_access",
+      "label": "11. Accès au grenier / entretoit ?",
+      "options": [
+        "Oui",
+        "Non"
+      ],
+      "required": true,
+      "condition": null,
+      "group": "isolation"
+    },
+    {
+      "key": "hydro_bill",
+      "label": "Facture d’électricité (Hydro)",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "isolation"
+    },
+    {
+      "key": "civic_number",
+      "label": "12. Adresse — numéro civique",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "adresse"
+    },
+    {
+      "key": "street",
+      "label": "Rue / avenue / chemin",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "adresse"
+    },
+    {
+      "key": "city",
+      "label": "Ville",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "adresse"
+    },
+    {
+      "key": "postal_code",
+      "label": "Code postal",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "adresse"
+    },
+    {
+      "key": "comments",
+      "label": "14. Commentaires / informations à transmettre au conseiller avant sa visite",
+      "options": null,
+      "required": true,
+      "condition": null,
+      "group": "conseiller"
+    }
+  ]
+}

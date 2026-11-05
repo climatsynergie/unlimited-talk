@@ -80,6 +80,8 @@ body['utc_offset_minutes']=-300
 missing={k:v for k,v in body.items() if k!='qualification'}
 agent_a.request('POST','/api/calendar',missing,expected=422)
 agent_a.request('POST','/api/calendar',{**body,'qualification':dict(schema_version=1,answers={'owner':'Oui'})},expected=422)
+legacy_qualification=json.loads((root/'tests/qualification-v1-fixture.json').read_text())
+agent_a.request('POST','/api/calendar',{**body,'qualification':legacy_qualification},expected=422)
 before_qualification=agent_a.request('GET',A+'/contacts/'+contact)
 assert before_qualification['qualification'] is None
 assert before_qualification['booker_name']=='Agent campagne'
@@ -95,6 +97,10 @@ assert agent_b.request('GET',path)['can_edit'] is False
 assert agent_a.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
+snapshot=admin.request('GET',path)['appointment']['qualification']
+assert snapshot['schema_version']==2
+for key in ('owners_present','spouses_present','insulation','insulation_comment','hydro_bill'):
+    assert snapshot['answers'][key]==QUALIFICATION['answers'][key]
 saved=agent_a.request('GET',A+'/contacts/'+contact)['qualification']
 assert saved['qualification']['answers']['postal_code']=='H2X 1Y4'
 draft=dict(request_id=str(uuid.uuid4()),expected_revision=saved['revision'],qualification=dict(schema_version=1,answers={'owner':'Non','city':'Laval'}))

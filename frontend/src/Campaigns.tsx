@@ -7,7 +7,11 @@ import { Field, Modal, Notice, Submit } from "./ui";
 import { usePhone } from "./Phone";
 import { CampaignTeam } from "./CampaignTeam";
 import { CallingSettingsDialog } from "./CallingSettings";
-import { QualificationFields, initialQualification } from "./Qualification";
+import {
+  QualificationFields,
+  initialQualification,
+  upgradeQualification,
+} from "./Qualification";
 import type {
   QualificationSchema,
   QualificationValue,
@@ -1216,8 +1220,14 @@ function CardDetail({
           setTarget(r.contact.stage_id);
           if (!qualificationLoaded.current && r.qualification_schema) {
             setQualification(
-              r.qualification?.qualification ||
-                initialQualification(r.qualification_schema, r.contact.profile),
+              upgradeQualification(
+                r.qualification_schema,
+                r.qualification?.qualification ||
+                  initialQualification(
+                    r.qualification_schema,
+                    r.contact.profile,
+                  ),
+              ),
             );
             setQualificationRevision(r.qualification?.revision || null);
             setQualificationDirty(false);
@@ -1443,8 +1453,7 @@ function CardDetail({
                 phone.automaticRunning ||
                 detailLoading ||
                 busy ||
-                data.contact.do_not_contact ||
-                data.contact.non_interested
+                data.contact.do_not_contact
               }
               onClick={() =>
                 void controller.start(
@@ -1559,7 +1568,7 @@ function CardDetail({
               ) : null}
               {data.booker_name ? (
                 <p className="booking-booker">
-                  <span>15. Booker par</span>
+                  <span>Rendez-vous pris par</span>
                   <strong>{data.booker_name}</strong>
                 </p>
               ) : null}

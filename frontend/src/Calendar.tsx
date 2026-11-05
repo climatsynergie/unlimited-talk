@@ -314,7 +314,7 @@ export function AppointmentForm({
       </fieldset>
       {bookerName ? (
         <p className="booking-booker">
-          <span>15. Booker par</span>
+          <span>Rendez-vous pris par</span>
           <strong>{bookerName}</strong>
         </p>
       ) : null}

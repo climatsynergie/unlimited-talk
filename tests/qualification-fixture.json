@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "answers": {
     "owner": "Oui",
     "owners": "2 propriétaires",
@@ -9,12 +9,16 @@
     "heating": "Plinthes électriques",
     "heating_age": "12 ans",
     "heat_pump": "Non",
-    "insulation": "Isolation de l’entretoit améliorée en 2018",
+    "insulation": "Refaite",
     "attic_access": "Oui",
     "civic_number": "123",
     "street": "Rue de test",
     "city": "Montréal",
     "postal_code": "H2X 1Y4",
-    "comments": "Confirmer les besoins avec le conseiller."
+    "comments": "Confirmer les besoins avec le conseiller.",
+    "owners_present": "Oui",
+    "spouses_present": "Pas de conjoint",
+    "insulation_comment": "Isolation de l’entretoit améliorée en 2018",
+    "hydro_bill": "150 $ par mois"
   }
 }

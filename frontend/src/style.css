@@ -2457,68 +2457,297 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 .contact-qualification {
   margin-top: 24px;
 }
-.qualification-fields,
-.qualification-group {
+.qualification-fields.qualification-fields {
+  display: block;
   min-width: 0;
   border: 0;
   padding: 0;
   margin: 0 0 20px;
 }
 .qualification-fields > legend {
-  font-size: 16px;
-  font-weight: 650;
-  color: #302647;
+  display: flex;
+  align-items: center;
+  gap: 9px;
   padding: 0;
+  margin-bottom: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: #163955;
 }
-.qualification-fields > p {
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 10px 0 20px;
+.qualification-fields > legend .icon {
+  color: #167c72;
+  width: 21px;
+  height: 21px;
 }
-.qualification-group {
+.qualification-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto);
+  align-items: center;
+  gap: 16px;
   padding: 16px;
-  border: 1px solid #e5deed;
-  border-radius: 10px;
-  background: #fbfaff;
+  margin-bottom: 22px;
+  border: 1px solid #dae9ef;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #f1f7ff, #f0faf5);
+}
+.qualification-intro p {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #40576b;
+}
+.qualification-progress {
+  display: grid;
+  gap: 8px;
+  font-size: 11px;
+  color: #4c6175;
+}
+.qualification-progress strong {
+  color: #1d4ed8;
+  font-size: 13px;
+}
+.qualification-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  accent-color: #2563eb;
+}
+.qualification-progress progress::-webkit-progress-bar {
+  background: #dce6ed;
+  border-radius: 8px;
+}
+.qualification-progress progress::-webkit-progress-value {
+  background: #2563eb;
+  border-radius: 8px;
+}
+.qualification-progress.is-complete progress {
+  accent-color: #15803d;
+}
+.qualification-progress.is-complete progress::-webkit-progress-value {
+  background: #15803d;
+}
+.qualification-progress.is-complete strong {
+  color: #15803d;
+}
+.qualification-fields .qualification-group {
+  display: block;
+  min-width: 0;
+  margin: 0 0 22px;
+  padding: 18px;
+  border: 1px solid #e0e7ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(24 49 73 / 3%);
 }
 .qualification-group > legend {
-  font-size: 12px;
-  font-weight: 650;
-  color: #655171;
-  padding-inline: 6px;
+  padding: 0 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f3f5c;
+  line-height: 1.6;
+}
+.qualification-section-icon {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  margin-right: 7px;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  border-radius: 8px;
+  background: #edf4ff;
+  color: #2563eb;
+}
+.qualification-section-icon .icon {
+  width: 15px;
+  height: 15px;
+}
+.qualification-group[data-complete="true"] .qualification-section-icon {
+  background: #e9f7ee;
+  color: #15803d;
+}
+.qualification-section-number {
+  padding-left: 10px;
+  color: #5c6f84;
+  font-size: 10px;
+  letter-spacing: 1px;
+  font-weight: 500;
+}
+.qualification-section-hint {
+  margin: 0 0 17px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #65758a;
 }
 .qualification-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 20px 18px;
   align-items: start;
 }
-.qualification-grid label {
+.qualification-grid .qualification-field {
   display: grid;
   gap: 8px;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
+}
+.qualification-field > label,
+.qualification-choice-field > legend {
+  display: block;
+  margin: 0;
+  padding: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #51445f;
+  font-weight: 600;
+  color: #34465b;
 }
-.qualification-grid textarea {
-  min-height: 80px;
+.qualification-choice-field > legend {
+  margin-bottom: 8px;
+}
+.qualification-required {
+  color: #2563eb;
+}
+.qualification-optional {
+  margin-left: 7px;
+  color: #5c6f84;
+  font-size: 10px;
+  font-weight: 400;
+}
+.qualification-field > input,
+.qualification-field > select,
+.qualification-field > textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 43px;
+  padding: 10px 12px;
+  border: 1px solid #d6dfeb;
+  border-radius: 9px;
+  background: #fcfdff;
+  color: #22364c;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgb(24 49 73 / 3%);
+}
+.qualification-field > textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+.qualification-field > input::placeholder {
+  color: #65758a;
+  font-size: 12px;
+}
+.qualification-field > small {
+  font-size: 10px;
+  line-height: 1.55;
+  color: #5c6f84;
+}
+.qualification-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.qualification-choices .qualification-choice {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+.qualification-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+}
+.qualification-choice > span {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  border: 1px solid #d6dfeb;
+  border-radius: 9px;
+  background: #fcfdff;
+  color: #4c6075;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  text-align: center;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.qualification-choice input:checked + span {
+  border-color: #2563eb;
+  background: #eff5ff;
+  color: #1e40af;
+  box-shadow: inset 0 0 0 1px #2563eb;
+}
+.qualification-choice[data-positive="true"] input:checked + span {
+  border-color: #15803d;
+  background: #edf9f1;
+  color: #166534;
+  box-shadow: inset 0 0 0 1px #15803d;
+}
+.qualification-choice input:focus-visible + span {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+.qualification-choice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.65;
 }
 .qualification-wide {
   grid-column: 1 / -1;
 }
+.qualification-save-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #62748a;
+}
+.qualification-save-hint .icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  color: #167c72;
+}
 .qualification-summary {
   margin: 20px 0;
-  padding: 16px;
-  border: 1px solid #e5deed;
-  border-radius: 10px;
+  padding: 18px;
+  border: 1px solid #dce6ef;
+  border-radius: 12px;
+  background: #f8fbfe;
 }
 .qualification-summary summary {
   cursor: pointer;
   font-size: 14px;
-  color: #302647;
+  color: #1f3f5c;
   font-weight: 650;
+}
+@media (max-width: 560px) {
+  .qualification-intro {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .qualification-fields .qualification-group {
+    padding: 14px;
+  }
+  .qualification-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .booking-booker {
   display: grid;
