@@ -63,7 +63,10 @@ test("menu administrateur : petit écran, molette et clavier atteignent tous les
     page,
     nav.getByRole("link", { name: "Utilisateurs", exact: true }),
   );
-  expect(await nav.getByRole("link").count()).toBe(11);
+  expect(await nav.getByRole("link").count()).toBe(12);
+  await expect(
+    nav.getByRole("link", { name: "Tableau de bord", exact: true }),
+  ).toHaveCount(1);
   await nav.hover();
   await page.mouse.wheel(0, 900);
   await expect

@@ -242,6 +242,12 @@ try:
     assert sum(event['kind']=='recording' for event in history['events']) == 1
     assert sum(event['kind']=='status' for event in history['events']) == 3
     assert '169.254' not in json.dumps(history) and 'RecordingUrl' not in json.dumps(history)
+    # Trusted provider durations are retained for reporting, without allowing
+    # a late lower-ranked result to overwrite the authoritative terminal result.
+    signed('status',identifier,{**status_fields,'CallStatus':'completed','SequenceNumber':'4','CallDuration':'12'})
+    signed('status',identifier,{**status_fields,'CallStatus':'completed','SequenceNumber':'5','CallDuration':'invalid'},400)
+    duration_history=browser.request('GET','/api/telephony/test/intents/'+str(identifier))
+    assert any(e['kind']=='status' and e['details'].get('duration_seconds')==12 for e in duration_history['events'])
     # Revoked sessions, changed roles, stale reservations and profile changes
     # cannot redeem a previously minted token. Call history survives revocation.
     for operation in ['revoke','deactivate','role','expire','idle_session','expired_session']:

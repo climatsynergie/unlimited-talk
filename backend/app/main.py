@@ -23,6 +23,7 @@ from app.telephony.recording_routes import router as recording_router
 from app.telephony.inbound_routes import router as inbound_router
 from app.telephony.calling_routes import router as calling_router
 from app.telephony.dialer_routes import router as dialer_router
+from app.reporting.routes import router as reporting_router
 from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
@@ -71,6 +72,7 @@ app.include_router(recording_router)
 app.include_router(inbound_router)
 app.include_router(calling_router)
 app.include_router(dialer_router)
+app.include_router(reporting_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -131,6 +133,7 @@ def root():
 @app.get('/calendrier', include_in_schema=False)
 @app.get('/campagnes', include_in_schema=False)
 @app.get('/admin/contacts', include_in_schema=False)
+@app.get('/admin/tableau-de-bord', include_in_schema=False)
 @app.get('/admin/imports', include_in_schema=False)
 def web_app():
     return FileResponse(WEB_ROOT / 'index.html', headers={

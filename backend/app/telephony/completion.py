@@ -1,7 +1,7 @@
 """Durable call-to-CRM completion, outside webhook intent-lock transactions."""
 from uuid import UUID
 
-from app.identity.service import query
+from app.identity.service import query,audit
 from app.campaigns import service as campaigns
 from app.callbacks import service as callbacks
 from app.telephony import service
@@ -18,6 +18,7 @@ def settle(db,identifier):
         # A closed/reloaded browser must not strand the completion outbox.
         query(db,'''UPDATE staging.voice_dialer_sessions SET mode='paused',hold_token=NULL,resume_after_hold=false,
             generation=generation+1,updated_at=clock_timestamp() WHERE actor_id=:id''',id=actor['id'])
+        audit(db,actor['id'],'dialer.pause_automatic',lookup['campaign_id'])
     campaign=None
     if lookup['campaign_id']:
         campaign=query(db,'SELECT * FROM staging.campaigns WHERE id=:id FOR SHARE',id=lookup['campaign_id']).mappings().one()

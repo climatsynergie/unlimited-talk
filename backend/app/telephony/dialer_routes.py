@@ -96,7 +96,7 @@ def heartbeat(body:Heartbeat,request:Request):
                 or row['generation']!=body.generation):
             raise HTTPException(409,'Le composeur a changé de session.')
         if row['mode'] in {'running','booking'} and not row['lease_alive']:
-            return {'dialer':dialer.control(db,actor,body.browser_id,'pause',generation=body.generation)}
+            return {'dialer':dialer.control(db,actor,body.browser_id,'pause',generation=body.generation,automatic_pause=True)}
         if row['mode'] in {'running','booking'}:
             identity.query(db,'''UPDATE staging.voice_dialer_sessions SET lease_until=clock_timestamp()+interval '90 seconds'
                 WHERE actor_id=:id''',id=actor['id'])

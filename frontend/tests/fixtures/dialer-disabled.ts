@@ -2,6 +2,9 @@ import type { Page } from "@playwright/test";
 
 // Synthetic sessions keep phone reads in their own fixture, without a real cookie.
 export async function disabledDialer(page: Page) {
+  await page.route("**/api/reporting/presence", (route) =>
+    route.fulfill({ json: { ok: true } }),
+  );
   await page.route("**/api/telephony/call-agents", (route) =>
     route.fulfill({ json: { items: [] } }),
   );

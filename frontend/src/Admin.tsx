@@ -720,6 +720,8 @@ export function Invitations({
 }
 
 const ACTIONS: Record<string, string> = {
+  "report.export_requested": "Export d’activité des agents demandé",
+  "dialer.pause_automatic": "Pause automatique du composeur",
   "queue.created": "File de réception créée",
   "queue.updated": "File de réception modifiée",
   "inbound.followup_updated": "Suivi d’appel entrant modifié",

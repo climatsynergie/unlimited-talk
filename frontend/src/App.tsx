@@ -5,6 +5,7 @@ import type { Identity } from "./api";
 import { AuthForm, AuthLayout, Enrollment, Recovery } from "./Auth";
 import type { PrivateEntry } from "./Auth";
 import { Audit, Invitations, InviteForm, ShareLink, Users } from "./Admin";
+import { Dashboard } from "./Dashboard";
 import { Inbound } from "./Inbound";
 import { Callbacks } from "./Callbacks";
 import { Calendar } from "./Calendar";
@@ -16,6 +17,7 @@ import { PhoneBar, PhoneProvider, usePhoneController } from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
 type Page =
+  | "dashboard"
   | "home"
   | "users"
   | "invitations"
@@ -30,6 +32,7 @@ type Page =
   | "callbacks"
   | "inbound";
 const PATHS: Record<Page, string> = {
+  dashboard: "/admin/tableau-de-bord",
   home: "/accueil",
   users: "/admin/utilisateurs",
   invitations: "/admin/invitations",
@@ -242,7 +245,14 @@ function Workspace({
   const admin = identity.user.role === "admin";
   const selected =
     !admin &&
-    ["users", "invitations", "audit", "contacts", "imports"].includes(page)
+    [
+      "dashboard",
+      "users",
+      "invitations",
+      "audit",
+      "contacts",
+      "imports",
+    ].includes(page)
       ? "home"
       : page;
   const navigation = useRef<HTMLElement>(null);
@@ -278,6 +288,7 @@ function Workspace({
       | "conversation";
   }[] = admin
     ? [
+        { page: "dashboard", title: "Tableau de bord", icon: "home" },
         { page: "campaigns", title: "Campagnes", icon: "campaign" },
         { page: "calendar", title: "Calendrier", icon: "calendar" },
         { page: "callbacks", title: "Rappels", icon: "clock" },
@@ -405,7 +416,9 @@ function Workspace({
               </button>
             </div>
           ) : null}
-          {selected === "campaigns" ? (
+          {selected === "dashboard" ? (
+            <Dashboard />
+          ) : selected === "campaigns" ? (
             <Campaigns admin={admin} />
           ) : selected === "inbound" ? (
             <Inbound admin={admin} userId={identity.user.id} />
@@ -574,6 +587,37 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [identity?.user.id]);
+  useEffect(() => {
+    if (!identity || identity.mfa_enrollment_required) return;
+    const controller = new AbortController();
+    let pending = false;
+    async function heartbeat() {
+      if (pending) return;
+      pending = true;
+      try {
+        await api("/reporting/presence", {
+          method: "POST",
+          body: {},
+          signal: AbortSignal.any([
+            controller.signal,
+            AbortSignal.timeout(10000),
+          ]),
+        });
+      } catch {
+        /* Network loss is displayed by the live dashboard; calls continue. */
+      } finally {
+        pending = false;
+      }
+    }
+    void heartbeat();
+    const timer = setInterval(() => void heartbeat(), 30000);
+    document.addEventListener("visibilitychange", heartbeat);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", heartbeat);
+    };
+  }, [identity?.user.id, identity?.mfa_enrollment_required]);
   function authenticated(value: Identity) {
     setEntry(null);
     setIdentity(value);

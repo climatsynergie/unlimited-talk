@@ -30,7 +30,7 @@ def cancel_reserved(db,actor,generation):
         service.event(db,identifier,'dialer.cancelled_before_authorization',{})
 
 
-def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_token=None):
+def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_token=None,*,automatic_pause=False):
     row=get(db,actor)
     if action=='hold' and row is None:
         if campaign_id is None or hold_token is None:raise HTTPException(400,'Campagne et saisie de rendez-vous requises.')
@@ -89,7 +89,7 @@ def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_tok
         row=query(db,'''UPDATE staging.voice_dialer_sessions SET mode=:mode,generation=generation+1,
             hold_token=:hold,resume_after_hold=:resume,lease_until=clock_timestamp()+interval '90 seconds',updated_at=clock_timestamp()
             WHERE actor_id=:actor RETURNING *''',actor=actor['id'],mode=mode,hold=hold_token,resume=resume).mappings().one()
-    audit(db,actor['id'],'dialer.'+action,campaign_id or row['campaign_id'])
+    audit(db,actor['id'],'dialer.pause_automatic' if automatic_pause else 'dialer.'+action,campaign_id or row['campaign_id'])
     return public(row)
 
 
@@ -149,7 +149,7 @@ def next_call(db,actor,profile,browser_id,generation,identifier):
         raise HTTPException(409,'Le composeur appartient à une autre session ou a changé.')
     if row['mode']!='running':return {'idle':row['mode'],'dialer':public(row)}
     if not row['lease_alive']:
-        state=control(db,actor,browser_id,'pause',generation=generation)
+        state=control(db,actor,browser_id,'pause',generation=generation,automatic_pause=True)
         return {'idle':'presence_expired','dialer':state}
     query(db,'''UPDATE staging.voice_dialer_sessions SET lease_until=clock_timestamp()+interval '90 seconds',updated_at=clock_timestamp()
         WHERE actor_id=:actor''',actor=actor['id'])

@@ -237,6 +237,8 @@ def notify(db, profile, kind, identifier, params):
         sequence = integer(params.get('SequenceNumber'), 1000000)
         attach_child(db, row, params['CallSid'])
         details = {'call_sid': params['CallSid'], 'status': status, 'sequence': sequence}
+        if status=='completed' and 'CallDuration' in params:
+            details['duration_seconds']=integer(params['CallDuration'],86400)
         if event(db, row['id'], kind, details):
             advance(db, row, status, 2, sequence)
     elif kind in {'finish', 'parent-status'}:
