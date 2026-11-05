@@ -115,12 +115,12 @@ class Reconsider(Body):
     request_id:uuid.UUID
     expected_updated_at:AwareDatetime
     confirmation:Literal['CLIENT_INTERESSE']
-    reason:str=Field(default='Le client a confirmé son intérêt pendant un échange.',min_length=5,max_length=1000)
+    reason:str=Field(default='Le client a confirmé son intérêt pendant un échange.',min_length=1,max_length=1000)
 
     @field_validator('reason')
     @classmethod
     def meaningful(cls,value):
-        if len(value.strip())<5 or any(ord(c)<32 and c not in '\n\r\t' for c in value):
+        if not value.strip() or any(ord(c)<32 and c not in '\n\r\t' for c in value):
             raise ValueError('Précisez le changement d’avis du client.')
         return value.strip()
 

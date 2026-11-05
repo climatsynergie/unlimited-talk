@@ -488,7 +488,7 @@ try:
     agents[0].request('POST','/api/telephony/test/intents',dict(id=str(renewed_call),destination=destination(102),campaign_id=flexible_campaign['id']),201)
     assert voice(agents[0],renewed_call)[1].find('Dial') is not None
     details=agents[0].request('GET',renewed_path)
-    restore_body=dict(request_id=str(uuid4()),confirmation='CLIENT_INTERESSE',expected_updated_at=details['contact']['contact_updated_at'],reason='Le client demande un rendez-vous après notre échange.')
+    restore_body=dict(request_id=str(uuid4()),confirmation='CLIENT_INTERESSE',expected_updated_at=details['contact']['contact_updated_at'],reason='OK')
     agents[1].request('POST',renewed_path+'/reconsider',restore_body,403)
     agents[0].request('POST',renewed_path+'/reconsider',{**restore_body,'confirmation':'AUTOMATIQUE'},422)
     agents[0].request('POST',renewed_path+'/reconsider',{**restore_body,'expected_updated_at':'2000-01-01T00:00:00Z'},409)

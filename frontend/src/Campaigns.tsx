@@ -1517,11 +1517,7 @@ function CardDetail({
                   <div className="actions">
                     <button
                       className="button success"
-                      disabled={
-                        busy ||
-                        (reconsiderReason.trim().length > 0 &&
-                          reconsiderReason.trim().length < 5)
-                      }
+                      disabled={busy}
                       onClick={() => void confirmInterest()}
                     >
                       Confirmer l’intérêt du client
