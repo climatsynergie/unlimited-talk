@@ -83,7 +83,12 @@ test("agent : vrai microphone simulé, indicateur, son, arrêt et navigation", a
   const commands: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("request", (request) => {
-    if (request.method() !== "GET") commands.push(request.url());
+    // Presence is independent of headset tests; no other write may be sent.
+    if (
+      request.method() !== "GET" &&
+      new URL(request.url()).pathname !== "/api/reporting/presence"
+    )
+      commands.push(request.url());
   });
   const response = await page.goto("/poste-appel");
   await page
