@@ -225,7 +225,7 @@ def authenticate_probe(profile, body, content_type, signature, signing_settings,
     authenticate_webhook(profile, 'probe', None, body, content_type, signature, signing_settings)
 
 
-def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None, caller_number=None):
+def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None, caller_number=None, *, ring_seconds=None):
     """Render only AFTER the durable intent gate; no client-supplied To exists."""
     caller_number = caller_number or profile.caller_number
     if not isinstance(caller_number,str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}',caller_number):
@@ -240,8 +240,11 @@ def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=No
         if destination is not None and destination != profile.approved_destination:
             raise VoiceConfigurationError('Destinataire de la réservation invalide.')
         destination = profile.approved_destination
+    if ring_seconds is None:ring_seconds=35 if isinstance(profile,ManualVoiceProfile) else 20
+    if type(ring_seconds) is not int or not 15<=ring_seconds<=60:
+        raise VoiceConfigurationError('Durée de sonnerie invalide.')
     response = VoiceResponse()
-    dial = response.dial(caller_id=caller_number, timeout=20,
+    dial = response.dial(caller_id=caller_number, timeout=ring_seconds,
                          time_limit=call_duration(profile), answer_on_bridge=True,
                          record='record-from-answer-dual',
                          recording_status_callback=webhook_url(profile, 'recording', intent_id),

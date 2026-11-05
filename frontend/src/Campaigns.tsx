@@ -94,6 +94,7 @@ const actions: Record<string, string> = {
   "card.moved": "Changement d’étape",
   "contact.restricted": "Restriction globale appliquée",
   "contact.restored": "Restrictions révisées",
+  "contact.reconsidered": "Le client a confirmé son intérêt",
   "note.added": "Note ajoutée",
   "contact.removed": "Retrait de la campagne",
   "call.finished": "Appel terminé",
@@ -1192,6 +1193,8 @@ function CardDetail({
   const busy = mutationBusy || qualificationReloading;
   const [error, setError] = useState("");
   const [restore, setRestore] = useState(false);
+  const [reconsider, setReconsider] = useState(false);
+  const [reconsiderReason, setReconsiderReason] = useState("");
   const [remove, setRemove] = useState(false);
   const [note, setNote] = useState("");
   const [qualification, setQualification] = useState<QualificationValue | null>(
@@ -1248,9 +1251,22 @@ function CardDetail({
   }, [campaign.id, identifier, revision, reloadKey]);
   useEffect(() => {
     onEditingChange?.(
-      !!note.trim() || booking || callback || busy || !!pendingStage,
+      !!note.trim() ||
+        booking ||
+        callback ||
+        busy ||
+        !!pendingStage ||
+        reconsider,
     );
-  }, [note, booking, callback, busy, pendingStage, onEditingChange]);
+  }, [
+    note,
+    booking,
+    callback,
+    busy,
+    pendingStage,
+    reconsider,
+    onEditingChange,
+  ]);
   function changeQualification(value: QualificationValue) {
     qualificationLoaded.current = true;
     setQualification(value);
@@ -1321,6 +1337,32 @@ function CardDetail({
       noteId.current = crypto.randomUUID();
       setNote("");
       form.reset();
+      setRevision((n) => n + 1);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function confirmInterest() {
+    if (!data || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/campaigns/${campaign.id}/contacts/${identifier}/reconsider`, {
+        method: "POST",
+        body: {
+          request_id: actionId.current,
+          expected_updated_at: data.contact.contact_updated_at,
+          confirmation: "CLIENT_INTERESSE",
+          ...(reconsiderReason.trim()
+            ? { reason: reconsiderReason.trim() }
+            : {}),
+        },
+      });
+      actionId.current = crypto.randomUUID();
+      setReconsider(false);
+      setReconsiderReason("");
       setRevision((n) => n + 1);
     } catch (e) {
       setError(message(e));
@@ -1437,6 +1479,64 @@ function CardDetail({
                 ? "Ne pas contacter — toutes les campagnes"
                 : "Non intéressé — toutes les campagnes"}
             </Notice>
+          ) : null}
+          {campaign.is_active &&
+          data.contact.non_interested &&
+          !data.contact.do_not_contact ? (
+            <section className="contact-reconsider">
+              {!reconsider ? (
+                <button
+                  className="button success"
+                  disabled={busy}
+                  onClick={() => {
+                    actionId.current = crypto.randomUUID();
+                    setReconsider(true);
+                  }}
+                >
+                  Le client a changé d’avis
+                </button>
+              ) : (
+                <>
+                  <p>
+                    Confirmez que le client souhaite reprendre les échanges. Le
+                    changement sera enregistré à votre nom. Vous pourrez ensuite
+                    réserver un rendez-vous ou programmer un rappel.
+                  </p>
+                  <label>
+                    Précision (facultative)
+                    <textarea
+                      disabled={busy}
+                      maxLength={1000}
+                      value={reconsiderReason}
+                      onChange={(e) => {
+                        actionId.current = crypto.randomUUID();
+                        setReconsiderReason(e.target.value);
+                      }}
+                    />
+                  </label>
+                  <div className="actions">
+                    <button
+                      className="button success"
+                      disabled={
+                        busy ||
+                        (reconsiderReason.trim().length > 0 &&
+                          reconsiderReason.trim().length < 5)
+                      }
+                      onClick={() => void confirmInterest()}
+                    >
+                      Confirmer l’intérêt du client
+                    </button>
+                    <button
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() => setReconsider(false)}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
           ) : null}
           <div
             className="actions contact-actions"
@@ -1762,6 +1862,9 @@ function CardDetail({
                       } as Record<string, string>
                     )[String(e.details.outcome)] || "Appel terminé"}
                   </p>
+                ) : null}
+                {e.action === "contact.reconsidered" && e.details.reason ? (
+                  <p>{String(e.details.reason)}</p>
                 ) : null}
                 <small>
                   {e.actor_name} · {date(e.created_at)}

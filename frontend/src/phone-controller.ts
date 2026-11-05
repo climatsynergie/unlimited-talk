@@ -348,6 +348,7 @@ export class PhoneController {
     )
       return;
     const epoch = ++this.automaticEpoch;
+    this.automaticFailures = 0;
     this.update({ automaticBusy: true, automaticError: "" });
     try {
       const result = await this.automaticTransport.control(
@@ -477,6 +478,7 @@ export class PhoneController {
         });
     }
   }
+  private automaticFailures = 0;
   async automaticTick() {
     const row = this.state.automatic;
     if (
@@ -497,18 +499,33 @@ export class PhoneController {
         this.requests.signal,
       );
       if (this.closed || epoch !== this.automaticEpoch) return;
+      this.automaticFailures = 0;
+      this.update({ automaticError: "" });
       this.applyAutomatic(result.dialer);
       if (this.automaticArmed && this.state.phase === "idle")
         await this.start(undefined, "", this.state.campaignId, true);
-    } catch {
+    } catch (error) {
       if (!this.closed && epoch === this.automaticEpoch) {
+        const status =
+          error && typeof error === "object" && "status" in error
+            ? error.status
+            : null;
+        const revoked = status === 401 || status === 403 || status === 409;
+        if (!revoked && ++this.automaticFailures < 3) {
+          this.update({
+            automaticError:
+              "Connexion instable. Nouvelle vérification automatique avant le prochain appel…",
+          });
+          return;
+        }
         this.automaticArmed = false;
         this.bookingArmed = false;
         this.update({
           automaticRunning: false,
           automaticNextAt: null,
-          automaticError:
-            "Composeur suspendu après une perte de connexion. Vérifiez l’appel avant de reprendre.",
+          automaticError: revoked
+            ? "La session du composeur a changé. Vérifiez son état avant de reprendre."
+            : "Composeur suspendu après plusieurs échecs de connexion. Vérifiez l’appel avant de reprendre.",
         });
       }
     } finally {
@@ -686,11 +703,12 @@ export class PhoneController {
             this.interrupted();
           }
         });
-      // Allow signalling teardown after the server's explicit duration limit.
+      // Include up to 60 s ringing and 30 s signalling teardown. The provider
+      // still enforces the exact conversation limit after the customer answers.
       if (this.watchdog !== null) clearTimeout(this.watchdog);
       this.watchdog = setTimeout(
         () => this.hangup(),
-        (this.state.maxDurationSeconds + 30) * 1000,
+        (this.state.maxDurationSeconds + 90) * 1000,
       );
     } catch (error) {
       if (this.closed || generation !== this.generation) return;

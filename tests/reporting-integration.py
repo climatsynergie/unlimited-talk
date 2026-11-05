@@ -121,6 +121,17 @@ try:
     # and revocation while calculating must prevent delivery of the report.
     from concurrent.futures import ThreadPoolExecutor
     from app.reporting import routes as reporting_routes
+    assert reporting_routes.report_slots.acquire(blocking=False)
+    previous_queue=reporting_routes.REPORT_QUEUE_SECONDS
+    reporting_routes.REPORT_QUEUE_SECONDS=.02
+    try:
+        admin.request('GET','/api/reporting/report?'+params,expected=429)
+        admin.request('POST','/api/reporting/presence',{})
+        a.request('GET','/api/reporting/report?'+params,expected=403)
+    finally:
+        reporting_routes.REPORT_QUEUE_SECONDS=previous_queue
+        reporting_routes.report_slots.release()
+    assert admin.request('GET','/api/reporting/report?'+params+'&agent_id='+str(a.id))['totals']['calls']==3
     original_report=reporting_routes.service.report
     entered=threading.Event();release=threading.Event()
     def slow_report(*args,**kwargs):

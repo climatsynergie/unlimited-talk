@@ -420,6 +420,44 @@ try:
     other_agent=Browser(role='agent')
     assert http('GET',playback,headers={'Cookie':COOKIE+'='+other_agent.token})[0]==404
     assert http('GET',playback)[0]==401
+    # Twenty agents and four supervisors can transfer private audio together.
+    # Streams retain no SQL connection, stay bounded and release capacity once.
+    from app.telephony import recording_routes
+    storage=recording_routes.archive_storage
+    original_range=storage.open_range
+    all_open=threading.Event();release_audio=threading.Event();audio_lock=threading.Lock()
+    opened=closed=0
+    def held_range(*args):
+        global opened,closed
+        with audio_lock:
+            opened+=1
+            if opened==24:all_open.set()
+        def chunks():
+            assert release_audio.wait(15)
+            yield content
+        def close():
+            global closed
+            with audio_lock:closed+=1
+        return chunks(),close
+    storage.open_range=held_range
+    try:
+        with ThreadPoolExecutor(max_workers=24) as pool:
+            transfers=[pool.submit(http,'GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token}) for _ in range(24)]
+            try:
+                assert all_open.wait(8)
+                assert http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})[0]==429
+            finally:release_audio.set()
+            for transfer in transfers:
+                status,received,_=transfer.result(timeout=10)
+                assert status==200 and received==content
+        for _ in range(100):
+            with audio_lock:
+                if closed==24:break
+            time.sleep(.01)
+        assert opened==closed==24
+    finally:
+        release_audio.set();storage.open_range=original_range
+    assert http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})[0]==200
     # Storage corruption cannot be played, even under an authenticated session.
     transport.put_object(Bucket=bucket,Key=key,Body=b'changed',ACL='private')
     assert http('GET',playback,headers={'Cookie':COOKIE+'='+admin_view.token})[0]==503

@@ -67,6 +67,7 @@ type LiveAgent = {
   consumed_at: string | null;
 };
 type Live = {
+  directory_warning?: { severity: string; message: string } | null;
   generated_at: string;
   items: LiveAgent[];
   online: number;
@@ -277,7 +278,7 @@ export function Dashboard() {
       busy = true;
       try {
         const value = await api<Report>(`/reporting/report?${query(filters)}`, {
-          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(25000)]),
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(40000)]),
         });
         if (!abort.signal.aborted) {
           setOverview(value);
@@ -316,7 +317,7 @@ export function Dashboard() {
         const value = await api<Report>(
           `/reporting/report?${query(filters, selected)}`,
           {
-            signal: AbortSignal.any([abort.signal, AbortSignal.timeout(25000)]),
+            signal: AbortSignal.any([abort.signal, AbortSignal.timeout(40000)]),
           },
         );
         if (!abort.signal.aborted) {
@@ -490,6 +491,11 @@ export function Dashboard() {
         </button>
       </div>
       <section className="report-live panel" aria-labelledby="live-heading">
+        {live?.directory_warning ? (
+          <Notice error={live.directory_warning.severity === "critical"}>
+            {live.directory_warning.message}
+          </Notice>
+        ) : null}
         <div className="report-section-heading">
           <div>
             <span className="report-live-dot" aria-hidden="true" />

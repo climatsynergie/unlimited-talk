@@ -111,6 +111,20 @@ class Note(Body):
         return value.strip()
 
 
+class Reconsider(Body):
+    request_id:uuid.UUID
+    expected_updated_at:AwareDatetime
+    confirmation:Literal['CLIENT_INTERESSE']
+    reason:str=Field(default='Le client a confirmé son intérêt pendant un échange.',min_length=5,max_length=1000)
+
+    @field_validator('reason')
+    @classmethod
+    def meaningful(cls,value):
+        if len(value.strip())<5 or any(ord(c)<32 and c not in '\n\r\t' for c in value):
+            raise ValueError('Précisez le changement d’avis du client.')
+        return value.strip()
+
+
 class Restore(Body):
     request_id:uuid.UUID
     do_not_contact:StrictBool
@@ -402,6 +416,35 @@ def note(identifier:uuid.UUID,contact_id:uuid.UUID,body:Note,request:Request):
             VALUES (:id,:contact,:campaign,:actor,:content)''',id=body.id,contact=contact_id,campaign=identifier,actor=user['id'],content=body.content)
         service.event(db,user,identifier,'note.added',{},contact_id)
         return {'id':body.id}
+
+
+@router.post('/{identifier}/contacts/{contact_id}/reconsider')
+def reconsider(identifier:uuid.UUID,contact_id:uuid.UUID,body:Reconsider,request:Request):
+    with request.app.state.engine.begin() as db:
+        user=authenticate(db,request);service.access(db,user,identifier)
+        service.contact_access(db,identifier,contact_id)
+        payload=dict(action='contact.reconsidered',contact=str(contact_id),**body.model_dump(mode='json',exclude={'request_id'}))
+        previous=service.replay(db,user,identifier,body.request_id,payload)
+        if previous is not None:return previous
+        contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=contact_id).mappings().one()
+        if contact['do_not_contact']:
+            raise HTTPException(409,'Ce contact est marqué « Ne pas contacter ». Cette action ne peut pas lever ce blocage.')
+        if contact['updated_at']!=body.expected_updated_at:
+            raise HTTPException(409,'Les restrictions ont changé. Actualisez la fiche avant de confirmer le changement d’avis.')
+        if not contact['non_interested']:
+            raise HTTPException(409,'Ce contact est déjà réactivé. Actualisez sa fiche.')
+        # Never requeue other campaigns or bypass DNC; the agent chooses the next
+        # explicit CRM action (RDV, callback or stage move) after confirmation.
+        query(db,'UPDATE staging.contacts SET non_interested=false,updated_at=clock_timestamp() WHERE id=:id',id=contact_id)
+        # The confirmation is a human decision. Older call completions and stale
+        # open forms must not overwrite it or silently requeue a membership.
+        query(db,'UPDATE staging.campaign_contacts SET version=version+1 WHERE contact_id=:id AND is_active',id=contact_id)
+        result={'non_interested':False,'do_not_contact':False,'reason':body.reason}
+        for campaign in query(db,'SELECT campaign_id FROM staging.campaign_contacts WHERE contact_id=:id AND is_active ORDER BY campaign_id',id=contact_id).scalars():
+            service.event(db,user,campaign,'contact.reconsidered',result,contact_id,
+                body.request_id if campaign==identifier else None,service.fingerprint(payload) if campaign==identifier else None)
+        audit(db,user['id'],'campaign.contact_reconsidered',identifier)
+        return result
 
 
 @router.post('/{identifier}/contacts/{contact_id}/restore')

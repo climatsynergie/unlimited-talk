@@ -4428,3 +4428,28 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
     padding: 14px;
   }
 }
+.calling-policy,
+.contact-reconsider {
+  padding: 1rem;
+  margin-block: 1rem;
+  border: 1px solid #c9dfef;
+  border-radius: 12px;
+  background: #f6faff;
+}
+.calling-policy summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #174a75;
+}
+.calling-policy p,
+.contact-reconsider p {
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: #52647a;
+}
+.calling-policy label,
+.contact-reconsider label {
+  display: grid;
+  gap: 0.4rem;
+  margin-block: 0.8rem;
+}

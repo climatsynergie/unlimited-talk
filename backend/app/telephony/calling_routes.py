@@ -7,6 +7,7 @@ from app.identity import service as identity
 from app.identity.routes import same_origin
 from app.campaigns import service as campaigns
 from app.telephony import dialer_policy as policy
+from app.telephony import number_health
 
 router=APIRouter(prefix='/api/telephony',tags=['Numéros émetteurs'],dependencies=[Depends(same_origin)])
 
@@ -14,11 +15,11 @@ router=APIRouter(prefix='/api/telephony',tags=['Numéros émetteurs'],dependenci
 def snapshot(db,campaign_id):
     config=policy.settings(db,campaign_id)
     if config is None:
-        return dict(version=0,enabled=False,default_number_id=None,hours=[],rules=[])
+        return dict(version=0,enabled=False,default_number_id=None,hours=[],rules=[],policy=policy.CampaignPolicy().model_dump())
     rules=identity.query(db,'''SELECT number_id,country,prefix FROM staging.voice_region_rules
         WHERE campaign_id=:id ORDER BY country,prefix''',id=campaign_id).mappings().all()
     return dict(version=config['version'],enabled=config['enabled'],default_number_id=str(config['default_number_id']) if config['default_number_id'] else None,
-        hours=config['hours'],rules=[{**r,'number_id':str(r['number_id'])} for r in rules])
+        hours=config['hours'],rules=[{**r,'number_id':str(r['number_id'])} for r in rules],policy=config['policy'])
 
 
 @router.get('/numbers')
@@ -27,12 +28,12 @@ def numbers(request:Request):
     with request.app.state.engine.begin() as db:
         identity.admin(db,request)
         if profile is None:return dict(items=[],configured=False,sync=None)
-        rows=identity.query(db,'''SELECT id,number,name,country,voice_enabled,is_present,is_active,verified_at,
-            verified_at>clock_timestamp()-interval '24 hours' AS fresh
-            FROM staging.voice_numbers WHERE account_sid=:account ORDER BY number,id LIMIT 2000''',account=profile.account_sid).mappings().all()
+        rows=identity.query(db,'''SELECT n.id,n.number,n.name,n.country,n.voice_enabled,n.is_present,n.is_active,n.verified_at,
+            '''+number_health.VERIFICATION_COLUMNS+' FROM staging.voice_numbers n '+number_health.DIRECTORY_JOIN+
+            ' WHERE n.account_sid=:account ORDER BY n.number,n.id LIMIT 2000',account=profile.account_sid).mappings().all()
         state=identity.query(db,'''SELECT synchronized_at,requested_at,last_error_code,
             (lease_until>clock_timestamp()) AS syncing FROM staging.voice_directory_state WHERE account_sid=:account''',account=profile.account_sid).mappings().first()
-        return dict(items=[dict(r) for r in rows],configured=True,sync=dict(state) if state else None)
+        return dict(items=[dict(r) for r in rows],configured=True,sync=dict(state) if state else None,warning=number_health.status(db,profile.account_sid))
 
 
 @router.post('/numbers/synchronize',status_code=202)
@@ -53,8 +54,9 @@ def get_settings(campaign_id:UUID,request:Request):
     with request.app.state.engine.begin() as db:
         actor=identity.authenticate(db,request)
         campaign=campaigns.access(db,actor,campaign_id,allow_archived=True)
-        return {'settings':snapshot(db,campaign_id),'timezone':campaign['timezone'],
-            'attempts_per_day':2,'retry_hours':2}
+        config=snapshot(db,campaign_id)
+        return {'settings':config,'timezone':campaign['timezone'],
+            'attempts_per_day':config['policy']['attempts_per_day'],'retry_hours':config['policy']['retry_minutes']/60}
 
 
 @router.put('/campaigns/{campaign_id}/calling')
@@ -83,7 +85,7 @@ def save_settings(campaign_id:UUID,body:policy.CallingSettings,request:Request):
             identity.query(db,'''INSERT INTO staging.voice_region_rules(id,campaign_id,number_id,country,prefix)
                 VALUES (:id,:campaign,:number,:country,:prefix)''',id=uuid4(),campaign=campaign_id,
                 number=rule.number_id,country=rule.country,prefix=rule.prefix)
-        after=snapshot(db,campaign_id)
+        after={**snapshot(db,campaign_id),'policy':body.policy.model_dump() if 'policy' in body.model_fields_set else before['policy']}
         result={'settings':after}
         campaigns.event(db,actor,campaign_id,'calling.settings_changed',dict(before=before,after=after),
             request_id=body.request_id,request_hash=campaigns.fingerprint(payload))

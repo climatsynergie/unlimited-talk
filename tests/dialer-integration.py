@@ -443,6 +443,112 @@ try:
     agents[2].request('GET','/api/telephony/call-agents',expected=403)
     agents[2].request('GET','/api/telephony/calls?from_at=2026-11-02T00:00:00Z&until_at=2026-11-01T00:00:00Z',expected=400)
     agents[2].request('POST','/api/telephony/dialer/control',dict(action='stop',browser_id=str(simple_browser),generation=simple_state['generation']))
-    print('Dialer HTTP/PG: due callback ownership/priority, regional owned callers, three parallel claims, pause/consume race, booking holds, lease expiry, global attempt limits, simple campaign setup and filtered private history: PASS')
+    # Per-campaign policy is immutable, replayable and projected by both the
+    # candidate SQL and the final authorization gate. Due callbacks are exempt.
+    flexible_campaign=admin.request('POST','/api/campaigns',dict(name='Règles souples '+uuid4().hex,timezone='UTC'),201)
+    admin.request('PUT','/api/campaigns/'+flexible_campaign['id']+'/agents/'+str(agents[0].id),dict(is_active=True))
+    chosen=dict(attempts_per_day=1,retry_minutes=1440,ring_seconds=50)
+    updated=admin.request('PUT','/api/telephony/campaigns/'+flexible_campaign['id']+'/calling',dict(
+        request_id=str(uuid4()),version=0,enabled=True,default_number_id=numbers['+14165550200'],hours=[],rules=[],policy=chosen))
+    assert updated['settings']['policy']==chosen
+    assert admin.request('GET','/api/telephony/campaigns/'+flexible_campaign['id']+'/calling')['settings']['policy']==chosen
+    legacy_body={k:v for k,v in updated['settings'].items() if k!='policy'}
+    legacy_body['request_id']=str(uuid4())
+    assert admin.request('PUT','/api/telephony/campaigns/'+flexible_campaign['id']+'/calling',legacy_body)['settings']['policy']==chosen
+    flexible_contact=seed(flexible_campaign,destination(101));flexible_browser=uuid4()
+    flexible_state=start(agents[0],flexible_browser,flexible_campaign)
+    launched=next_call(agents[0],flexible_browser,flexible_state)
+    launched_id=UUID(launched['intent']['id'])
+    assert launched['intent']['contact_id']==str(flexible_contact)
+    xml=voice(agents[0],launched_id)[1]
+    assert xml.find('Dial').get('timeout')=='50' and xml.find('Dial').get('timeLimit')=='1800'
+    finish(agents[0],launched_id,'no-answer')
+    assert 'intent' not in next_call(agents[0],flexible_browser,flexible_state)
+    explicit_callback=schedule(agents[0],flexible_campaign,flexible_contact)
+    with engine.begin() as db:query(db,"UPDATE staging.callbacks SET due_at=clock_timestamp()-interval '1 minute' WHERE id=:id",id=explicit_callback)
+    recalled=next_call(agents[0],flexible_browser,flexible_state)
+    assert recalled['intent']['callback_id']==str(explicit_callback)
+    recalled_id=UUID(recalled['intent']['id'])
+    recalled_parent,recalled_xml=voice(agents[0],recalled_id)
+    assert recalled_xml.find('Dial') is not None
+    signed('finish',recalled_id,dict(CallSid=recalled_parent,DialCallStatus='failed'))
+    with engine.begin() as db:query(db,"UPDATE staging.voice_completion_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE intent_id=:id",id=recalled_id)
+    completion.process_once(engine,profile)
+    assert agents[0].request('GET','/api/callbacks/'+str(explicit_callback))['callback']['status']=='scheduled'
+    assert 'intent' not in next_call(agents[0],flexible_browser,flexible_state)
+    agents[0].request('POST','/api/telephony/dialer/control',dict(action='stop',browser_id=str(flexible_browser),generation=flexible_state['generation']))
+
+    # An assigned agent can confirm renewed interest and book immediately, but
+    # cannot clear DNC, act outside their campaigns, or silently requeue contacts.
+    renewed=seed(flexible_campaign,destination(102));enroll(a,renewed)
+    renewed_path='/api/campaigns/'+flexible_campaign['id']+'/contacts/'+str(renewed)
+    renewed_stage=next(s for s in admin.request('GET','/api/campaigns/'+flexible_campaign['id']+'/board')['stages'] if s['kind']=='non_interested')
+    agents[0].request('POST',renewed_path+'/move',dict(request_id=str(uuid4()),version=card(flexible_campaign,renewed)['version'],stage_id=renewed_stage['id']))
+    renewed_call=uuid4()
+    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(renewed_call),destination=destination(102),campaign_id=flexible_campaign['id']),201)
+    assert voice(agents[0],renewed_call)[1].find('Dial') is not None
+    details=agents[0].request('GET',renewed_path)
+    restore_body=dict(request_id=str(uuid4()),confirmation='CLIENT_INTERESSE',expected_updated_at=details['contact']['contact_updated_at'],reason='Le client demande un rendez-vous après notre échange.')
+    agents[1].request('POST',renewed_path+'/reconsider',restore_body,403)
+    agents[0].request('POST',renewed_path+'/reconsider',{**restore_body,'confirmation':'AUTOMATIQUE'},422)
+    agents[0].request('POST',renewed_path+'/reconsider',{**restore_body,'expected_updated_at':'2000-01-01T00:00:00Z'},409)
+    restored=agents[0].request('POST',renewed_path+'/reconsider',restore_body)
+    assert restored['non_interested'] is False
+    assert agents[0].request('POST',renewed_path+'/reconsider',restore_body)==restored
+    finish(agents[0],renewed_call)
+    restored_details=agents[0].request('GET',renewed_path)
+    assert restored_details['contact']['non_interested'] is False
+    assert sum(e['action']=='contact.reconsidered' for e in restored_details['events'])==1
+    with engine.connect() as db:
+        kinds=query(db,'''SELECT s.kind FROM staging.campaign_contacts m JOIN staging.campaign_stages s ON s.id=m.stage_id
+            WHERE m.contact_id=:id AND m.is_active''',id=renewed).scalars().all()
+        assert kinds and set(kinds)=={'non_interested'}
+    requested=schedule(agents[0],flexible_campaign,renewed)
+    from app.qualification import SCHEMA
+    answers={}
+    for field in SCHEMA['fields']:
+        condition=field['condition']
+        if condition and answers.get(condition[0]) not in condition[1]:continue
+        answers[field['key']]=field['options'][0] if field['options'] else ('H2X 1Y4' if field['key']=='postal_code' else 'Confirmé avec le client')
+    booked=agents[0].request('POST','/api/calendar',dict(id=str(uuid4()),campaign_id=flexible_campaign['id'],contact_id=str(renewed),
+        membership_version=card(flexible_campaign,renewed)['version'],local_start=(datetime.now(timezone.utc)+timedelta(days=2)).replace(tzinfo=None,second=0,microsecond=0).isoformat(),
+        timezone='UTC',duration_minutes=30,qualification=dict(schema_version=SCHEMA['schema_version'],answers=answers)),201)
+    assert booked['status']=='booked'
+    assert agents[0].request('GET','/api/callbacks/'+str(requested))['callback']['status']=='cancelled'
+    dnc=seed(flexible_campaign,destination(103));dnc_path='/api/campaigns/'+flexible_campaign['id']+'/contacts/'+str(dnc)
+    dnc_stage=next(s for s in admin.request('GET','/api/campaigns/'+flexible_campaign['id']+'/board')['stages'] if s['kind']=='do_not_contact')
+    agents[0].request('POST',dnc_path+'/move',dict(request_id=str(uuid4()),version=card(flexible_campaign,dnc)['version'],stage_id=dnc_stage['id']))
+    dnc_details=agents[0].request('GET',dnc_path)
+    agents[0].request('POST',dnc_path+'/reconsider',dict(request_id=str(uuid4()),confirmation='CLIENT_INTERESSE',expected_updated_at=dnc_details['contact']['contact_updated_at']),409)
+    agents[0].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(103)),400)
+    assert agents[0].request('GET',dnc_path)['contact']['do_not_contact'] is True
+
+    # Previously verified ownership survives a bounded read outage, never an
+    # account/permission error, a removed number, or more than 48 hours.
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_numbers SET verified_at=clock_timestamp()-interval '25 hours' WHERE id=:id",id=numbers[profile.caller_number])
+        query(db,"UPDATE staging.voice_directory_state SET synchronized_at=clock_timestamp()-interval '25 hours',last_error_code='provider_unavailable' WHERE account_sid=:account",account=profile.account_sid)
+    grace=admin.request('GET','/api/telephony/numbers')
+    assert next(n for n in grace['items'] if n['number']==profile.caller_number)['in_grace'] is True
+    assert admin.request('GET','/api/reporting/live')['directory_warning']['severity']=='warning'
+    allowed=agents[2].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(104)),201)
+    agents[2].request('POST','/api/telephony/test/intents/'+allowed['intent']['id']+'/cancel',{})
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_numbers SET verified_at=clock_timestamp()-interval '49 hours' WHERE id=:id",id=numbers[profile.caller_number])
+        query(db,"UPDATE staging.voice_directory_state SET synchronized_at=clock_timestamp()-interval '49 hours' WHERE account_sid=:account",account=profile.account_sid)
+    agents[2].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(105)),409)
+    assert admin.request('GET','/api/reporting/live')['directory_warning']['severity']=='critical'
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_numbers SET verified_at=clock_timestamp()-interval '25 hours' WHERE id=:id",id=numbers[profile.caller_number])
+        query(db,"UPDATE staging.voice_directory_state SET synchronized_at=clock_timestamp()-interval '25 hours',last_error_code='provider_response_invalid' WHERE account_sid=:account",account=profile.account_sid)
+    agents[2].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(106)),409)
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_directory_state SET last_error_code='provider_unavailable' WHERE account_sid=:account",account=profile.account_sid)
+        query(db,'UPDATE staging.voice_numbers SET is_present=false WHERE id=:id',id=numbers[profile.caller_number])
+    agents[2].request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination=destination(107)),409)
+    with engine.begin() as db:
+        query(db,"UPDATE staging.voice_numbers SET verified_at=clock_timestamp(),is_present=true WHERE id=:id",id=numbers[profile.caller_number])
+        query(db,"UPDATE staging.voice_directory_state SET synchronized_at=clock_timestamp(),last_error_code=NULL WHERE account_sid=:account",account=profile.account_sid)
+    print('Dialer HTTP/PG: ownership, races, configurable prospecting, punctual callbacks, ringing, confirmed renewed interest/RDV, unchanged DNC, bounded caller continuity and warnings: PASS')
 finally:
     server.should_exit=True;thread.join(5);engine.dispose()

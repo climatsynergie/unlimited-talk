@@ -12,6 +12,7 @@ type NumberItem = {
   is_present: boolean;
   is_active: boolean;
   fresh: boolean;
+  in_grace?: boolean;
 };
 type Window = { weekday: number; start: number; end: number };
 type Rule = { number_id: string; country: string; prefix: string };
@@ -21,10 +22,16 @@ type Settings = {
   default_number_id: string | null;
   hours: Window[];
   rules: Rule[];
+  policy?: {
+    attempts_per_day: number;
+    retry_minutes: number;
+    ring_seconds: number;
+  };
 };
 export type Directory = {
   items: NumberItem[];
   configured: boolean;
+  warning?: { severity: string; message: string } | null;
   sync: {
     synchronized_at: string | null;
     last_error_code: string | null;
@@ -32,7 +39,10 @@ export type Directory = {
   } | null;
 };
 const usable = (number: NumberItem) =>
-  number.voice_enabled && number.is_present && number.is_active && number.fresh;
+  number.voice_enabled &&
+  number.is_present &&
+  number.is_active &&
+  (number.fresh || number.in_grace);
 
 export function CallingSettingsDialog({
   campaignId,
@@ -44,6 +54,11 @@ export function CallingSettingsDialog({
   const [directory, setDirectory] = useState<Directory | null>(null);
   const [version, setVersion] = useState(0);
   const [defaultNumber, setDefaultNumber] = useState("");
+  const [policy, setPolicy] = useState({
+    attempts_per_day: 2,
+    retry_minutes: 120,
+    ring_seconds: 35,
+  });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -66,6 +81,7 @@ export function CallingSettingsDialog({
         if (controller.signal.aborted) return;
         const settings = result.settings;
         setVersion(settings.version);
+        if (settings.policy) setPolicy(settings.policy);
         setDefaultNumber(
           settings.default_number_id || numbers.items.find(usable)?.id || "",
         );
@@ -141,6 +157,7 @@ export function CallingSettingsDialog({
             default_number_id: defaultNumber || null,
             hours: [],
             rules: [],
+            policy,
           },
         },
       );
@@ -166,6 +183,11 @@ export function CallingSettingsDialog({
     <Modal title="Téléphonie de la campagne" onClose={onClose} busy={busy}>
       {error ? <Notice error>{error}</Notice> : null}
       {notice ? <Notice>{notice}</Notice> : null}
+      {directory?.warning ? (
+        <Notice error={directory.warning.severity === "critical"}>
+          {directory.warning.message}
+        </Notice>
+      ) : null}
       {loading ? (
         <p>Chargement des réglages…</p>
       ) : !directory ? (
@@ -212,6 +234,55 @@ export function CallingSettingsDialog({
                   {options()}
                 </select>
               </label>
+              <details className="calling-policy">
+                <summary>Tentatives et sonnerie</summary>
+                <p>
+                  Les tentatives et le délai concernent la prospection
+                  automatique. La sonnerie s’applique aux appels de cette
+                  campagne, y compris manuels. Les rappels programmés sont
+                  prioritaires à l’heure choisie, lorsque l’agent est
+                  disponible.
+                </p>
+                {(
+                  [
+                    [
+                      "attempts_per_day",
+                      "Tentatives maximum par numéro et par jour",
+                      1,
+                      20,
+                    ],
+                    [
+                      "retry_minutes",
+                      "Délai entre tentatives (minutes)",
+                      0,
+                      1440,
+                    ],
+                    ["ring_seconds", "Durée de sonnerie (secondes)", 15, 60],
+                  ] as const
+                ).map(([key, label, min, max]) => (
+                  <label key={key}>
+                    {label}
+                    <input
+                      type="number"
+                      min={min}
+                      max={max}
+                      step={1}
+                      required
+                      value={Number.isNaN(policy[key]) ? "" : policy[key]}
+                      onChange={(e) => {
+                        changed();
+                        setPolicy((old) => ({
+                          ...old,
+                          [key]:
+                            e.target.value === ""
+                              ? NaN
+                              : Number(e.target.value),
+                        }));
+                      }}
+                    />
+                  </label>
+                ))}
+              </details>
             </fieldset>
             <Submit busy={busy}>Enregistrer la téléphonie</Submit>
           </form>

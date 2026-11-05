@@ -740,6 +740,7 @@ const ACTIONS: Record<string, string> = {
   "campaign.stages_reordered": "Ordre du pipeline modifié",
   "campaign.stage_archived": "Étape de pipeline archivée",
   "campaign.contact_restored": "Restrictions d’un contact révisées",
+  "campaign.contact_reconsidered": "Changement d’avis du client confirmé",
   "campaign.created": "Campagne créée",
   "campaign.contacts_enrolled": "Contacts ajoutés à une campagne",
   "contacts.source_uploaded": "Fichier CSV déposé",

@@ -10,6 +10,7 @@ from pydantic import Field, StrictBool, StrictInt, field_validator, model_valida
 from app.identity.service import query
 from app.campaigns import service as campaigns
 from app.telephony.inbound_settings import Body,Hours,within_hours
+from app.telephony.number_health import VERIFICATION_COLUMNS,DIRECTORY_JOIN
 
 
 class RegionRule(Body):
@@ -28,6 +29,12 @@ class RegionRule(Body):
         return self
 
 
+class CampaignPolicy(Body):
+    attempts_per_day: StrictInt = Field(default=2,ge=1,le=20)
+    retry_minutes: StrictInt = Field(default=120,ge=0,le=1440)
+    ring_seconds: StrictInt = Field(default=35,ge=15,le=60)
+
+
 class CallingSettings(Body):
     request_id: UUID
     version: StrictInt = Field(ge=0)
@@ -35,6 +42,7 @@ class CallingSettings(Body):
     default_number_id: UUID | None = None
     hours: list[Hours] = Field(default_factory=list,max_length=14)
     rules: list[RegionRule] = Field(default_factory=list,max_length=50)
+    policy: CampaignPolicy = Field(default_factory=CampaignPolicy)
 
     @model_validator(mode='after')
     def consistent(self):
@@ -49,14 +57,29 @@ class CallingSettings(Body):
         return self
 
 
+# The existing indexed, immutable settings event stores the versioned policy
+# alongside its canonical settings version in the same transaction. Older events
+# inherit the defaults; no unreviewed schema operation is needed on a live app.
+POLICY_JOIN = '''LEFT JOIN LATERAL (
+    SELECT e.details->'after'->'policy' AS value FROM staging.campaign_events e
+    WHERE e.campaign_id=ca.id AND e.contact_id IS NULL AND e.action='calling.settings_changed'
+    ORDER BY e.id DESC LIMIT 1) call_policy ON true'''
+
+
 def settings(db,campaign_id):
-    return query(db,'SELECT * FROM staging.voice_campaign_settings WHERE campaign_id=:id',id=campaign_id).mappings().first()
+    row=query(db,'''SELECT s.*,e.details->'after'->'policy' AS saved_policy
+        FROM staging.voice_campaign_settings s LEFT JOIN LATERAL (
+          SELECT details FROM staging.campaign_events WHERE campaign_id=s.campaign_id
+            AND contact_id IS NULL AND action='calling.settings_changed' ORDER BY id DESC LIMIT 1
+        ) e ON true WHERE s.campaign_id=:id''',id=campaign_id).mappings().first()
+    if row is None:return None
+    return {**row,'policy':CampaignPolicy.model_validate(row['saved_policy'] or {}).model_dump()}
 
 
 def number(db,profile,identifier):
-    row=query(db,'''SELECT *,verified_at>clock_timestamp()-interval '24 hours' AS fresh
-        FROM staging.voice_numbers WHERE id=:id AND account_sid=:account''',id=identifier,account=profile.account_sid).mappings().first()
-    if not row or not all(row[k] for k in ('voice_enabled','is_present','is_active','fresh')):
+    row=query(db,'SELECT n.*,'+VERIFICATION_COLUMNS+' FROM staging.voice_numbers n '+DIRECTORY_JOIN+
+        ' WHERE n.id=:id AND n.account_sid=:account',id=identifier,account=profile.account_sid).mappings().first()
+    if not row or not all(row[k] for k in ('voice_enabled','is_present','is_active')) or not (row['fresh'] or row['in_grace']):
         raise HTTPException(409,'Le numéro émetteur doit être actif et vérifié dans votre compte Twilio.')
     return row
 
@@ -91,7 +114,9 @@ def campaign_allowed(db,user,campaign_id,now,automatic=False):
     return campaign
 
 
-def attempt_limits(db,profile,destination,zone,now):
+def attempt_limits(db,profile,destination,zone,now,campaign_id=None):
+    config=settings(db,campaign_id) if campaign_id else None
+    policy=config['policy'] if config else CampaignPolicy().model_dump()
     first=query(db,'''SELECT attempt_timezone FROM staging.voice_intents WHERE account_sid=:account
         AND destination=:destination ORDER BY created_at,id LIMIT 1''',account=profile.account_sid,destination=destination).scalar_one_or_none()
     # The first recorded timezone is stable across campaign switches. Changing
@@ -104,16 +129,26 @@ def attempt_limits(db,profile,destination,zone,now):
         count(*) FILTER (WHERE consumed_at>=:start AND consumed_at<:end) AS today
         FROM staging.voice_intents WHERE account_sid=:account AND destination=:destination AND consumed_at IS NOT NULL''',
         account=profile.account_sid,destination=destination,start=start,end=end).mappings().one()
-    if row['today']>=2:
+    if row['today']>=policy['attempts_per_day']:
         return zone,'daily_limit',end
-    if row['last_attempt'] and now<row['last_attempt']+timedelta(hours=2):
-        return zone,'cooldown',row['last_attempt']+timedelta(hours=2)
+    retry=timedelta(minutes=policy['retry_minutes'])
+    if row['last_attempt'] and now<row['last_attempt']+retry:
+        return zone,'cooldown',row['last_attempt']+retry
     return zone,None,None
 
 
 def callback_for(db,contact_id):
     if not contact_id:return None
     return query(db,"SELECT * FROM staging.callbacks WHERE contact_id=:id AND status='scheduled' FOR UPDATE",id=contact_id).mappings().first()
+
+
+def requested_callback_attempt(db,identifier,version,account,destination):
+    if identifier is None:return False
+    # One exemption per explicitly scheduled version. An uncertain provider
+    # outcome must never turn one callback into an unlimited retry loop.
+    return not query(db,'''SELECT 1 FROM staging.voice_intents WHERE account_sid=:account AND destination=:destination
+        AND callback_id=:id AND callback_version=:version AND consumed_at IS NOT NULL LIMIT 1''',
+        id=identifier,version=version,account=account,destination=destination).first()
 
 
 def prepare_context(db,actor,profile,destination,campaign_id=None,automatic=None):
@@ -203,5 +238,7 @@ def authorize_context(db,actor,row,profile):
         if selected['number']!=row['caller_number']:return False
     elif row['caller_number']!=profile.caller_number:return False
     query(db,'SELECT pg_advisory_xact_lock(hashtextextended(:account,74192010))',account=profile.account_sid)
-    return (row['dialer_generation'] is None or
-        attempt_limits(db,profile,row['destination'],row['attempt_timezone'],now)[1] is None)
+    # Explicit, due callbacks already passed owner/version/date checks above.
+    # They are not cold-prospecting retries and must run at the requested time.
+    return (row['dialer_generation'] is None or requested_callback_attempt(db,row['callback_id'],row['callback_version'],profile.account_sid,row['destination']) or
+        attempt_limits(db,profile,row['destination'],row['attempt_timezone'],now,row['campaign_id'])[1] is None)

@@ -42,7 +42,12 @@ leur décalage UTC. La vue équipe et les fiches d’agent s’actualisent chaqu
 
 Les appels, RDV et actions d’audit proviennent d’une même requête d’agrégation
 PostgreSQL. Les réponses sont limitées en période et ne chargent pas les appels
-individuels dans la mémoire applicative. Une requête a un délai maximum de 15 s. Les verrous d’authentification sont
+individuels dans la mémoire applicative. Une requête a un délai maximum de 15 s. Une seule agrégation lourde s’exécute
+à la fois par processus API ; les autres attendent jusqu’à 15 s avant un 429
+avec Retry-After. L’attente n’acquiert aucune connexion ni verrou SQL. Cette
+limite laisse une connexion du pool runtime disponible pour les opérations
+d’appel et les présences. Le navigateur autorise 40 s pour un rapport mis en file.
+Les verrous d’authentification sont
 libérés avant le calcul et les droits sont revérifiés après.
 Les seules écritures ajoutées sont le signal de session, les événements de pause
 automatique et la trace des exports ; aucune migration de schéma n’est nécessaire.

@@ -14,7 +14,8 @@ from app.telephony import archive_storage
 from app.telephony.twilio_voice import sid
 
 router=APIRouter(prefix='/api/telephony',tags=['Enregistrements'])
-playback_slots=BoundedSemaphore(2)
+# Bounded streaming, not whole-file buffering: twenty agents plus supervisors.
+playback_slots=BoundedSemaphore(24)
 
 
 @router.get('/calls')
@@ -120,7 +121,7 @@ async def audio(recording_sid:str,request:Request):
         raise HTTPException(416,'Plage audio invalide.')
     start,end,status=byte_range(request.headers.get('range'),row['content_bytes'])
     if not playback_slots.acquire(blocking=False):
-        raise HTTPException(429,'Deux lectures audio sont déjà en cours. Réessayez dans un instant.')
+        raise HTTPException(429,'Les chargements audio sont occupés. Réessayez dans un instant.',headers={'Retry-After':'2'})
     try:
         chunks,close=await run_in_threadpool(archive_storage.open_range,
             row['object_key'],row['checksum'],row['content_bytes'],start,end)

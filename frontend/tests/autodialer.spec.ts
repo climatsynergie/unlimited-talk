@@ -56,8 +56,14 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     default_number_id: null as string | null,
     hours: [] as { weekday: number; start: number; end: number }[],
     rules: [] as { number_id: string; country: string; prefix: string }[],
+    policy: { attempts_per_day: 2, retry_minutes: 120, ring_seconds: 35 },
   };
   const controls: string[] = [];
+  const restrictions = new Map<
+    string,
+    { non_interested: boolean; do_not_contact: boolean }
+  >();
+  const reconsiderations: { confirmation: string; reason?: string }[] = [];
   const notes: {
     id: string;
     contact: string;
@@ -220,6 +226,7 @@ async function setup(page: Page, role = "agent", sameContact = false) {
           default_number_id: body.default_number_id,
           hours: body.hours,
           rules: body.rules,
+          policy: body.policy,
         };
       }
       result = {
@@ -285,6 +292,14 @@ async function setup(page: Page, role = "agent", sameContact = false) {
           qualificationReplays.set(body.request_id, saved);
           result = saved;
         }
+      } else if (action === "reconsider") {
+        expect(body.confirmation).toBe("CLIENT_INTERESSE");
+        reconsiderations.push(body);
+        restrictions.set(contact, {
+          non_interested: false,
+          do_not_contact: false,
+        });
+        result = { non_interested: false, do_not_contact: false };
       } else if (action === "move") {
         moveRequests.push(body.request_id);
         if (!appliedMoves.has(body.request_id)) {
@@ -320,8 +335,8 @@ async function setup(page: Page, role = "agent", sameContact = false) {
             stage_id: stageByContact.get(contact) || "stage-new",
             version: versions.get(contact) || 0,
             queue_position: "1",
-            do_not_contact: false,
-            non_interested: false,
+            do_not_contact: restrictions.get(contact)?.do_not_contact || false,
+            non_interested: restrictions.get(contact)?.non_interested || false,
             contact_updated_at: new Date().toISOString(),
           },
           notes: notes.filter((note) => note.contact === contact),
@@ -388,6 +403,8 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     moves,
     moveRequests,
     qualifications,
+    restrictions,
+    reconsiderations,
     appointments,
     failures,
     detailReads,
@@ -909,6 +926,16 @@ test("administrateur : un numéro suffit, sans horaires ni règles régionales",
   await expect(
     dialog.getByText("Numéros par région", { exact: true }),
   ).toHaveCount(0);
+  await dialog.getByText("Tentatives et sonnerie", { exact: true }).click();
+  await dialog
+    .getByLabel("Tentatives maximum par numéro et par jour", { exact: true })
+    .fill("3");
+  await dialog
+    .getByLabel("Délai entre tentatives (minutes)", { exact: true })
+    .fill("60");
+  await dialog
+    .getByLabel("Durée de sonnerie (secondes)", { exact: true })
+    .fill("45");
   await dialog
     .getByRole("button", { name: "Enregistrer la téléphonie", exact: true })
     .click();
@@ -918,6 +945,11 @@ test("administrateur : un numéro suffit, sans horaires ni règles régionales",
   expect(f.settings.hours).toEqual([]);
   expect(f.settings.rules).toEqual([]);
   expect(f.settings.enabled).toBe(true);
+  expect(f.settings.policy).toEqual({
+    attempts_per_day: 3,
+    retry_minutes: 60,
+    ring_seconds: 45,
+  });
   const report = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
@@ -931,7 +963,69 @@ test("administrateur : un numéro suffit, sans horaires ni règles régionales",
   await expect(
     page.getByRole("combobox", { name: "Numéro émetteur", exact: true }),
   ).toHaveValue(ca);
+  await dialog.getByText("Tentatives et sonnerie", { exact: true }).click();
+  await expect(
+    dialog.getByLabel("Durée de sonnerie (secondes)", { exact: true }),
+  ).toHaveValue("45");
   expect(f.nextCount).toBe(0);
+});
+
+test("agent : changement d’avis confirmé rétablit RDV et rappel, sans action pour Ne pas contacter", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const row = [...f.rows.values()][0];
+  await page
+    .getByRole("button", { name: "Mettre en pause", exact: true })
+    .click();
+  f.restrictions.set(row.contact_id, {
+    non_interested: true,
+    do_not_contact: false,
+  });
+  await page
+    .getByRole("button", { name: "Actualiser la fiche", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Prendre rendez-vous", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Le client a changé d’avis", exact: true })
+    .click();
+  expect(f.reconsiderations).toHaveLength(0);
+  await page
+    .getByLabel("Précision (facultative)", { exact: true })
+    .fill("Le client souhaite un rendez-vous cette semaine.");
+  await page
+    .getByRole("button", { name: "Confirmer l’intérêt du client", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Prendre rendez-vous", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Programmer un rappel", exact: true }),
+  ).toBeVisible();
+  expect(f.reconsiderations).toHaveLength(1);
+  f.restrictions.set(row.contact_id, {
+    non_interested: true,
+    do_not_contact: true,
+  });
+  await page
+    .getByRole("button", { name: "Actualiser la fiche", exact: true })
+    .click();
+  await expect(
+    page.getByText("Ne pas contacter — toutes les campagnes", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Le client a changé d’avis",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Prendre rendez-vous", exact: true }),
+  ).toHaveCount(0);
+  expect(f.nextCount).toBe(1);
 });
 
 test("refus du microphone : aucun composeur serveur ni appel", async ({

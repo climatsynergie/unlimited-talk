@@ -48,13 +48,24 @@ automatique pendant la saisie ; enregistrer ou annuler la saisie rend la main au
 
 La navigation interne conserve le téléphone. Un rechargement, une session expirée,
 une présence serveur périmée ou une erreur média demande une reprise explicite.
+Une erreur réseau isolée déclenche une nouvelle vérification sans nouvel appel.
+Trois échecs consécutifs suspendent l’enchaînement ; un refus de session ou de
+contrôle (401/403/409) le suspend immédiatement. Une vérification réussie remet
+le compteur à zéro. Le bail serveur de 90 secondes continue à faire autorité.
 Les fenêtres concurrentes ne peuvent pas contrôler simultanément le même agent.
 
 Les restrictions globales, l’attribution et le propriétaire/date du
 rappel sont revérifiés au moment de l’autorisation signée. Un numéro destinataire
-ne peut recevoir automatiquement que deux tentatives autorisées par jour local,
-espacées d’au moins deux heures, même en changeant de campagne. Un rappel manuel
-explicite reste possible sans ce délai ni ce quota automatique. Les restrictions
+utilise par défaut deux tentatives de prospection par jour local, espacées
+de deux heures. L’administrateur peut régler ces valeurs par campagne dans
+**Tentatives et sonnerie** : 1–20 tentatives, 0–1440 minutes entre tentatives,
+15–60 secondes de sonnerie (35 par défaut, également en manuel dans la campagne).
+Les appels au même numéro restent comptés ensemble, même en changeant de campagne.
+Une tentative de rappel explicitement programmé bénéficie d’une priorité à son
+échéance, sans délai ni quota de prospection. L’exemption est unique par version
+de rappel : un résultat fournisseur incertain ne crée pas de boucle de relance.
+Une reprogrammation explicite crée une nouvelle version. Un appel manuel
+explicite reste possible sans délai ni quota automatique. Les restrictions
 du contact, le propriétaire d’un rappel et l’exclusion des appels simultanés restent
 vérifiés. Le premier fuseau enregistré
 pour ce numéro reste la référence du quota. Les réservations annulées avant
@@ -76,7 +87,30 @@ la session sont figés dans la réservation. Le navigateur transmet uniquement s
 identifiant au SDK. Les règles modifiées ultérieurement ne réécrivent pas les appels
 historiques. Les archives privées et permissions de lecture restent appliquées.
 
-## Déploiement
+Les paramètres supplémentaires sont conservés dans l’événement immuable et
+indexé `calling.settings_changed`, dans la même transaction que la version des
+réglages. Le formulaire, la sélection SQL des candidats et l’autorisation finale
+utilisent cette projection. Les événements précédents héritent des valeurs par
+défaut ; les anciens formulaires préservent les paramètres qu’ils ne connaissent
+pas. Aucun changement de schéma n’est nécessaire.
+
+La vérification des numéros se renouvelle toutes les cinq minutes. Dès douze
+heures de retard, l’administration affiche une alerte. Les réessais automatiques
+respectent le Retry-After fournisseur (entre dix secondes et une heure), avec
+une minute par défaut. Une panne de disponibilité du fournisseur
+peut accorder au numéro déjà vérifié une continuité jusqu’à 48 heures depuis sa
+dernière vérification. Un numéro retiré, désactivé, jamais vérifié ou une erreur
+d’authentification ne bénéficie pas de cette continuité.
+
+## Déploiements courants
+
+Terminer les appels et mettre les composeurs en pause, puis utiliser **Deploy
+staging** avec le SHA main validé par Foundation CI. Le déployeur ferme brièvement
+l’admission et rétablit l’état d’appel précédent après contrôle de santé. Une
+fermeture volontaire par administrateur reste respectée ; ne pas exécuter
+manuellement `disable` comme étape habituelle du déploiement.
+
+## Mise en place initiale (historique)
 
 1. Déployer par le workflow attesté la compatibilité
    `c59c839937eaa96b2d42c055c0efd82027d26070` et constater sa santé au schéma 9.

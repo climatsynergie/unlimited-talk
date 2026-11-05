@@ -1,21 +1,35 @@
 """GET-only owned-number discovery, with complete-page and lease validation."""
 import json
+import math
+from datetime import datetime,timezone
+from email.utils import parsedate_to_datetime
 import re
 import ssl
 from urllib.parse import parse_qsl, urlencode, urlsplit
 import urllib.request
+import urllib.error
 from uuid import uuid4
 
 import phonenumbers
 from app.identity.service import query
-from app.telephony.reconciliation import configured_provider, NoRedirect
+from app.telephony.reconciliation import configured_provider, NoRedirect,ProviderReadError
 from app.telephony.twilio_voice import sid
 
 MAX_BYTES = 1024 * 1024
 
 
 class DirectoryError(ValueError):
-    pass
+    def __init__(self,reason,*,retry_after=60):
+        super().__init__(reason)
+        self.retry_after=retry_after
+
+
+def retry_delay(value):
+    try:
+        raw=value.strip()
+        seconds=int(raw) if raw.isdigit() else (parsedate_to_datetime(raw)-datetime.now(timezone.utc)).total_seconds()
+        return max(10,min(3600,math.ceil(seconds)))
+    except (ValueError,TypeError,AttributeError,OverflowError):return 60
 
 
 def page_suffix(account, value=None):
@@ -86,6 +100,15 @@ class NumberReader:
                 suffix=page_suffix(self.profile.account_sid,data['next_page_uri'])
             raise DirectoryError('provider_response_invalid')
         except DirectoryError: raise
+        except (json.JSONDecodeError,UnicodeDecodeError,ProviderReadError,ssl.SSLCertVerificationError):
+            raise DirectoryError('provider_response_invalid') from None
+        except urllib.error.HTTPError as error:
+            # Authentication/account errors are not a transient network outage.
+            reason='provider_unavailable' if error.code in {408,425,429,500,502,503,504} else 'provider_response_invalid'
+            raise DirectoryError(reason,retry_after=retry_delay(error.headers.get('Retry-After')) if error.headers else 60) from None
+        except urllib.error.URLError as error:
+            reason='provider_response_invalid' if isinstance(error.reason,ssl.SSLCertVerificationError) else 'provider_unavailable'
+            raise DirectoryError(reason) from None
         except Exception: raise DirectoryError('provider_unavailable') from None
 
 
@@ -123,9 +146,10 @@ def synchronize_once(engine,profile,reader=None):
         return 'synchronized'
     except Exception as error:
         reason=error.args[0] if isinstance(error,DirectoryError) and error.args else 'provider_unavailable'
+        delay=error.retry_after if isinstance(error,DirectoryError) else 60
         with engine.begin() as db:
             query(db,'''UPDATE staging.voice_directory_state SET lease_token=NULL,lease_until=NULL,
-                last_error_code=:reason,next_attempt_at=clock_timestamp()+interval '60 seconds'
+                last_error_code=:reason,next_attempt_at=clock_timestamp()+make_interval(secs=>:delay)
                 WHERE account_sid=:account AND lease_token=:lease''',account=profile.account_sid,lease=lease,
-                reason=reason if reason in {'provider_unavailable','provider_response_invalid'} else 'provider_response_invalid')
+                reason=reason if reason in {'provider_unavailable','provider_response_invalid'} else 'provider_response_invalid',delay=delay)
         return 'retry_scheduled'

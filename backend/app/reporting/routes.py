@@ -9,9 +9,12 @@ from app.identity import service as identity
 from app.identity.routes import same_origin
 from app.reporting import service
 from app.reporting.excel import workbook
+from app.telephony import number_health
 
 router=APIRouter(prefix='/api/reporting',tags=['Tableau de bord'])
 export_slots=BoundedSemaphore(1)
+report_slots=BoundedSemaphore(1)
+REPORT_QUEUE_SECONDS=15
 
 @router.post('/presence')
 def presence(request:Request):
@@ -24,7 +27,10 @@ def presence(request:Request):
 def live(request:Request):
     with request.app.state.engine.begin() as db:
         identity.admin(db,request)
-        return service.live(db)
+        result=service.live(db)
+        profile=getattr(request.app.state,'voice_profile',None)
+        result['directory_warning']=number_health.status(db,profile.account_sid if profile else None)
+        return result
 
 def administrator(request):
     # Authentication locks are short. Never retain the actor/global admin lock
@@ -34,9 +40,18 @@ def administrator(request):
 
 
 def aggregate(request,period,agent_id):
-    with request.app.state.engine.begin() as db:
-        identity.query(db,'SET TRANSACTION READ ONLY')
-        return service.report(db,period,agent_id)
+    period.bounds()
+    # Queue before acquiring SQL: at most one expensive report occupies the
+    # two-connection runtime pool. Calls retain a connection of their own.
+    if not report_slots.acquire(timeout=REPORT_QUEUE_SECONDS):
+        raise HTTPException(429,'Un rapport est déjà en préparation. Réessayez dans quelques secondes.',
+                            headers={'Retry-After':'5'})
+    try:
+        with request.app.state.engine.begin() as db:
+            identity.query(db,'SET TRANSACTION READ ONLY')
+            return service.report(db,period,agent_id)
+    finally:
+        report_slots.release()
 
 
 @router.get('/report')

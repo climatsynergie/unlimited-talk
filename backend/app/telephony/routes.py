@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.identity import service as identity
 from app.identity.routes import same_origin
-from app.telephony import service
+from app.telephony import service,dialer_policy
 from app.telephony.twilio_voice import (
     MAX_WEBHOOK_BYTES, VoiceWebhookError, authenticate_webhook,
     browser_token, controlled_call_twiml, authenticate_probe,
@@ -151,13 +151,17 @@ def apply_webhook(request, configured, kind, identifier, params):
         return HANGUP
     try:
         destination = None
+        ring_seconds = None
         with request.app.state.engine.begin() as db:
             if kind == 'voice':
                 accepted = getattr(request.app.state, 'voice_calling_enabled', False) and service.consume(db, configured, params)
                 if accepted:
-                    selected = identity.query(db, 'SELECT destination,caller_number FROM staging.voice_intents WHERE id=:id',
+                    selected = identity.query(db, 'SELECT destination,caller_number,campaign_id FROM staging.voice_intents WHERE id=:id',
                                               id=UUID(params['Intent'])).mappings().one()
                     destination = selected['destination']
+                    if isinstance(configured,ManualVoiceProfile):
+                        policy=dialer_policy.settings(db,selected['campaign_id']) if selected['campaign_id'] else None
+                        ring_seconds=policy['policy']['ring_seconds'] if policy else 35
             else:
                 service.notify(db, configured, kind, identifier, params)
                 accepted = False
@@ -166,7 +170,7 @@ def apply_webhook(request, configured, kind, identifier, params):
     # DB commit precedes the only response that can create the external call.
     # Replays and revoked/expired reservations receive Hangup, never another Dial.
     if accepted:
-        return controlled_call_twiml(configured, UUID(params['Intent']), destination,selected['caller_number'])
+        return controlled_call_twiml(configured, UUID(params['Intent']), destination,selected['caller_number'],ring_seconds=ring_seconds)
     return HANGUP
 
 

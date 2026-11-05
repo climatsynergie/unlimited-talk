@@ -101,14 +101,17 @@ ELIGIBLE = '''
     AND EXISTS(SELECT 1 FROM staging.voice_campaign_settings cfg WHERE cfg.campaign_id=m.campaign_id AND cfg.enabled)
     AND NOT EXISTS(SELECT 1 FROM staging.voice_intents i WHERE i.account_sid=:account AND i.destination=c.phone
         AND i.state IN ('reserved','authorized','ringing','answered') AND (i.state<>'reserved' OR i.expires_at>clock_timestamp()))
+'''
+
+PROSPECTING_LIMITS = '''
     AND NOT EXISTS(SELECT 1 FROM staging.voice_intents i WHERE i.account_sid=:account AND i.destination=c.phone
-        AND i.consumed_at>clock_timestamp()-interval '2 hours')
+        AND i.consumed_at>clock_timestamp()-make_interval(mins=>coalesce((call_policy.value->>'retry_minutes')::integer,120)))
     AND (SELECT count(*) FROM staging.voice_intents i WHERE i.account_sid=:account AND i.destination=c.phone
         AND i.consumed_at >= (date_trunc('day',clock_timestamp() AT TIME ZONE coalesce(
             (SELECT first.attempt_timezone FROM staging.voice_intents first WHERE first.account_sid=:account
                 AND first.destination=c.phone ORDER BY first.created_at,first.id LIMIT 1),ca.timezone))
             AT TIME ZONE coalesce((SELECT first.attempt_timezone FROM staging.voice_intents first
-                WHERE first.account_sid=:account AND first.destination=c.phone ORDER BY first.created_at,first.id LIMIT 1),ca.timezone))) < 2
+                WHERE first.account_sid=:account AND first.destination=c.phone ORDER BY first.created_at,first.id LIMIT 1),ca.timezone))) < coalesce((call_policy.value->>'attempts_per_day')::integer,2)
 '''
 
 
@@ -122,18 +125,21 @@ def candidates(db,values,campaign_id=None):
                 cb.due_at AS candidate_order,cb.id AS candidate_key FROM staging.callbacks cb
                 JOIN staging.contacts c ON c.id=cb.contact_id JOIN staging.campaigns ca ON ca.id=cb.campaign_id
                 JOIN staging.campaign_contacts m ON m.campaign_id=cb.campaign_id AND m.contact_id=cb.contact_id
-                WHERE cb.owner_id=:actor AND cb.status='scheduled' AND cb.due_at<=clock_timestamp()
+                '''+policy.POLICY_JOIN+''' WHERE cb.owner_id=:actor AND cb.status='scheduled' AND cb.due_at<=clock_timestamp()
                 AND (CAST(:after AS timestamptz) IS NULL OR (cb.due_at,cb.id)>(CAST(:after AS timestamptz),CAST(:after_id AS uuid)))
-                AND '''+ELIGIBLE+''' ORDER BY cb.due_at,cb.id LIMIT 100'''
+                AND '''+ELIGIBLE+''' AND (NOT EXISTS(SELECT 1 FROM staging.voice_intents prior
+                  WHERE prior.account_sid=:account AND prior.destination=c.phone AND prior.callback_id=cb.id
+                  AND prior.callback_version=cb.version AND prior.consumed_at IS NOT NULL)
+                  OR ('''+PROSPECTING_LIMITS.strip().removeprefix('AND ')+''')) ORDER BY cb.due_at,cb.id LIMIT 100'''
         else:
             statement='''SELECT m.campaign_id,c.id AS contact_id,c.phone,
                 m.queue_position AS candidate_order,c.id AS candidate_key FROM staging.campaign_contacts m
                 JOIN staging.contacts c ON c.id=m.contact_id JOIN staging.campaigns ca ON ca.id=m.campaign_id
                 JOIN staging.campaign_stages s ON s.id=m.stage_id
-                WHERE m.campaign_id=:campaign AND s.kind IN ('new','no_answer','other','custom')
+                '''+policy.POLICY_JOIN+''' WHERE m.campaign_id=:campaign AND s.kind IN ('new','no_answer','other','custom')
                 AND NOT EXISTS(SELECT 1 FROM staging.callbacks cb WHERE cb.contact_id=c.id AND cb.status='scheduled')
                 AND (CAST(:after AS bigint) IS NULL OR (m.queue_position,c.id)>(CAST(:after AS bigint),CAST(:after_id AS uuid)))
-                AND '''+ELIGIBLE+''' ORDER BY m.queue_position,c.id LIMIT 100'''
+                AND '''+ELIGIBLE+PROSPECTING_LIMITS+''' ORDER BY m.queue_position,c.id LIMIT 100'''
         page=query(db,statement,**values,campaign=campaign_id,after=after,after_id=after_id).mappings().all()
         if not page:return
         yield from page

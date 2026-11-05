@@ -477,7 +477,7 @@ test("durée normale et microphone conservé : aucun raccrochage après le plafo
   assert.deepEqual(f.device.inputs, ["selected-headset"]);
   t.mock.timers.tick(210_000);
   assert.equal(f.device.call.disconnected, 0);
-  t.mock.timers.tick(420_000);
+  t.mock.timers.tick(480_000);
   assert.equal(f.device.call.disconnected, 1);
   f.controller.dispose();
 });
@@ -490,11 +490,14 @@ test("appel normal : trente minutes autorisées, dix minutes ne coupent pas", as
   await f.controller.refresh();
   assert.equal(f.controller.state.maxDurationSeconds, 1800);
   await f.controller.start("", "+14165550101");
+  t.mock.timers.tick(60_000); // Long ringing must not consume conversation time.
   f.device.call.emit("accept");
   t.mock.timers.tick(11 * 60 * 1000);
   assert.equal(f.controller.state.phase, "connected");
   assert.equal(f.device.call.disconnected, 0);
-  t.mock.timers.tick(20 * 60 * 1000);
+  t.mock.timers.tick(19 * 60 * 1000);
+  assert.equal(f.device.call.disconnected, 0);
+  t.mock.timers.tick(30_000);
   assert.equal(f.device.call.disconnected, 1);
 });
 
@@ -607,6 +610,9 @@ function automaticFixture() {
     failHeartbeat: () => {
       heartbeatFailure = true;
     },
+    recoverHeartbeat: () => {
+      heartbeatFailure = false;
+    },
     empty: () => {
       idle = true;
     },
@@ -714,6 +720,8 @@ test("composeur : perte de présence pendant les dix secondes interdit tout dép
   await f.controller.refresh();
   f.failHeartbeat();
   await f.controller.automaticTick();
+  await f.controller.automaticTick();
+  await f.controller.automaticTick();
   now = 10_000;
   await f.controller.automaticTick();
   assert.equal(f.controller.state.automaticNextAt, null);
@@ -798,10 +806,48 @@ test("composeur : perte de présence suspend l’enchaînement sans inventer la 
   await f.controller.automaticTick();
   f.failHeartbeat();
   await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, true);
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, true);
+  await f.controller.automaticTick();
   assert.equal(f.controller.state.automaticRunning, false);
   assert.equal(f.device.call.disconnected, 0);
   assert.notEqual(f.controller.state.phase, "idle");
   assert.equal(f.nextCount, 1);
+});
+
+test("composeur : une microcoupure ne lance aucun appel, puis la vérification réussie permet de continuer", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  f.empty();
+  f.failHeartbeat();
+  await f.controller.automaticTick();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  assert.equal(f.controller.state.automaticRunning, true);
+  f.recoverHeartbeat();
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.automaticError, "");
+  f.failHeartbeat();
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, true);
+  assert.equal(f.nextCount, 1);
+});
+
+test("composeur : une autorisation révoquée suspend dès le premier refus", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  f.automatic.heartbeat = async () => {
+    throw Object.assign(new Error("Accès refusé"), { status: 403 });
+  };
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.nextCount, 0);
 });
 
 test("composeur : la saisie RDV suspend, puis reprend seulement si aucune pause n’a été demandée", async (t) => {
@@ -828,6 +874,8 @@ test("composeur : une perte de présence pendant le RDV exige une reprise explic
   await f.controller.startAutomatic("campaign");
   const hold = await f.controller.beginBooking("campaign");
   f.failHeartbeat();
+  await f.controller.automaticTick();
+  await f.controller.automaticTick();
   await f.controller.automaticTick();
   await f.controller.endBooking(hold);
   assert.equal(f.controller.state.automaticRunning, false);

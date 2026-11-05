@@ -32,10 +32,14 @@ Moving into non-interested or do-not-contact requires explicit confirmation in
 the UI and sets the canonical contact flag, then updates every active campaign
 membership in one transaction. Global do-not-contact takes precedence over
 non-interested. Default restriction stages cannot be archived. Imports and
-reenrollment preserve global flags. Clearing flags is a separate, explicit,
-administrator-only action with an expected contact timestamp, so a fresh global
-restriction cannot be overwritten from a stale confirmation dialog; it does not silently put every membership into a
-calling stage. Those cards must be moved deliberately after reactivation.
+reenrollment preserve global flags. Clearing do-not-contact remains an explicit administrator-only operation. An
+assigned agent may confirm renewed client interest through the separate
+`reconsider` action, with an expected contact timestamp and an immutable actor,
+reason and timestamp. This action only clears non-interested and always rejects
+a do-not-contact flag. It never silently puts memberships back into calling
+stages; the agent can deliberately book, schedule a callback or change a stage.
+The renewed-interest event is visible in every active campaign for that contact.
+Stale confirmation and duplicate request handling preserve concurrent decisions.
 
 ## Reliability and pagination
 

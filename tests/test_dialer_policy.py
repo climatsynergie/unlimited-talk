@@ -5,17 +5,23 @@ from pathlib import Path
 import re
 import sys
 import unittest
+import urllib.error
 from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from app.telephony.dialer_policy import CallingSettings,RegionRule
+from app.telephony.dialer_policy import CallingSettings,RegionRule,CampaignPolicy
 from app.telephony.caller_directory import NumberReader,DirectoryError,page_suffix
 from app.telephony.twilio_voice import ManualVoiceProfile,controlled_call_twiml
 from xml.etree import ElementTree
 
 
 class DialerPolicyTests(unittest.TestCase):
+    def test_prospecting_settings_are_bounded_and_manual_ringing_is_longer(self):
+        self.assertEqual(CampaignPolicy().model_dump(),dict(attempts_per_day=2,retry_minutes=120,ring_seconds=35))
+        for change in [dict(attempts_per_day=0),dict(attempts_per_day=True),dict(retry_minutes=-1),dict(retry_minutes=1441),dict(ring_seconds=61)]:
+            with self.subTest(change=change),self.assertRaises(ValidationError):CampaignPolicy(**change)
+        self.assertEqual(CampaignPolicy(retry_minutes=0).retry_minutes,0)
     def test_campaign_activation_needs_owned_number_and_nonoverlapping_hours(self):
         number=uuid4()
         base=dict(request_id=uuid4(),version=0,enabled=True,default_number_id=number,
@@ -57,6 +63,18 @@ class NumberDirectoryTests(unittest.TestCase):
         self.assertEqual(len(result),2)
         self.assertTrue(all(n['voice_enabled'] for n in result))
         self.assertEqual(requests[1].split('?',1)[1],'PageSize=100&Page=1&PageToken=a%2Bb%3D')
+
+    def test_provider_authentication_errors_cannot_grant_outage_continuity(self):
+        for code,reason in [(401,'provider_response_invalid'),(403,'provider_response_invalid'),
+                            (404,'provider_response_invalid'),(429,'provider_unavailable'),(503,'provider_unavailable')]:
+            def send(request):raise urllib.error.HTTPError(request.full_url,code,'synthetic',{},None)
+            with self.subTest(code=code),self.assertRaisesRegex(DirectoryError,reason):NumberReader(self.profile,send).read()
+        import json
+        def corrupted(request):raise json.JSONDecodeError('synthetic','x',0)
+        with self.assertRaisesRegex(DirectoryError,'provider_response_invalid'):NumberReader(self.profile,corrupted).read()
+        def throttled(request):raise urllib.error.HTTPError(request.full_url,429,'synthetic',{'Retry-After':'120'},None)
+        with self.assertRaises(DirectoryError) as failure:NumberReader(self.profile,throttled).read()
+        self.assertEqual(failure.exception.retry_after,120)
 
     def test_untrusted_page_urls_and_query_overrides_are_refused(self):
         for suffix in ['https://untrusted.invalid'+self.base+'?PageSize=100&Page=1&PageToken=x',

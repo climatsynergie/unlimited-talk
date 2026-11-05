@@ -648,8 +648,10 @@ de rétablir le mode fermé. La configuration publique Caddy est validée avant
 rechargement et restaurée si les contrôles d'accès échouent. Les notifications
 non signées restent refusées ; les endpoints internes de santé ne sont pas publics.
 
-Avant un déploiement ultérieur, fermer les appels avec l'action `disable` de ce
-même outil. Le profil version 2 doit rester associé à une image qui le comprend :
+Avant un déploiement ultérieur, terminer les appels et mettre les composeurs
+en pause. Le workflow attesté gère la fermeture transitoire et le rétablissement
+automatique des appels ; l’action `disable` est réservée à une fermeture
+volontaire de l’administrateur. Le profil version 2 doit rester associé à une image qui le comprend :
 ne pas revenir à une ancienne image version 1 sans restauration opérateur du profil
 et sans résolution préalable des appels et archives.
 
@@ -676,3 +678,12 @@ libre d’isolation passe dans son commentaire et l’agent choisit explicitemen
 le nouveau statut. Une modification d’un ancien RDV conserve son questionnaire
 d’origine. Les choix courts utilisent des groupes radio natifs accessibles au
 clavier ; aucune réponse client n’est stockée dans le navigateur.
+
+La sonnerie des appels manuels libres est demandée pour 35 secondes. Dans une
+campagne, l’administrateur peut choisir entre 15 et 60 secondes ; la limite de
+conversation reste 30 minutes. Les transferts privés d’enregistrements sont
+limités à 24 requêtes simultanées par processus API, avec lecture en flux, sans
+connexion SQL maintenue pendant le transfert. La 25e requête reçoit un 429
+réessayable. Les preuves HTTP vérifient 24 transferts retenus en parallèle, le
+refus borné de la requête supplémentaire et la libération unique des ressources.
+Cette preuve de transfert ne prétend pas valider 20 conversations PSTN réelles.
