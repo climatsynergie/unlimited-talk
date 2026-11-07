@@ -41,6 +41,19 @@ class ReconciliationTests(unittest.TestCase):
     def read(self,pending=None):
         return ReadOnlyCalls(self.profile,self.send).read(pending or self.pending)
 
+    def test_incoming_children_use_the_real_bounded_reader_allowlist(self):
+        requests=[]
+        def send(request):
+            requests.append(request)
+            return dict(calls=[],next_page_uri=None)
+        reader=ReadOnlyCalls(self.profile,send)
+        prefix='/Calls.json?ParentCallSid='+self.pending.parent_call_sid+'&PageSize='
+        for size in (2,21):self.assertEqual(reader._get(prefix+str(size))['calls'],[])
+        for size in (0,1,3,20,22,100):
+            with self.assertRaises(ProviderReadError):reader._get(prefix+str(size))
+        self.assertEqual(len(requests),2)
+        self.assertTrue(all(request.method=='GET' and request.data is None for request in requests))
+
     def test_only_scoped_gets_and_relationships_can_prove_terminal_result(self):
         observed=self.read()
         self.assertTrue(observed.terminal)

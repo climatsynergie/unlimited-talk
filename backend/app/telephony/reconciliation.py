@@ -100,7 +100,7 @@ class ReadOnlyCalls:
         # This allowlist exists in addition to validation of the reservation and
         # relationships. Neither URLs supplied in responses nor a POST can pass.
         if not (re.fullmatch(r'/Calls/CA[0-9a-fA-F]{32}\.json', suffix)
-                or re.fullmatch(r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=2', suffix)):
+                or re.fullmatch(r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=(2|21)', suffix)):
             raise ProviderReadError('endpoint_refused')
         request = urllib.request.Request(self.base + suffix, method='GET', headers={
             'Authorization': self.authorization, 'Accept': 'application/json',

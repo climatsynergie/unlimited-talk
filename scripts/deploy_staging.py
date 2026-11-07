@@ -208,6 +208,7 @@ def require_recording_compatibility(labels, previous):
         if (state.get('migration') in {'0011_long_recordings','0012_incoming_runtime'}
                 and current.get('io.unlimitedtalk.schema12-compatible')=='1'
                 and current.get('io.unlimitedtalk.incoming-runtime')=='1'
+                and current.get('io.unlimitedtalk.incoming-recovery')=='1'
                 and current.get('org.opencontainers.image.revision')==state['revision']
                 and current.get('org.opencontainers.image.source')=='https://github.com/'+REPOSITORY):return
         raise ValueError('Deploy the reviewed incoming compatibility release first')
@@ -339,7 +340,7 @@ def deploy(request):
         if labels.get('io.unlimitedtalk.schema') in DIALER_SCHEMAS and any(labels.get(k)!='1' for k in
                 ('io.unlimitedtalk.voice-manual','io.unlimitedtalk.dialer-compatible','io.unlimitedtalk.dialer')):
             raise ValueError('This deployment template requires the reviewed dialer capability')
-        if labels.get('io.unlimitedtalk.schema') == '0012_incoming_runtime' and any(labels.get(k)!='1' for k in ('io.unlimitedtalk.incoming-runtime','io.unlimitedtalk.schema12-compatible')):
+        if labels.get('io.unlimitedtalk.schema') == '0012_incoming_runtime' and any(labels.get(k)!='1' for k in ('io.unlimitedtalk.incoming-runtime','io.unlimitedtalk.schema12-compatible','io.unlimitedtalk.incoming-recovery')):
             raise ValueError('Incoming runtime compatibility required')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
