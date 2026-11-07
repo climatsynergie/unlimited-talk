@@ -229,11 +229,15 @@ try:
    if 'Calls.json?' in path:return {'calls':[child_data], 'next_page_uri':None}
    return child_data if child_data['sid'] in path else parent_data
  provider=Provider()
- observation=incoming_recovery.observe(provider,snapshot)
+ from app.telephony.reconciliation import ReadOnlyCalls
+ # Replace network I/O only. The actual shared endpoint allowlist and provider
+ # adapter must be exercised; a fake _get alone can hide refused new endpoints.
+ adapter=ReadOnlyCalls(profile,send=lambda request:provider._get(request.full_url.removeprefix('https://api.twilio.com/2010-04-01/Accounts/'+profile.account_sid)))
+ observation=incoming_recovery.observe(adapter,snapshot)
  assert incoming_recovery.apply(engine,profile,observation)=='checked'
  assert offers(recovery_call)[0]['state']=='finished' and call_row(recovery_call)['state']=='waiting'
  parent_data['status']='completed'
- assert incoming_recovery.apply(engine,profile,incoming_recovery.observe(provider,{'call':call_row(recovery_call),'offers':offers(recovery_call)}))=='checked'
+ assert incoming_recovery.apply(engine,profile,incoming_recovery.observe(adapter,{'call':call_row(recovery_call),'offers':offers(recovery_call)}))=='checked'
  assert call_row(recovery_call)['state']=='finished'
  class Ambiguous(Provider):
   def _get(self,path):

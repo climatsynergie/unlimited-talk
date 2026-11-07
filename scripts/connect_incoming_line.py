@@ -75,6 +75,7 @@ def runtime(revision):
         item=json.loads(run(['docker','inspect',identifier]))[0];labels=item['Config']['Labels']
         if (item['Config']['Image']!=manifest['image'] or item['State'].get('Health',{}).get('Status')!='healthy'
                 or labels.get('org.opencontainers.image.revision')!=revision or labels.get('io.unlimitedtalk.incoming-runtime')!='1'
+                or labels.get('io.unlimitedtalk.incoming-recovery')!='1'
                 or labels.get('org.opencontainers.image.source')!='https://github.com/climatsynergie/unlimited-talk'):
             raise ValueError('Healthy attested incoming runtime required')
     return command

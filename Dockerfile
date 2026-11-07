@@ -20,6 +20,7 @@ LABEL io.unlimitedtalk.schema11-compatible="1"
 LABEL io.unlimitedtalk.long-recordings="1"
 LABEL io.unlimitedtalk.schema12-compatible="1"
 LABEL io.unlimitedtalk.incoming-runtime="1"
+LABEL io.unlimitedtalk.incoming-recovery="1"
 ENV APP_REVISION=$GIT_REVISION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
