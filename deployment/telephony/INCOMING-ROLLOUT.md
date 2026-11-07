@@ -1,6 +1,6 @@
 # Réception des appels et classements agents
 
-La livraison de compatibilité `40e4f6f8223d0ae3c489a0bf04abd034577507e1` conserve la migration `0011_long_recordings`.
+La livraison de compatibilité `662b450501a70431b0effbb087501e727111099d` conserve la migration `0011_long_recordings`.
 Elle contient l’intégralité du futur runtime entrant, mais les nouvelles commandes
 ne peuvent recevoir de média avant la migration additive et la connexion d’une
 ligne. Les fonctions « Boîte vocale » et « Parle anglais » fonctionnent sur le
@@ -28,7 +28,7 @@ Ne pas contacter. Les RDV/rappels futurs et restrictions existants sont protég�
 1. Publier, attendre Foundation CI (image testée + attestation), puis déployer la
    livraison de compatibilité sur le SHA exact de main. Vérifier la révision
    réellement servie et les étiquettes `schema12-compatible=1` et
-   `incoming-runtime=1`. Ne pas avancer main vers la seconde livraison avant
+   `incoming-runtime=1` et `incoming-recovery=1`. Ne pas avancer main vers la seconde livraison avant
    d’avoir déployé celle-ci : Deploy staging exige le SHA actuel de main.
 2. Cette seconde livraison place le fichier revu dans
    `backend/migrations/versions/0012_incoming_runtime.py` et porte l’étiquette

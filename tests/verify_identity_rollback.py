@@ -50,7 +50,7 @@ def ready(revision):
 
 
 before=snapshot()
-old_revision='40e4f6f8223d0ae3c489a0bf04abd034577507e1'
+old_revision='662b450501a70431b0effbb087501e727111099d'
 with tempfile.TemporaryDirectory(prefix='identity-app-rollback-') as tmp:
     override=Path(tmp)/'rollback.yaml'
     override.write_text('services:\n  api:\n    image: unlimited-talk-staging-api:identity-rollback\n')
