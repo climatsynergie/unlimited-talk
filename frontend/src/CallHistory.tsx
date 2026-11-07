@@ -3,7 +3,7 @@ import { api, date, message } from "./api";
 import { Notice, Field, Icon } from "./ui";
 import { CallContactDialog } from "./Campaigns";
 
-type Recording = {
+export type Recording = {
   sid: string;
   state: string;
   duration: number;
@@ -45,7 +45,7 @@ const outcomes: Record<string, string> = {
   canceled: "Annulé",
 };
 
-function RecordingPlayer({
+export function RecordingPlayer({
   recording,
   disabled,
 }: {

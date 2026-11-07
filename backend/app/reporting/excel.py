@@ -7,7 +7,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils import get_column_letter
 
-COLUMNS=[('calls','Appels lancés'),('answered','Décrochés'),('answer_rate','Taux de décroché (%)'),
+COLUMNS=[('calls','Appels lancés'),('answered','Décrochés clients'),('voicemail','Boîtes vocales'),('answer_rate','Taux de décroché (%)'),
  ('contacts','Contacts distincts'),('manual','Manuels'),('automatic','Automatiques'),('no_answer','Sans réponse'),
  ('busy','Occupés'),('failed','Échecs'),('cancelled','Annulés'),('in_progress','En cours'),
  ('bookings','RDV créés'),('cancelled_bookings','RDV annulés (statut actuel)'),('bookings_per_100_calls','RDV / 100 appels'),
@@ -54,7 +54,7 @@ def workbook(report):
         ['Début',str(report['period']['start'])],['Fin incluse',str(report['period']['end'])],
         ['Fuseau horaire',report['period']['timezone']],['Extraction (UTC)',report['generated_at'].isoformat()],
         ['Jours sans activité','Les lignes à zéro sont incluses. Une absence d’activité enregistrée ne prouve pas une absence au travail.'],
-        *[[{'calls':'Appels lancés','answered':'Décrochés','talk':'Durées de conversation','bookings':'Rendez-vous','pauses':'Pauses et arrêts','time':'Temps et fuseaux'}.get(key,key),value] for key,value in report['definitions'].items()],
+        *[[{'calls':'Appels lancés','answered':'Décrochés clients','voicemail':'Boîtes vocales','talk':'Durées de conversation','bookings':'Rendez-vous','pauses':'Pauses et arrêts','time':'Temps et fuseaux'}.get(key,key),value] for key,value in report['definitions'].items()],
         ['RDV / 100 appels','RDV créés sur la période / appels lancés sur la période × 100. Les RDV ne sont pas forcément issus des appels de cette même période.'],
         ['Durée moyenne connue','Somme des durées connues / nombre de décrochés disposant d’une durée. Les durées inconnues sont exclues.']])
     target=BytesIO();book.save(target)

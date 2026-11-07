@@ -105,11 +105,28 @@ try:
     for suffix in ('start=2026-01-01&end=2026-05-01','start=2026-01-01&end=2026-01-02&timezone=invalid','start=9999-01-01&end=9999-01-02'):
         admin.request('GET','/api/reporting/report?'+suffix,expected=422)
     admin.request('GET','/api/reporting/report?'+params+'&agent_id='+str(uuid4()),expected=404)
+    # Manual voicemail disposition is bound to the actual agent/session and
+    # changes historical metrics without changing provider outcomes or totals.
+    target='/api/telephony/test/intents/'+str(identifiers[0])+'/voicemail'
+    b.request('POST',target,{},expected=404)
+    a.request('POST',target,{},headers={'X-CSRF-Token':'wrong'},expected=403)
+    a.request('POST',target,{})
+    a.request('POST',target,{})
+    voicemail_report=admin.request('GET','/api/reporting/report?'+params+'&agent_id='+str(a.id))
+    vm=voicemail_report['totals']
+    assert (vm['calls'],vm['answered'],vm['voicemail'],vm['talk_seconds'],vm['duration_known'],vm['average_talk_seconds'])==(3,1,1,60,1,60),vm
+    assert voicemail_report['daily'][0]['voicemail']==1
+    assert sum(row['voicemail'] for row in voicemail_report['hourly'])==1
+    with engine.connect() as db:
+        assert query(db,"SELECT count(*) FROM staging.voice_events WHERE intent_id=:id AND kind='disposition.voicemail'",id=identifiers[0]).scalar_one()==1
+        assert query(db,"SELECT outcome FROM staging.voice_intents WHERE id=:id",id=identifiers[0]).scalar_one()=='completed'
     content=admin.request('GET','/api/reporting/export.xlsx?'+params+'&agent_id='+str(a.id),raw=True)
     book=load_workbook(BytesIO(content),read_only=True)
     assert book.sheetnames==['Synthèse','Par jour','Par heure','Repères']
     rows=list(book['Synthèse'].rows);assert rows[1][0].data_type=='s' and rows[1][2].value==3
     assert len(list(book['Par heure'].rows))==50
+    exported=[row for row in book['Synthèse'].values]
+    assert 'Boîtes vocales' in exported[0] and exported[1][exported[0].index('Boîtes vocales')]==1
     from app.reporting.routes import export_slots
     assert export_slots.acquire(blocking=False)
     try:

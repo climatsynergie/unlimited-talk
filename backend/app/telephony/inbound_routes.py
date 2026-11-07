@@ -45,11 +45,12 @@ class Note(Body):
 
 
 @router.get('/agents')
-def agents(request: Request, offset: int = Query(0, ge=0, le=100000)):
+def agents(request: Request, offset: int = Query(0, ge=0, le=100000), search: str = Query('',max_length=120)):
     with request.app.state.engine.begin() as db:
         identity.admin(db, request)
         rows = identity.query(db, '''SELECT id,display_name,role FROM staging.identity_users WHERE is_active
-            ORDER BY lower(display_name),id LIMIT 101 OFFSET :offset''', offset=offset).mappings().all()
+            AND strpos(lower(display_name||' '||email),lower(:search))>0
+            ORDER BY lower(display_name),id LIMIT 101 OFFSET :offset''', offset=offset,search=search.strip()).mappings().all()
         return {'items':[dict(r) for r in rows[:100]],'has_more':len(rows)>100}
 
 
@@ -61,13 +62,15 @@ def queues(request: Request):
             WHERE f.queue_id=q.id AND f.stage<>'handled') AS open_count FROM staging.inbound_queues q
             WHERE :admin OR EXISTS(SELECT 1 FROM staging.inbound_queue_agents a WHERE a.queue_id=q.id AND a.user_id=:user AND a.is_active)
             ORDER BY lower(q.name),q.id LIMIT 200''', admin=actor['role']=='admin', user=actor['id']).mappings().all()
-        return {'items':[dict(r,routing_active=False) for r in rows]}
+        from app.telephony.incoming_presence import routing_states
+        states=routing_states(db,getattr(request.app.state,'voice_profile',None))
+        return {'items':[dict(r,routing_active=states.get(r['id'])=='active',routing_state=states.get(r['id'],'disconnected')) for r in rows]}
 
 
 @router.get('/queues/{identifier}')
 def queue(identifier: UUID, request: Request):
     with request.app.state.engine.begin() as db:
-        return service.queue_detail(db, identity.authenticate(db, request), identifier)
+        return service.queue_detail(db, identity.authenticate(db, request), identifier,getattr(request.app.state,'voice_profile',None))
 
 
 @router.post('/queues', status_code=201)
@@ -105,7 +108,7 @@ def cards(db, identifier, stage, before=None):
 def board(identifier: UUID, request: Request):
     with request.app.state.engine.begin() as db:
         actor = identity.authenticate(db, request)
-        configured = service.queue_detail(db, actor, identifier)
+        configured = service.queue_detail(db, actor, identifier,getattr(request.app.state,'voice_profile',None))
         counts = dict(identity.query(db, 'SELECT stage,count(*) FROM staging.inbound_followups WHERE queue_id=:id GROUP BY stage', id=identifier).all())
         return {'queue':configured,'columns':[{'stage':stage,'name':name,'count':counts.get(stage,0),**cards(db,identifier,stage)} for stage,name in service.STAGES]}
 
@@ -139,7 +142,17 @@ def calls(identifier: UUID, request: Request, before: UUID | None = None):
             FROM staging.inbound_interactions WHERE followup_id=:id AND (CAST(:before AS uuid) IS NULL
             OR (created_at,id)<(CAST(:time AS timestamptz),CAST(:before AS uuid)))
             ORDER BY created_at DESC,id DESC LIMIT 51''', id=identifier, before=before, time=cursor).mappings().all()
-        return {'items':[dict(r) for r in rows[:50]],'has_more':len(rows)>50}
+        result=[dict(r) for r in rows[:50]]
+        from app.telephony.incoming_schema import installed
+        if installed(db) and result:
+            from app.telephony.incoming_history import recordings
+            linked=identity.query(db,'''SELECT i.id,c.id AS call_id FROM staging.inbound_interactions i JOIN staging.inbound_calls c
+                ON c.account_sid=i.account_sid AND c.parent_call_sid=i.call_sid
+                WHERE i.followup_id=:followup AND i.id=ANY(CAST(:ids AS uuid[]))''',followup=identifier,ids=[str(r['id']) for r in result]).mappings().all()
+            ids={r['id']:r['call_id'] for r in linked};media=recordings(db,list(ids.values()))
+            for row in result:
+                row['recordings']=[{k:v for k,v in item.items() if k!='call_id'} for item in media if item['call_id']==ids.get(row['id'])]
+        return {'items':result,'has_more':len(rows)>50}
 
 
 @router.post('/followups/{identifier}')

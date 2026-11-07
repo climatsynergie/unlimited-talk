@@ -645,3 +645,52 @@ test("appel normal long : aucune coupure après dix minutes", async ({
     .poll(() => page.evaluate(() => window.phoneProof.disconnected))
     .toBe(1);
 });
+
+test("Boîte vocale raccroche immédiatement et classe une seule fois le bon appel", async ({
+  page,
+}) => {
+  const state = await setup(page, true, "agent");
+  const classified: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route(
+    /\/api\/telephony\/test\/intents\/[a-f0-9-]+\/voicemail$/,
+    async (route) => {
+      classified.push(
+        new URL(route.request().url()).pathname.split("/").at(-2)!,
+      );
+      await gate;
+      await route.fulfill({ json: { recorded: true } });
+    },
+  );
+  await page.goto("/poste-appel");
+  await page
+    .getByLabel("Numéro à appeler", { exact: true })
+    .fill("+14165550101");
+  await page.getByRole("button", { name: "Appeler", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof?.connections.length))
+    .toBe(1);
+  const id = [...state.rows.keys()][0];
+  state.rows.get(id)!.state = "answered";
+  await page.evaluate(() => window.phoneProof.call!.emit("accept"));
+  const bar = page.getByRole("complementary", {
+    name: "Appel en cours",
+    exact: true,
+  });
+  await expect(
+    bar.getByRole("button", { name: "Raccrocher", exact: true }),
+  ).toBeVisible();
+  await bar.getByRole("button", { name: "Boîte vocale", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.phoneProof.disconnected))
+    .toBeGreaterThan(0);
+  expect(classified).toEqual([id]);
+  state.rows.get(id)!.state = "finished";
+  state.rows.get(id)!.outcome = "completed";
+  release();
+  await expect(bar).toHaveCount(0);
+  expect(classified).toEqual([id]);
+});

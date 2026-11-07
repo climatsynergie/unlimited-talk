@@ -227,6 +227,9 @@ def authorize_context(db,actor,row,profile):
     if contact:
         if contact['do_not_contact'] or (automatic and contact['non_interested']):
             return False
+        if automatic and contact['profile'].get('preferred_language')=='en' and not query(db,
+                "SELECT 1 FROM staging.campaign_events WHERE campaign_id=:id AND action='campaign.english_destination' LIMIT 1",id=row['campaign_id']).first():
+            return False
         if row['campaign_id'] and automatic:campaigns.contact_access(db,row['campaign_id'],contact['id'])
         callback=callback_for(db,contact['id']) if automatic else None
         if row['callback_id'] and automatic:
@@ -238,6 +241,8 @@ def authorize_context(db,actor,row,profile):
         if selected['number']!=row['caller_number']:return False
     elif row['caller_number']!=profile.caller_number:return False
     query(db,'SELECT pg_advisory_xact_lock(hashtextextended(:account,74192010))',account=profile.account_sid)
+    from app.telephony.incoming_schema import occupancy
+    if occupancy(db,profile.account_sid,actor['id'])['actor_busy']:return False
     # Explicit, due callbacks already passed owner/version/date checks above.
     # They are not cold-prospecting retries and must run at the requested time.
     return (row['dialer_generation'] is None or requested_callback_attempt(db,row['callback_id'],row['callback_version'],profile.account_sid,row['destination']) or

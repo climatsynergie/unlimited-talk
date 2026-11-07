@@ -36,7 +36,7 @@ from app.database import make_engine
 logger = logging.getLogger('uvicorn.error')
 
 # Long recording metadata requires the additive schema 11 migration.
-COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0011_long_recordings'})
+COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0011_long_recordings','0012_incoming_runtime'})
 WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
@@ -75,6 +75,12 @@ app.include_router(inbound_router)
 app.include_router(calling_router)
 app.include_router(dialer_router)
 app.include_router(reporting_router)
+from app.telephony.incoming_hooks import router as incoming_hooks_router
+from app.telephony.incoming_routes import router as incoming_reception_router
+from app.telephony.incoming_history import router as incoming_history_router
+app.include_router(incoming_hooks_router)
+app.include_router(incoming_reception_router)
+app.include_router(incoming_history_router)
 app.mount('/assets', StaticFiles(directory=WEB_ROOT / 'assets', check_dir=False), name='assets')
 
 
@@ -184,6 +190,9 @@ def ready(request: Request):
             if secret:
                 request.app.state.identity_cipher.decrypt(secret.encode())
             marker = connection.execute(text("SELECT value FROM staging.environment_metadata WHERE key='environment'")).scalar_one()
+            if version=='0012_incoming_runtime':
+                from app.telephony.incoming_schema import TABLES
+                for table in TABLES:connection.execute(text('SELECT 1 FROM staging.'+table+' LIMIT 0'))
             if version not in COMPATIBLE_SCHEMA_REVISIONS or marker != 'staging':
                 raise ValueError('Schema/environment mismatch')
     except (SQLAlchemyError, ValueError, InvalidToken):

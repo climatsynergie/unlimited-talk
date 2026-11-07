@@ -22,7 +22,7 @@ BASE = Path('/srv/unlimited-talk-staging')
 PROFILE = ROOT/'voice-runtime.json'
 OVERRIDE = ROOT/'voice-manual.yaml'
 SCHEMA = '0010_dialer'
-SCHEMAS = frozenset({SCHEMA, '0011_long_recordings'})
+SCHEMAS = frozenset({SCHEMA, '0011_long_recordings', '0012_incoming_runtime'})
 COMMON = {'account_sid','api_key_sid','api_key_secret','twiml_app_sid','shared_key_id',
           'shared_key_secret','public_origin','caller_number'}
 OVERRIDE_BYTES = (json.dumps({'services': {'api': {'environment': {'COMMUNICATIONS_MODE': 'manual'}}}}, sort_keys=True)+'\n').encode()
@@ -142,13 +142,16 @@ engine=make_engine()
 try:
  with engine.connect() as db:
   db.execute(text('SET TRANSACTION READ ONLY'))
-  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one() in {'0010_dialer','0011_long_recordings'}
+  assert db.execute(text('SELECT version_num FROM staging.alembic_version')).scalar_one() in {'0010_dialer','0011_long_recordings','0012_incoming_runtime'}
   assert db.execute(text('SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()')).scalar_one()
   assert db.execute(text('SELECT current_user')).scalar_one()=='ut_staging_runtime'
   assert not db.execute(text("SELECT pg_has_role(current_user,'ut_staging_migrator','MEMBER')")).scalar_one()
   assert not db.execute(text("SELECT has_table_privilege(current_user,'staging.voice_archive_jobs','DELETE')")).scalar_one()
   active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
   pending=db.execute(text("SELECT count(*) FROM staging.voice_recordings WHERE state<>'archived'")).scalar_one()
+  if db.execute(text("SELECT to_regclass('staging.inbound_calls')")).scalar_one() is not None:
+   active+=db.execute(text("SELECT count(*) FROM staging.inbound_calls WHERE state<>'finished' OR EXISTS(SELECT 1 FROM staging.inbound_offers o WHERE o.call_id=inbound_calls.id AND o.state<>'finished')")).scalar_one()
+   pending+=db.execute(text("SELECT count(*) FROM staging.inbound_recordings WHERE state<>'archived'")).scalar_one()
   caller=db.execute(text("SELECT EXISTS(SELECT 1 FROM staging.voice_numbers WHERE account_sid=:account AND number=:number AND voice_enabled AND is_present AND is_active AND verified_at>clock_timestamp()-interval '24 hours')"),dict(account=profile.account_sid,number=profile.caller_number)).scalar_one()
  assert engine.pool.checkedout()==0
  transport,bucket=client(); assert transport.head_bucket(Bucket=bucket)['ResponseMetadata']['HTTPStatusCode']==200

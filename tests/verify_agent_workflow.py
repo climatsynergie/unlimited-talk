@@ -32,7 +32,11 @@ with make_engine().begin() as db:
  count=db.execute(text("""SELECT count(*) FROM staging.campaigns ca WHERE ca.name LIKE :prefix
    AND (SELECT count(*) FROM staging.voice_intents i WHERE i.campaign_id=ca.id AND i.state='finished')=2
    AND (SELECT count(*) FROM staging.campaign_contacts m JOIN staging.contacts c ON c.id=m.contact_id
-     WHERE m.campaign_id=ca.id AND c.non_interested)=1"""),{'prefix':PREFIX}).scalar_one()
+     WHERE m.campaign_id=ca.id AND c.non_interested)=1
+   AND (SELECT count(*) FROM staging.voice_events e JOIN staging.voice_intents i ON i.id=e.intent_id
+     WHERE i.campaign_id=ca.id AND e.kind='disposition.voicemail')=1
+   AND (SELECT count(*) FROM staging.campaign_contacts m JOIN staging.contacts c ON c.id=m.contact_id
+     WHERE m.campaign_id=ca.id AND c.profile->>'preferred_language'='en')=1"""),{'prefix':PREFIX}).scalar_one()
  assert count==2,'Real workflow evidence is missing; a skipped browser test cannot pass.'
 print('Real browser/API/PostgreSQL workflow evidence: PASS')
 '''.replace('PREFIX',repr(prefix))

@@ -6,6 +6,7 @@ import { Notice } from "./ui";
 type Metrics = {
   calls: number;
   answered: number;
+  voicemail?: number;
   no_answer: number;
   busy: number;
   failed: number;
@@ -132,13 +133,19 @@ function Measures({ metrics }: { metrics: Metrics }) {
           tone: "blue",
         },
         {
-          title: "Décrochés",
+          title: "Décrochés clients",
           value: number(metrics.answered),
           hint:
             metrics.answer_rate === null
               ? "Aucun appel lancé"
               : `${metrics.answer_rate.toLocaleString("fr-CA")} % des appels`,
           tone: "green",
+        },
+        {
+          title: "Boîtes vocales",
+          value: number(metrics.voicemail ?? 0),
+          hint: "Signalées par les agents · hors conversations",
+          tone: "blue",
         },
         {
           title: "RDV créés",
@@ -844,7 +851,8 @@ export function Dashboard() {
                             {[
                               "Date",
                               "Appels",
-                              "Décrochés",
+                              "Décrochés clients",
+                              "Boîtes vocales",
                               "Taux",
                               "RDV",
                               "Pauses",
@@ -861,6 +869,7 @@ export function Dashboard() {
                               <th scope="row">{shortDay(day.date)}</th>
                               <td>{number(day.calls)}</td>
                               <td>{number(day.answered)}</td>
+                              <td>{number(day.voicemail ?? 0)}</td>
                               <td>
                                 <Rate value={day.answer_rate} />
                               </td>
@@ -925,7 +934,8 @@ export function Dashboard() {
                             "Agent",
                             "État actuel",
                             "Appels",
-                            "Décrochés",
+                            "Décrochés clients",
+                            "Boîtes vocales",
                             "RDV",
                             "Pauses",
                             "Arrêts",
@@ -960,6 +970,7 @@ export function Dashboard() {
                             </td>
                             <td>{number(agent.metrics.calls)}</td>
                             <td>{number(agent.metrics.answered)}</td>
+                            <td>{number(agent.metrics.voicemail ?? 0)}</td>
                             <td>{number(agent.metrics.bookings)}</td>
                             <td>{number(agent.metrics.pauses)}</td>
                             <td>{number(agent.metrics.stops)}</td>
@@ -1014,7 +1025,8 @@ export function Dashboard() {
                       <dt>
                         {{
                           calls: "Appels lancés",
-                          answered: "Décrochés",
+                          answered: "Décrochés clients",
+                          voicemail: "Boîtes vocales",
                           talk: "Durées",
                           bookings: "Rendez-vous",
                           pauses: "Pauses et arrêts",

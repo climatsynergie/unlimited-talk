@@ -95,6 +95,8 @@ def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_tok
 
 ELIGIBLE = '''
     NOT c.do_not_contact AND NOT c.non_interested AND ca.is_active AND m.is_active
+    AND (coalesce(c.profile->>'preferred_language','fr')<>'en' OR EXISTS(
+        SELECT 1 FROM staging.campaign_events english WHERE english.campaign_id=m.campaign_id AND english.action='campaign.english_destination'))
     AND NOT EXISTS(SELECT 1 FROM staging.appointments ap WHERE ap.contact_id=c.id AND ap.status='booked' AND ap.ends_at>clock_timestamp())
     AND (:admin OR EXISTS(SELECT 1 FROM staging.campaign_agents ag WHERE ag.campaign_id=m.campaign_id
         AND ag.user_id=:actor AND ag.is_active))
@@ -154,6 +156,9 @@ def next_call(db,actor,profile,browser_id,generation,identifier):
             or row['generation']!=generation):
         raise HTTPException(409,'Le composeur appartient à une autre session ou a changé.')
     if row['mode']!='running':return {'idle':row['mode'],'dialer':public(row)}
+    from app.telephony.incoming_schema import occupancy
+    if occupancy(db,profile.account_sid,actor['id'])['actor_busy']:
+        return {'idle':'inbound_call','dialer':public(row)}
     if not row['lease_alive']:
         state=control(db,actor,browser_id,'pause',generation=generation,automatic_pause=True)
         return {'idle':'presence_expired','dialer':state}

@@ -99,6 +99,8 @@ const actions: Record<string, string> = {
   "contact.removed": "Retrait de la campagne",
   "call.finished": "Appel terminé",
   "call.pipeline_updated": "Étape mise à jour après l’appel",
+  "contact.english_referred": "Transmis aux agents anglophones",
+  "contact.english_received": "Reçu dans la campagne anglophone",
   "calling.settings_changed": "Réglages téléphoniques modifiés",
   "contact.qualification_saved": "Qualification du client enregistrée",
 };
@@ -1103,6 +1105,7 @@ export function CallContactDialog({
       admin={admin}
       inline={inline}
       confirmRestrictions
+      callId={callId}
       reloadKey={revision}
       loadError={error}
       onEditingChange={onEditingChange}
@@ -1169,6 +1172,7 @@ function CardDetail({
   onEditingChange,
   confirmRestrictions = false,
   loadError = "",
+  callId,
 }: {
   campaign: Campaign;
   identifier: string;
@@ -1182,6 +1186,7 @@ function CardDetail({
   onEditingChange?: (editing: boolean) => void;
   confirmRestrictions?: boolean;
   loadError?: string;
+  callId?: string;
 }) {
   const { controller, state: phone, busy: calling } = usePhone();
   useEffect(() => {
@@ -1200,6 +1205,8 @@ function CardDetail({
   const [error, setError] = useState("");
   const [restore, setRestore] = useState(false);
   const [reconsider, setReconsider] = useState(false);
+  const englishRequest = useRef<{ version: number; id: string } | null>(null);
+  const [englishNotice, setEnglishNotice] = useState("");
   const [reconsiderReason, setReconsiderReason] = useState("");
   const [remove, setRemove] = useState(false);
   const [note, setNote] = useState("");
@@ -1383,6 +1390,42 @@ function CardDetail({
       setBusy(false);
     }
   }
+  async function referEnglish() {
+    if (!data || busy) return;
+    if (englishRequest.current?.version !== data.contact.version)
+      englishRequest.current = {
+        version: data.contact.version,
+        id: crypto.randomUUID(),
+      };
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ destination_campaign_name: string }>(
+        `/campaigns/${campaign.id}/contacts/${identifier}/english`,
+        {
+          method: "POST",
+          body: {
+            request_id: englishRequest.current.id,
+            version: data.contact.version,
+            ...(callId ? { source_intent_id: callId } : {}),
+          },
+        },
+      );
+      englishRequest.current = null;
+      setPendingStage(null);
+      setEnglishNotice(
+        `Transmis à « ${result.destination_campaign_name} ». L’administration peut y attribuer les agents anglophones.`,
+      );
+      setRevision((n) => n + 1);
+      onChanged();
+    } catch (error) {
+      setError(message(error));
+      if (error instanceof ApiError && error.status === 409)
+        setRevision((n) => n + 1);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function confirmInterest() {
     if (!data || busy) return;
     setBusy(true);
@@ -1473,6 +1516,7 @@ function CardDetail({
       {error ? <Notice error>{error}</Notice> : null}
       {loadError ? <Notice error>{loadError}</Notice> : null}
       {moveNotice ? <Notice>{moveNotice}</Notice> : null}
+      {englishNotice ? <Notice>{englishNotice}</Notice> : null}
       <button
         className="button secondary"
         disabled={busy || detailLoading}
@@ -1504,6 +1548,7 @@ function CardDetail({
                 <dt>
                   {{
                     display_name: "Nom complet",
+                    preferred_language: "Langue",
                     first_name: "Prénom",
                     last_name: "Nom",
                     email: "Courriel",
@@ -1513,7 +1558,11 @@ function CardDetail({
                     postal_code: "Code postal",
                   }[key] || key}
                 </dt>
-                <dd>{value}</dd>
+                <dd>
+                  {key === "preferred_language" && value === "en"
+                    ? "Anglais"
+                    : value}
+                </dd>
               </div>
             ))}
           </dl>
@@ -1605,6 +1654,24 @@ function CardDetail({
             >
               Appeler ce contact
             </button>
+            {!data.contact.do_not_contact &&
+            !data.contact.non_interested &&
+            data.contact.profile.preferred_language !== "en" ? (
+              <button
+                type="button"
+                className="button secondary"
+                disabled={
+                  busy ||
+                  detailLoading ||
+                  booking ||
+                  callback ||
+                  !campaign.is_active
+                }
+                onClick={() => void referEnglish()}
+              >
+                Parle anglais
+              </button>
+            ) : null}
             {callback ? (
               <section>
                 <h3>Programmer un rappel</h3>

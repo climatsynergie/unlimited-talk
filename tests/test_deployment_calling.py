@@ -206,3 +206,17 @@ class DeploymentCallingTests(unittest.TestCase):
         with patch.object(module,'calling_state',return_value={'migration':'0011_long_recordings'}), patch.object(module,'run') as run:
             module.require_recording_compatibility({'io.unlimitedtalk.schema':'0011_long_recordings'},self.previous)
             run.assert_not_called()
+
+
+class IncomingCompatibilityTests(unittest.TestCase):
+    def test_incoming_migration_requires_full_preceding_runtime(self):
+        from unittest.mock import patch
+        previous=Path('/srv/unlimited-talk-staging/releases/git-'+'a'*40)
+        labels={'io.unlimitedtalk.schema':'0012_incoming_runtime'}
+        current={'io.unlimitedtalk.schema12-compatible':'1','io.unlimitedtalk.incoming-runtime':'1',
+                 'org.opencontainers.image.revision':'a'*40,'org.opencontainers.image.source':'https://github.com/climatsynergie/unlimited-talk'}
+        with patch.object(module,'calling_state',return_value={'migration':'0011_long_recordings','revision':'a'*40}), patch.object(module,'compose',return_value='container'), patch.object(module,'run',return_value=json.dumps(current)):
+            module.require_recording_compatibility(labels,previous)
+        for changed in [{'io.unlimitedtalk.schema12-compatible':'0'},{'io.unlimitedtalk.incoming-runtime':'0'},{'org.opencontainers.image.revision':'b'*40}]:
+            with patch.object(module,'calling_state',return_value={'migration':'0011_long_recordings','revision':'a'*40}), patch.object(module,'compose',return_value='container'), patch.object(module,'run',return_value=json.dumps(current|changed)):
+                with self.assertRaises(ValueError):module.require_recording_compatibility(labels,previous)

@@ -240,8 +240,29 @@ for (const concurrentChange of [false, true]) {
     await page
       .getByRole("button", { name: "Mettre en pause", exact: true })
       .click();
+    const marked = page.waitForResponse(
+      (r) =>
+        r.url().endsWith(`/intents/${second.id}/voicemail`) &&
+        r.request().method() === "POST",
+    );
+    await page
+      .getByRole("complementary", { name: "Appel en cours", exact: true })
+      .getByRole("button", { name: "Boîte vocale", exact: true })
+      .click();
+    expect((await marked).status()).toBe(200);
     await provider(second.id, "finish");
-    await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+    const transferred = page.waitForResponse(
+      (r) =>
+        r.url().endsWith(`/contacts/${fixture.contacts[1].id}/english`) &&
+        r.request().method() === "POST",
+    );
+    await current
+      .getByRole("button", { name: "Parle anglais", exact: true })
+      .click();
+    expect((await transferred).status()).toBe(200);
+    await expect(
+      current.getByText(/Transmis à « Contacts anglophones »/),
+    ).toBeVisible();
     expect(externalRequests).toBe(0);
   });
 }

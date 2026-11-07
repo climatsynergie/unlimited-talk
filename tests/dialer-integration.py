@@ -407,8 +407,14 @@ try:
     admin.request('PUT','/api/campaigns/'+batch['id']+'/agents/'+str(agents[0].id),dict(is_active=True))
     with engine.begin() as db:query(db,'UPDATE staging.voice_numbers SET is_present=true WHERE id=:id',id=numbers['+442079460002'])
     config(batch,numbers['+14165550200'],rules=[dict(country='GB',prefix='',number_id=numbers['+442079460002'])])
-    batch_ids=[];phone_prefix='+442079'+f'{uuid4().int%400:03d}'
+    batch_ids=[]
     with engine.begin() as db:
+        # Re-running this isolated proof must not collide with its own earlier
+        # synthetic data; choose an unoccupied prefix rather than random luck.
+        for prefix in range(400):
+            phone_prefix='+442079'+f'{prefix:03d}'
+            if not query(db,'SELECT 1 FROM staging.contacts WHERE strpos(phone,:prefix)=1 LIMIT 1',prefix=phone_prefix).first():break
+        else:raise ValueError('Synthetic UK batch range exhausted')
         for index in range(101):
             contact_id=uuid4();batch_ids.append(str(contact_id))
             query(db,"INSERT INTO staging.contacts(id,phone,profile) VALUES (:id,:phone,'{}')",id=contact_id,phone=phone_prefix+f'{index:03d}')
@@ -549,6 +555,36 @@ try:
     with engine.begin() as db:
         query(db,"UPDATE staging.voice_numbers SET verified_at=clock_timestamp(),is_present=true WHERE id=:id",id=numbers[profile.caller_number])
         query(db,"UPDATE staging.voice_directory_state SET synchronized_at=clock_timestamp(),last_error_code=NULL WHERE account_sid=:account",account=profile.account_sid)
+    # English referrals preserve one canonical contact and its original history,
+    # while preventing it from returning to a French automatic queue.
+    english_contact=seed(a,destination(108))
+    english_path='/api/campaigns/'+a['id']+'/contacts/'+str(english_contact)
+    referral_body=dict(request_id=str(uuid4()),version=0)
+    Browser('agent').request('POST',english_path+'/english',referral_body,403)
+    referral=agents[0].request('POST',english_path+'/english',referral_body)
+    assert agents[0].request('POST',english_path+'/english',referral_body)==referral
+    target_id=referral['destination_campaign_id']
+    assert target_id!=a['id']
+    original=card(a,english_contact)
+    assert original['profile']['preferred_language']=='en' and original['version']==1
+    agents[0].request('GET','/api/campaigns/'+target_id+'/board',expected=403)
+    admin.request('PUT','/api/campaigns/'+target_id+'/agents/'+str(agents[1].id),dict(is_active=True))
+    english_board=agents[1].request('GET','/api/campaigns/'+target_id+'/board')
+    assert english_board['campaign']['name']=='Contacts anglophones'
+    with engine.connect() as db:
+        assert query(db,'SELECT count(*) FROM staging.campaign_contacts WHERE campaign_id=:campaign AND contact_id=:contact',campaign=target_id,contact=english_contact).scalar_one()==1
+        assert query(db,"SELECT count(*) FROM staging.campaign_events WHERE contact_id=:contact AND action='contact.english_referred'",contact=english_contact).scalar_one()==1
+        assert query(db,"SELECT s.name FROM staging.campaign_contacts m JOIN staging.campaign_stages s ON s.id=m.stage_id WHERE m.campaign_id=:campaign AND m.contact_id=:contact",campaign=a['id'],contact=english_contact).scalar_one()=='Anglais'
+    # Reserving remains flexible in manual mode; final automatic authorization
+    # must also reject a contact whose language changed after reservation.
+    from app.telephony import dialer_service as automatic
+    with engine.begin() as db:
+        values=dict(actor=agents[1].id,admin=False,account=profile.account_sid)
+        assert english_contact in [row['contact_id'] for row in automatic.candidates(db,values,campaign_id=target_id)]
+        assert english_contact not in [row['contact_id'] for row in automatic.candidates(db,dict(actor=agents[0].id,admin=False,account=profile.account_sid),campaign_id=a['id'])]
+    restricted=seed(a,destination(109))
+    with engine.begin() as db:query(db,'UPDATE staging.contacts SET do_not_contact=true WHERE id=:id',id=restricted)
+    agents[0].request('POST','/api/campaigns/'+a['id']+'/contacts/'+str(restricted)+'/english',dict(request_id=str(uuid4()),version=0),409)
     print('Dialer HTTP/PG: ownership, races, configurable prospecting, punctual callbacks, ringing, confirmed renewed interest/RDV, unchanged DNC, bounded caller continuity and warnings: PASS')
 finally:
     server.should_exit=True;thread.join(5);engine.dispose()

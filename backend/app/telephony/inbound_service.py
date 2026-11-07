@@ -25,14 +25,15 @@ def queue(db, actor, identifier, *, lock=False):
     return dict(row)
 
 
-def queue_detail(db, actor, identifier):
+def queue_detail(db, actor, identifier,profile=None):
     result = queue(db, actor, identifier)
     result['agents'] = [dict(r) for r in query(db, '''SELECT a.user_id,a.mode,u.display_name,u.is_active AS account_active
         FROM staging.inbound_queue_agents a JOIN staging.identity_users u ON u.id=a.user_id
         WHERE a.queue_id=:id AND a.is_active ORDER BY lower(u.display_name),u.id''', id=identifier).mappings()]
-    # No provider route is installed by this milestone. Do not imply that a
-    # configuration save makes this number ring in the browser.
-    result['routing_active'] = False
+    from app.telephony.incoming_presence import routing_states
+    state=routing_states(db,profile).get(identifier,'disconnected')
+    result['routing_active'] = state=='active'
+    result['routing_state'] = state
     return result
 
 
@@ -79,6 +80,10 @@ def settings(db, actor, identifier, body, request_id, version=None):
             raise HTTPException(409, 'Réattribuez les suivis en cours avant de retirer leur agent de cette file.')
         if current['phone'] != values['phone'] and query(db, 'SELECT 1 FROM staging.inbound_interactions WHERE queue_id=:id LIMIT 1', id=identifier).first():
             raise HTTPException(409, 'Cette file possède un historique. Créez une autre file pour un autre numéro.')
+        if current['phone']!=values['phone']:
+            from app.telephony.incoming_schema import installed
+            if installed(db) and query(db,'SELECT 1 FROM staging.inbound_calls WHERE queue_id=:id LIMIT 1',id=identifier).first():
+                raise HTTPException(409,'Cette ligne possède un historique d’appels entrants. Créez une autre file pour un autre numéro.')
         query(db, '''UPDATE staging.inbound_queues SET name=:name,phone=:phone,timezone=:timezone,hours=CAST(:hours AS jsonb),
             max_wait_seconds=:max_wait_seconds,offer_seconds=:offer_seconds,is_active=:is_active,version=version+1,
             updated_at=clock_timestamp() WHERE id=:id''', id=identifier,

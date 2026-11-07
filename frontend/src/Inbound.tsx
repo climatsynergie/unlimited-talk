@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { ReceptionControl } from "./IncomingPhone";
+import { RecordingPlayer } from "./CallHistory";
+import { usePhone } from "./Phone";
 import { api, date, message } from "./api";
 import { Field, Icon, Modal, Notice, Submit } from "./ui";
 import { local, Timezone, when } from "./Scheduling";
@@ -26,6 +29,7 @@ type Queue = {
   open_count?: number;
   agents: Member[];
   routing_active: boolean;
+  routing_state?: string;
 };
 type Followup = {
   id: string;
@@ -61,12 +65,19 @@ type Column = {
   items: Followup[];
   has_more: boolean;
 };
+type IncomingRecording = {
+  sid: string;
+  kind: string;
+  duration: number;
+  state: string;
+};
 type Call = {
   id: string;
   called_number: string;
   outcome: string;
   received_at: string;
   ended_at: string;
+  recordings?: IncomingRecording[];
 };
 const stages: Record<Stage, string> = {
   pending: "À traiter",
@@ -75,6 +86,7 @@ const stages: Record<Stage, string> = {
   handled: "Traité",
 };
 const outcomes: Record<string, string> = {
+  answered: "Pris en charge",
   missed: "Sans réponse",
   abandoned: "Appel abandonné",
   outside_hours: "Hors horaires",
@@ -161,7 +173,7 @@ function QueueForm({
     const controller = new AbortController();
     setLoading(true);
     api<{ items: { id: string; display_name: string }[]; has_more: boolean }>(
-      `/inbound/agents?offset=${offset}`,
+      `/inbound/agents?offset=${offset}&search=${encodeURIComponent(agentSearch.trim())}`,
       { signal: controller.signal },
     )
       .then((r) => {
@@ -175,7 +187,7 @@ function QueueForm({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [offset]);
+  }, [offset, agentSearch]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || loading || numberLoading || !phone) return;
@@ -318,8 +330,8 @@ function QueueForm({
           <fieldset className="inbound-fieldset" disabled={busy}>
             <legend>Horaires de réception</legend>
             <p className="muted">
-              Sans plage horaire, la file reste hors horaires. Pour une
-              ouverture de nuit, utilisez une plage sur chaque journée.
+              Sans plage horaire, la réception est ouverte tous les jours. Pour
+              une ouverture de nuit, utilisez une plage sur chaque journée.
             </p>
             {hours.map((h, index) => (
               <div className="inbound-hours" key={index}>
@@ -411,7 +423,10 @@ function QueueForm({
             <input
               type="search"
               value={agentSearch}
-              onChange={(e) => setAgentSearch(e.target.value)}
+              onChange={(e) => {
+                setAgentSearch(e.target.value);
+                setOffset(0);
+              }}
             />
           </label>
           <p className="inbound-agent-count">
@@ -852,6 +867,7 @@ function FollowupDetail({
                 <strong>{outcomes[c.outcome]}</strong>
                 <span>{when(c.received_at, queue.timezone)}</span>
                 <span>Numéro appelé : {c.called_number}</span>
+                <IncomingRecordings items={c.recordings || []} />
               </li>
             ))}
           </ol>
@@ -1043,7 +1059,15 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
           ) : null}
         </div>
       </div>
+      <ReceptionControl />
       {error ? <Notice error>{error}</Notice> : null}
+      {selected && !loading ? (
+        <IncomingHistory
+          key={selected}
+          queueId={selected}
+          revision={revision}
+        />
+      ) : null}
       {loading ? (
         <p role="status">Chargement des files…</p>
       ) : error && !queues.length ? null : !queues.length ? (
@@ -1394,5 +1418,146 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
         />
       ) : null}
     </>
+  );
+}
+
+function IncomingRecordings({ items }: { items: IncomingRecording[] }) {
+  const { busy } = usePhone();
+  return (
+    <>
+      {items.map((r) => (
+        <div key={r.sid}>
+          <small>
+            {r.kind === "voicemail"
+              ? "Message vocal de l’appelant"
+              : "Conversation"}
+          </small>
+          <RecordingPlayer
+            disabled={busy}
+            recording={{
+              ...r,
+              playback_path:
+                r.state === "archived"
+                  ? `/api/telephony/recordings/${r.sid}/audio`
+                  : null,
+            }}
+          />
+        </div>
+      ))}
+    </>
+  );
+}
+type ReceivedCall = {
+  id: string;
+  caller_number: string | null;
+  received_at: string;
+  state: string;
+  outcome: string | null;
+  agent_name: string | null;
+  recordings: IncomingRecording[];
+};
+function IncomingHistory({
+  queueId,
+  revision,
+}: {
+  queueId: string;
+  revision: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<ReceivedCall[]>([]);
+  const [more, setMore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const cancel = new AbortController();
+    setBusy(true);
+    setError("");
+    api<{ items: ReceivedCall[]; has_more: boolean }>(
+      `/inbound/queues/${queueId}/calls`,
+      { signal: cancel.signal },
+    )
+      .then((r) => {
+        if (!cancel.signal.aborted) {
+          setItems(r.items);
+          setMore(r.has_more);
+        }
+      })
+      .catch((e) => {
+        if (!cancel.signal.aborted) setError(message(e));
+      })
+      .finally(() => {
+        if (!cancel.signal.aborted) setBusy(false);
+      });
+    return () => cancel.abort();
+  }, [queueId, open, revision, refresh]);
+  async function previous() {
+    if (busy || !items.length) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api<{ items: ReceivedCall[]; has_more: boolean }>(
+        `/inbound/queues/${queueId}/calls?before=${items.at(-1)?.id}`,
+      );
+      setItems((old) => [...old, ...r.items]);
+      setMore(r.has_more);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel incoming-history">
+      <button
+        className="text-button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        Historique des appels reçus {open ? "▴" : "▾"}
+      </button>
+      {open ? (
+        <>
+          <div className="actions">
+            <p className="muted">
+              Appels pris en charge, manqués et messages vocaux.
+            </p>
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setRefresh((r) => r + 1)}
+            >
+              Actualiser l’historique
+            </button>
+          </div>
+          {error ? <Notice error>{error}</Notice> : null}
+          {busy ? <p role="status">Chargement…</p> : null}
+          {!busy && !items.length && !error ? <p>Aucun appel reçu.</p> : null}
+          <ol className="inbound-history">
+            {items.map((c) => (
+              <li key={c.id}>
+                <strong>{c.caller_number || "Numéro masqué"}</strong>
+                <span>
+                  {c.outcome ? outcomes[c.outcome] : "En cours"} ·{" "}
+                  {date(c.received_at)}
+                  {c.agent_name ? ` · ${c.agent_name}` : ""}
+                </span>
+                <IncomingRecordings items={c.recordings} />
+              </li>
+            ))}
+          </ol>
+          {more ? (
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => void previous()}
+            >
+              Voir les appels précédents
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </section>
   );
 }

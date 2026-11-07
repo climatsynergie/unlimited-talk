@@ -52,22 +52,24 @@ class Job:
             raise ArchiveError('archive_job_invalid')
 
 
-def inspect_wav(content, duration):
+def inspect_wav(content, duration, channels=2):
+    if type(channels) is not int or channels not in (1,2):raise ArchiveError('recording_format_invalid')
     if not isinstance(content,bytes) or not 44 <= len(content) <= archive_storage.MAX_BYTES:
         raise ArchiveError('recording_too_large')
     try:
         with wave.open(io.BytesIO(content),'rb') as audio:
             frames=audio.getnframes()
-            if (audio.getnchannels()!=2 or audio.getsampwidth()!=2 or audio.getframerate()!=8000
+            if (audio.getnchannels()!=channels or audio.getsampwidth()!=2 or audio.getframerate()!=8000
                     or audio.getcomptype()!='NONE' or frames<=0 or frames>(MAX_RECORDING_SECONDS+1)*8000
-                    or abs(frames/8000-duration)>1.05 or len(audio.readframes(frames))!=frames*4):
+                    or abs(frames/8000-duration)>1.05 or len(audio.readframes(frames))!=frames*channels*2):
                 raise ValueError
     except Exception:
         raise ArchiveError('recording_format_invalid') from None
     return 8000
 
 
-def inspect_wav_file(source, duration, progress=lambda: None):
+def inspect_wav_file(source, duration, progress=lambda: None, channels=2):
+    if type(channels) is not int or channels not in (1,2):raise ArchiveError('recording_format_invalid')
     source.seek(0, 2)
     size = source.tell()
     if not 44 <= size <= archive_storage.MAX_BYTES:
@@ -76,15 +78,15 @@ def inspect_wav_file(source, duration, progress=lambda: None):
     try:
         with wave.open(source, 'rb') as audio:
             frames = audio.getnframes()
-            if (audio.getnchannels()!=2 or audio.getsampwidth()!=2 or audio.getframerate()!=8000
+            if (audio.getnchannels()!=channels or audio.getsampwidth()!=2 or audio.getframerate()!=8000
                     or audio.getcomptype()!='NONE' or frames<=0 or frames>(MAX_RECORDING_SECONDS+1)*8000
                     or abs(frames/8000-duration)>1.05):
                 raise ValueError
             total = 0
-            while chunk := audio.readframes(STREAM_CHUNK_BYTES//4):
+            while chunk := audio.readframes(STREAM_CHUNK_BYTES//(channels*2)):
                 total += len(chunk)
                 progress()
-            if total != frames*4:
+            if total != frames*channels*2:
                 raise ValueError
     except Exception:
         raise ArchiveError('recording_format_invalid') from None
@@ -104,10 +106,10 @@ class RecordingReader:
     def __init__(self, profile, send=None):
         self.profile,self.transport,self.send=profile,configured_provider(profile),send
 
-    def _get(self, recording_sid, media=False):
-        if not sid(recording_sid,'RE'):
+    def _get(self, recording_sid, media=False, channels=2):
+        if not sid(recording_sid,'RE') or type(channels) is not int or channels not in (1,2):
             raise ArchiveError('archive_job_invalid')
-        suffix='/Recordings/'+recording_sid+('.wav?RequestedChannels=2' if media else '.json')
+        suffix='/Recordings/'+recording_sid+('.wav?RequestedChannels='+str(channels) if media else '.json')
         limit=LEGACY_BUFFER_BYTES if media else 65536
         request=urllib.request.Request(self.transport.base+suffix,method='GET',headers={
             'Authorization':self.transport.authorization,'Accept':'audio/wav' if media else 'application/json',
@@ -136,24 +138,24 @@ class RecordingReader:
         data=self._get(job.recording_sid)
         if (not isinstance(data,dict) or data.get('sid')!=job.recording_sid
                 or data.get('account_sid')!=self.profile.account_sid or data.get('call_sid')!=job.call_sid
-                or data.get('status')!='completed' or data.get('source')!='DialVerb'
-                or data.get('channels')!=2 or type(data.get('channels')) is not int
+                or data.get('status')!='completed' or data.get('source')!=getattr(job,'recording_source','DialVerb')
+                or data.get('channels')!=job.channels or type(data.get('channels')) is not int
                 or data.get('duration')!=str(job.duration) or data.get('encryption_details') not in (None,{})):
             raise ArchiveError('recording_identity_mismatch')
 
     def read(self,job):
         self.metadata(job)
-        content=self._get(job.recording_sid,True)
-        inspect_wav(content,job.duration)
+        content=self._get(job.recording_sid,True,job.channels)
+        inspect_wav(content,job.duration,job.channels)
         return content
 
     def read_to_file(self, job, source, progress=lambda: None):
         self.metadata(job)
         if self.send is not None:
-            content = self._get(job.recording_sid, True)
+            content = self._get(job.recording_sid, True, job.channels)
             source.write(content)
         else:
-            url = self.transport.base+'/Recordings/'+job.recording_sid+'.wav?RequestedChannels=2'
+            url = self.transport.base+'/Recordings/'+job.recording_sid+'.wav?RequestedChannels='+str(job.channels)
             request = urllib.request.Request(url, method='GET', headers={
                 'Authorization': self.transport.authorization, 'Accept': 'audio/wav',
                 'Cache-Control': 'no-cache', 'User-Agent': 'Unlimited-Talks-recording-archive/2'})
@@ -180,7 +182,7 @@ class RecordingReader:
             except Exception:
                 raise ArchiveError('provider_unavailable') from None
         source.flush()
-        return inspect_wav_file(source, job.duration, progress)
+        return inspect_wav_file(source, job.duration, progress, job.channels)
 
 
 def claim(engine,profile):
@@ -304,6 +306,10 @@ def main():
             state='idle'
             try:
                 state=archive_once(engine,profile,reader)
+                if profile is not None:
+                    from app.telephony.incoming_archive import archive_once as incoming_archive_once
+                    incoming_state=incoming_archive_once(engine,profile,reader)
+                    if state=='idle':state=incoming_state
                 Path('/tmp/voice-archive-heartbeat').touch()
                 if state=='retry_scheduled':logger.warning('Archivage audio reporté ; reprise conservée en base.')
             except Exception:logger.warning('Archivage audio à reprendre.')

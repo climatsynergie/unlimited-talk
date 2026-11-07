@@ -119,6 +119,12 @@ def history(identifier: UUID, request: Request):
         return service.history(db, identifier, actor)
 
 
+@router.post('/test/intents/{identifier}/voicemail', dependencies=[Depends(same_origin)])
+def voicemail(identifier:UUID,request:Request):
+    with request.app.state.engine.begin() as db:
+        return service.voicemail(db,identity.authenticate(db,request),identifier)
+
+
 async def signed_form(request, kind, identifier):
     configured = profile(request)
     if (request.url.query and kind != 'probe') or request.headers.get('content-encoding', 'identity') != 'identity':

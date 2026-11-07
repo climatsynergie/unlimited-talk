@@ -28,6 +28,7 @@ export type MediaDevice = {
   onError: (listener: () => void) => void;
 };
 export type Transport = {
+  voicemail?: (id: string, signal: AbortSignal) => Promise<unknown>;
   session: (signal: AbortSignal) => Promise<Session>;
   reserve: (
     id: string,
@@ -69,6 +70,9 @@ export type AutomaticTransport = {
   }>;
 };
 export type PhoneState = {
+  inboundBusy: boolean;
+  voicemailPending: string[];
+  voicemailFailures: { id: string; destination: string }[];
   loaded: boolean;
   enabled: boolean;
   destination: string | null;
@@ -102,6 +106,10 @@ const terminal = (row: Intent) =>
   ["finished", "cancelled", "expired"].includes(row.state);
 
 export class PhoneController {
+  private voicemailRequests = new Map<
+    string,
+    { id: string; destination: string }
+  >();
   private transport: Transport;
   private factory: (token: string) => Promise<MediaDevice>;
   private listeners = new Set<() => void>();
@@ -123,6 +131,9 @@ export class PhoneController {
   private automaticArmed = false;
   private bookingArmed = false;
   state: PhoneState = {
+    inboundBusy: false,
+    voicemailPending: [],
+    voicemailFailures: [],
     loaded: false,
     enabled: false,
     destination: null,
@@ -161,6 +172,15 @@ export class PhoneController {
     };
   };
   snapshot = () => this.state;
+  setInboundBusy(value: boolean) {
+    if (value === this.state.inboundBusy) return;
+    this.update({
+      inboundBusy: value,
+      ...(!value && this.state.inboundBusy && this.automaticArmed
+        ? { automaticNextAt: performance.now() + 10_000 }
+        : {}),
+    });
+  }
   private update(patch: Partial<PhoneState>) {
     if (this.closed) return;
     this.state = { ...this.state, ...patch };
@@ -502,7 +522,11 @@ export class PhoneController {
       this.automaticFailures = 0;
       this.update({ automaticError: "" });
       this.applyAutomatic(result.dialer);
-      if (this.automaticArmed && this.state.phase === "idle")
+      if (
+        this.automaticArmed &&
+        this.state.phase === "idle" &&
+        !this.state.inboundBusy
+      )
         await this.start(undefined, "", this.state.campaignId, true);
     } catch (error) {
       if (!this.closed && epoch === this.automaticEpoch) {
@@ -543,6 +567,7 @@ export class PhoneController {
       !this.state.loaded ||
       !this.state.enabled ||
       this.state.phase !== "idle" ||
+      this.state.inboundBusy ||
       this.pending ||
       (!automatic && this.automaticArmed) ||
       (automatic &&
@@ -617,6 +642,8 @@ export class PhoneController {
           claimed: "Les contacts disponibles sont déjà pris en charge.",
           settling: "Enregistrement du résultat de l’appel…",
           active_call: "Un appel reste à vérifier avant de continuer.",
+          inbound_call:
+            "Un appel entrant est en cours. L’enchaînement reprendra après sa fin.",
           presence_expired:
             "Session du composeur expirée. Reprenez explicitement.",
         };
@@ -771,6 +798,68 @@ export class PhoneController {
     this.update({ phase: "checking", local: false });
     void this.refresh();
   }
+  async voicemail() {
+    const row = this.state.intent;
+    if (!row || !this.state.local || !this.transport.voicemail || this.closed)
+      return;
+    const saving = this.saveVoicemail({
+      id: row.id,
+      destination: row.destination || this.state.destination || "",
+    });
+    this.hangup();
+    await saving;
+  }
+  async retryVoicemail(id: string) {
+    const entry = this.state.voicemailFailures.find((row) => row.id === id);
+    if (entry) await this.saveVoicemail(entry);
+  }
+  private async saveVoicemail(entry: { id: string; destination: string }) {
+    if (
+      !this.transport.voicemail ||
+      this.closed ||
+      this.voicemailRequests.has(entry.id)
+    )
+      return;
+    const lifecycle = this.requests;
+    const current = () =>
+      !this.closed && !lifecycle.signal.aborted && lifecycle === this.requests;
+    this.voicemailRequests.set(entry.id, entry);
+    this.update({ voicemailPending: [...this.voicemailRequests.keys()] });
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await this.transport.voicemail(entry.id, lifecycle.signal);
+          if (current())
+            this.update({
+              voicemailFailures: this.state.voicemailFailures.filter(
+                (row) => row.id !== entry.id,
+              ),
+            });
+          return;
+        } catch {
+          if (!current()) return;
+          if (attempt < 2)
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+      if (current()) {
+        this.update({
+          voicemailFailures: [
+            ...this.state.voicemailFailures.filter(
+              (row) => row.id !== entry.id,
+            ),
+            entry,
+          ],
+        });
+        if (this.state.automaticRunning) await this.pauseAutomatic();
+      }
+    } finally {
+      if (current()) {
+        this.voicemailRequests.delete(entry.id);
+        this.update({ voicemailPending: [...this.voicemailRequests.keys()] });
+      }
+    }
+  }
   hangup() {
     if (this.closed || this.state.phase === "idle") return;
     const generation = ++this.generation;
@@ -820,6 +909,17 @@ export class PhoneController {
     }
   }
   dispose() {
+    this.state = {
+      ...this.state,
+      voicemailPending: [],
+      voicemailFailures: [
+        ...new Map([
+          ...this.state.voicemailFailures.map((row) => [row.id, row] as const),
+          ...this.voicemailRequests.entries(),
+        ]).values(),
+      ],
+    };
+    this.voicemailRequests.clear();
     this.automaticArmed = false;
     ++this.automaticEpoch;
     this.closed = true;
@@ -837,6 +937,7 @@ export class PhoneController {
     this.automaticArmed = false;
     this.update({
       local: false,
+      inboundBusy: false,
       automaticRunning: false,
       automaticBusy: false,
       automaticNextAt: null,

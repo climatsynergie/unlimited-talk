@@ -115,6 +115,8 @@ jobs:
         run: python3 tests/verify_contacts_restore.py
       - name: Verify database outage and recovery
         run: python3 tests/verify_recovery.py
+      - name: Verify incoming runtime upgrade, routing and private voicemail on disposable PostgreSQL
+        run: python3 tests/verify_incoming_runtime.py
       - name: Export the tested image
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |

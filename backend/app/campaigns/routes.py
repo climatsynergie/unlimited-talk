@@ -90,6 +90,12 @@ class Move(Body):
     source_intent_id:uuid.UUID|None=None
 
 
+class EnglishReferral(Body):
+    request_id:uuid.UUID
+    version:int=Field(ge=0)
+    source_intent_id:uuid.UUID|None=None
+
+
 class QualificationSave(Body):
     request_id:uuid.UUID
     expected_revision:str|None=Field(default=None,pattern=r'^[1-9][0-9]{0,18}$')
@@ -369,6 +375,17 @@ def move(identifier:uuid.UUID,contact_id:uuid.UUID,body:Move,request:Request):
     with request.app.state.engine.begin() as db:
         user=authenticate(db,request);service.access(db,user,identifier)
         return service.move(db,user,identifier,contact_id,body.stage_id,body.version,body.request_id,source_intent_id=body.source_intent_id)
+
+
+@router.post('/{identifier}/contacts/{contact_id}/english')
+def english(identifier:uuid.UUID,contact_id:uuid.UUID,body:EnglishReferral,request:Request):
+    from app.campaigns.language import refer
+    try:
+        with request.app.state.engine.begin() as db:
+            user=authenticate(db,request);service.access(db,user,identifier)
+            return refer(db,user,identifier,contact_id,body.version,body.request_id,body.source_intent_id)
+    except IntegrityError:
+        raise HTTPException(409,'Une autre modification est en cours. Actualisez la fiche avant de confirmer le transfert.') from None
 
 
 @router.get('/{identifier}/contacts/{contact_id}')

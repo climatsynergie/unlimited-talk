@@ -90,8 +90,18 @@ def authorize(request,recording_sid):
             FROM staging.voice_recordings r JOIN staging.voice_intents i ON i.id=r.intent_id
             LEFT JOIN staging.voice_archive_jobs j ON j.recording_sid=r.sid
             WHERE r.sid=:sid''',sid=recording_sid).mappings().first()
-        if row is None or (user['role']!='admin' and row['actor_id']!=user['id']):
+        if row is not None and user['role']!='admin' and row['actor_id']!=user['id']:
             raise HTTPException(404,'Enregistrement introuvable.')
+        if row is None:
+            from app.telephony.incoming_schema import installed
+            if installed(db):
+                row=query(db,'''SELECT r.*,r.call_id AS intent_id,j.content_bytes,j.sample_rate,c.agent_id AS actor_id
+                    FROM staging.inbound_recordings r JOIN staging.inbound_calls c ON c.id=r.call_id
+                    LEFT JOIN staging.inbound_archive_jobs j ON j.recording_sid=r.sid
+                    WHERE r.sid=:sid AND (:admin OR c.agent_id=:actor OR EXISTS(SELECT 1 FROM staging.inbound_queue_agents a
+                        WHERE a.queue_id=c.queue_id AND a.user_id=:actor AND a.is_active))''',
+                    sid=recording_sid,admin=user['role']=='admin',actor=user['id']).mappings().first()
+            if row is None:raise HTTPException(404,'Enregistrement introuvable.')
         if row['state']!='archived' or row['content_bytes'] is None:
             raise HTTPException(409,'La sauvegarde de cet enregistrement est en cours. Réessayez dans un instant.')
         if row['object_key']!=archive_storage.object_key(row['intent_id'],row['sid'],row['checksum']):

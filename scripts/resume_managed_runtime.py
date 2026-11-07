@@ -38,7 +38,7 @@ def validate(containers, manifest, config):
             labels = row['Config']['Labels']
             if (row['Config']['Image'] != manifest['image']
                     or labels.get('org.opencontainers.image.revision') != manifest['revision']
-                    or labels.get('io.unlimitedtalk.schema') not in {'0010_dialer', '0011_long_recordings'}):
+                    or labels.get('io.unlimitedtalk.schema') not in {'0010_dialer', '0011_long_recordings', '0012_incoming_runtime'}):
                 raise ValueError('The existing application differs from its release')
     modes = [item.split('=', 1)[1] for item in containers['api']['Config']['Env']
              if item.startswith('COMMUNICATIONS_MODE=')]

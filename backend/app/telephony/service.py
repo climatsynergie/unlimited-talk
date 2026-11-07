@@ -89,6 +89,10 @@ def reserve(db, actor, identifier, profile, destination=None, *, campaign_id=Non
     # Admission is short and global to this provider account. PostgreSQL unique
     # indexes retain the actor/destination guarantees even across API replicas.
     query(db, 'SELECT pg_advisory_xact_lock(hashtextextended(:account,74192010))', account=profile.account_sid)
+    from app.telephony.incoming_schema import occupancy
+    incoming=occupancy(db,profile.account_sid,actor['id'])
+    if incoming['actor_busy']:
+        raise HTTPException(409,'Un appel entrant vous est proposé ou est en cours. Terminez-le avant de lancer un appel sortant.')
     expired = query(db, '''UPDATE staging.voice_intents SET state='expired',finished_at=clock_timestamp()
         WHERE state='reserved' AND expires_at<=clock_timestamp() RETURNING id''').scalars().all()
     for old_id in expired:
@@ -112,7 +116,7 @@ def reserve(db, actor, identifier, profile, destination=None, *, campaign_id=Non
             context['attempt_timezone']=zone
         count = query(db, '''SELECT count(*) FROM staging.voice_intents WHERE account_sid=:account
             AND state IN ('reserved','authorized','ringing','answered')''', account=profile.account_sid).scalar_one()
-        if count >= profile.max_concurrent_calls:
+        if count+incoming['total'] >= profile.max_concurrent_calls:
             raise HTTPException(409, 'Toutes les lignes sont occupées. Réessayez lorsqu’un appel se termine.')
     row = query(db, '''INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,
         account_sid,application_sid,caller_number,destination,expires_at)
@@ -130,6 +134,16 @@ def reserve(db, actor, identifier, profile, destination=None, *, campaign_id=Non
     event(db, identifier, 'reserved', {})
     audit(db, actor['id'], 'voice.reserved' if isinstance(profile, ManualVoiceProfile) else 'voice.test_reserved', identifier)
     return row
+
+
+def voicemail(db, actor, identifier):
+    row=query(db,'SELECT * FROM staging.voice_intents WHERE id=:id FOR UPDATE',id=identifier).mappings().first()
+    if not row or row['actor_id']!=actor['id'] or row['session_hash']!=actor['session_hash']:
+        raise HTTPException(404,'Appel introuvable.')
+    if not query(db,"SELECT 1 FROM staging.voice_events WHERE intent_id=:id AND kind='disposition.voicemail' LIMIT 1",id=identifier).first():
+        event(db,identifier,'disposition.voicemail',{'actor_id':str(actor['id'])})
+        audit(db,actor['id'],'voice.voicemail',identifier)
+    return {'id':str(identifier),'disposition':'voicemail'}
 
 
 def cancel(db, actor, identifier):

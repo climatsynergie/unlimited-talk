@@ -21,12 +21,14 @@ MAX_TEST_CALL_SECONDS = 180
 MAX_MANUAL_CALL_SECONDS = 30 * 60
 MANUAL_TOKEN_TTL_SECONDS = MAX_MANUAL_CALL_SECONDS + 180
 MAX_WEBHOOK_BYTES = 16384
-FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status', 'probe'})
-INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish'})
+FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status', 'probe','incoming','incoming-parent-status'})
+INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish','incoming-step','incoming-dial-finish',
+    'incoming-agent-status','incoming-agent-answer','incoming-recording','incoming-voicemail-finish'})
 HOOK_KINDS = FIXED_HOOK_KINDS | INTENT_HOOK_KINDS
 CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent',
                             'CallStatus', 'SequenceNumber', 'DialCallSid', 'DialCallStatus',
-                            'RecordingSid', 'RecordingStatus', 'RecordingChannels', 'RecordingDuration', 'RecordingSource'})
+                            'RecordingSid', 'RecordingStatus', 'RecordingChannels', 'RecordingDuration', 'RecordingSource',
+                            'Direction','Digits','DialBridged','CallDuration','DialCallDuration'})
 
 
 class VoiceConfigurationError(ValueError):
@@ -130,6 +132,18 @@ def browser_token(profile: VoiceProfile, agent_id: UUID, intent_id: UUID):
                         identity=identity, ttl=MANUAL_TOKEN_TTL_SECONDS if isinstance(profile, ManualVoiceProfile)
                         else TOKEN_TTL_SECONDS, region='us1')
     token.add_grant(VoiceGrant(outgoing_application_sid=profile.twiml_app_sid, incoming_allow=False))
+    return token.to_jwt()
+
+
+def incoming_identity(registration_id:UUID):
+    if not isinstance(registration_id,UUID):raise VoiceConfigurationError('Identité de réception invalide.')
+    return 'ut_in_'+registration_id.hex
+
+
+def incoming_token(profile:VoiceProfile,registration_id:UUID):
+    token=AccessToken(profile.account_sid,profile.api_key_sid,profile.api_key_secret,
+        identity=incoming_identity(registration_id),ttl=TOKEN_TTL_SECONDS,region='us1')
+    token.add_grant(VoiceGrant(incoming_allow=True))
     return token.to_jwt()
 
 

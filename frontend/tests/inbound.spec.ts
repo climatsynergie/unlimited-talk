@@ -91,6 +91,9 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
   await expect(
     dialog.getByRole("textbox", { name: "Numéro de réception", exact: true }),
   ).toHaveCount(0);
+  await dialog
+    .getByRole("searchbox", { name: "Rechercher un agent", exact: true })
+    .fill(agentName);
   await dialog.getByLabel(agentName, { exact: true }).check();
   await dialog
     .getByText("Attente, sonnerie et horaires", { exact: true })

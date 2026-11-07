@@ -48,6 +48,7 @@ export async function api<T>(
     raw?: Blob;
     signal?: AbortSignal;
     authenticated?: boolean;
+    keepalive?: boolean;
   } = {},
 ): Promise<T> {
   const csrf = document.cookie
@@ -67,6 +68,7 @@ export async function api<T>(
       credentials: "same-origin",
       cache: "no-store",
       signal: options.signal,
+      keepalive: options.keepalive,
       body:
         options.raw ??
         (options.body === undefined ? undefined : JSON.stringify(options.body)),

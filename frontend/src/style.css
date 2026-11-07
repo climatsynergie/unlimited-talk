@@ -4165,7 +4165,7 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   font-size: 12px;
 }
 .report-kpis {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
   gap: 14px;
   margin: 18px 0;
   display: grid;
@@ -4475,4 +4475,49 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 .calendar-canvas [data-calendar-scroll]:focus-visible {
   outline: 3px solid #2563eb;
   outline-offset: -3px;
+}
+
+.phone-disposition-alert {
+  padding: 1rem;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  background: #fffbeb;
+  margin: 0.75rem;
+}
+
+.reception-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  border-left: 4px solid #168865;
+  margin-bottom: 1rem;
+}
+.reception-control > div:first-child {
+  flex: 1 1 22rem;
+}
+.reception-control h2 {
+  margin: 0.25rem 0;
+}
+.reception-control p {
+  font-size: 0.875rem;
+  margin: 0.4rem 0;
+}
+.reception-control > .notice {
+  flex-basis: 100%;
+}
+.incoming-phone-bar {
+  border-left: 5px solid #168865;
+}
+.incoming-phone-bar .eyebrow {
+  display: block;
+  font-size: 0.7rem;
+  color: #bbf7d0;
+}
+.incoming-history {
+  margin-bottom: 1rem;
+}
+.incoming-history .inbound-history {
+  max-height: 36rem;
+  overflow: auto;
 }

@@ -265,14 +265,18 @@ def main():
             time.sleep(10)
     engine = make_engine()
     provider = configured_provider(profile)
-    from app.telephony import completion,caller_directory
+    from app.telephony import completion,caller_directory,incoming_settlement,incoming_recovery
     next_reconciliation=0
     try:
         while True:
             try:
                 completion.process_once(engine,profile)
+                incoming_settlement.process_once(engine,profile)
                 caller_directory.synchronize_once(engine,profile)
                 result = reconcile_once(engine, profile, provider) if time.monotonic()>=next_reconciliation else {'failed':0}
+                if time.monotonic()>=next_reconciliation:
+                    incoming_result=incoming_recovery.process_once(engine,profile,provider)
+                    result['failed']+=incoming_result['failed']
                 if time.monotonic()>=next_reconciliation:next_reconciliation=time.monotonic()+10
                 if result['failed']:
                     logger.warning('Rapprochement Voice en attente : %s', result)

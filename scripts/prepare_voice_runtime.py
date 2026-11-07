@@ -31,15 +31,15 @@ TOKEN = ROOT / 'voice-read-auth'
 GATEWAY = ROOT / 'voice-read-gateway.json'
 
 
-def render_gateway(config, token, recordings=False, directory=False):
+def render_gateway(config, token, recordings=False, directory=False, *, incoming=True):
     if (not re.fullmatch('AC[0-9a-fA-F]{32}', config['account_sid'])
             or not re.fullmatch('SK[0-9a-fA-F]{32}', config['api_key_sid'])
             or not re.fullmatch('[0-9a-f]{64}', token)):
         raise PreflightError('Paramètres de passerelle invalides.')
     base = '/2010-04-01/Accounts/' + config['account_sid']
-    pattern = '^' + base + r'/Calls/CA[0-9a-fA-F]{32}\.json$|^' + base + r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=2$'
+    pattern = '^' + base + r'/Calls/CA[0-9a-fA-F]{32}\.json$|^' + base + r'/Calls\.json\?ParentCallSid=CA[0-9a-fA-F]{32}&PageSize=(2|21)$'
     if recordings:
-        pattern += '|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.json$|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.wav\?RequestedChannels=2$'
+        pattern += '|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.json$|^' + base + r'/Recordings/RE[0-9a-fA-F]{32}\.wav\?RequestedChannels=[12]$'
     if directory:
         # Go/RE2 limits each counted repetition to 1000. A URL-encoded token
         # from the reader can span 3072 characters; adjacent bounded chunks
@@ -47,6 +47,7 @@ def render_gateway(config, token, recordings=False, directory=False):
         token_chars=r'[A-Za-z0-9._~%=-]'
         page_token=token_chars+'{1,1000}'+(token_chars+'{0,1000}')*3
         pattern += '|^' + base + r'/IncomingPhoneNumbers\.json\?PageSize=100&Page=[0-9]{1,4}(&PageToken='+page_token+r')?$'
+    if not incoming:pattern=pattern.replace('(2|21)','2').replace('RequestedChannels=[12]','RequestedChannels=2')
     expression = '{http.request.uri}.matches(' + json.dumps(pattern) + ')'
     auth = base64.b64encode((config['api_key_sid'] + ':' + config['api_key_secret']).encode()).decode()
     return f'''http://172.30.8.1:8112 {{
@@ -208,11 +209,15 @@ def upgrade_recording_gateway(config, *, directory=False):
     old=FRAGMENT.read_bytes()
     # Never remove an already reviewed directory capability during a later
     # recording-only maintenance operation.
-    directory=directory or old==render_gateway(config,token,True,True).encode()
+    directory=directory or old in {render_gateway(config,token,True,True,incoming=mode).encode() for mode in (False,True)}
     desired=render_gateway(config,token,True,directory).encode()
-    if old==desired:return
-    if old not in {render_gateway(config,token).encode(),render_gateway(config,token,True).encode()}:
+    info=FRAGMENT.lstat()
+    accepted={render_gateway(config,token,recordings,directory,incoming=mode).encode()
+        for mode in (False,True) for recordings,directory in ((False,False),(True,False),(True,True))}
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_gid!=grp.getgrnam('caddy').gr_gid
+            or stat.S_IMODE(info.st_mode)!=0o640 or info.st_nlink!=1 or old not in accepted):
         raise PreflightError('Passerelle différente du plan ; aucune modification.')
+    if old==desired:return
     original=CADDY.read_text()
     line='import '+str(FRAGMENT)
     if original.count(line)!=1:raise PreflightError('Import de passerelle inattendu.')
@@ -245,7 +250,7 @@ def upgrade_recording_gateway(config, *, directory=False):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Préparer les connexions Voice sans activer les appels.')
-    parser.add_argument('action',choices=['prepare','read-gateway','enable-hooks','upgrade-recording-gateway','upgrade-directory-gateway'])
+    parser.add_argument('action',choices=['prepare','read-gateway','enable-hooks','upgrade-recording-gateway','upgrade-directory-gateway','upgrade-incoming-gateway'])
     args=parser.parse_args(argv)
     try:
         if os.geteuid()!=0:raise PreflightError('Exécutez cet outil en root.')
@@ -254,7 +259,15 @@ def main(argv=None):
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             base=voice.load_base();plan=voice.validate_plan(read_private(voice.PLAN),base)
             config=voice.validate_credentials(read_private(voice.CREDENTIALS),plan,base)
-            prepare(config)
+            if args.action=='upgrade-incoming-gateway':
+                info=RUNTIME.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_gid!=10001
+                        or stat.S_IMODE(info.st_mode) not in {0o440,0o640} or info.st_nlink!=1):
+                    raise PreflightError('Profil runtime privé requis.')
+                runtime=json.loads(RUNTIME.read_text())
+                if any(runtime.get(key)!=config[key] for key in ('account_sid','api_key_sid','api_key_secret','public_origin')):
+                    raise PreflightError('Identité runtime différente ; aucun changement de passerelle.')
+            else:prepare(config)
             if args.action=='read-gateway':
                 network=json.loads(subprocess.check_output(['docker','network','inspect','unlimited-talk-staging-managed_staging'],text=True))[0]
                 bridge=private_bridge(network)
@@ -271,18 +284,20 @@ def main(argv=None):
                 if not dropin.exists():
                     dropin.write_text(value);dropin.chmod(0o644)
                     subprocess.run(['systemctl','daemon-reload'],capture_output=True,check=True,timeout=15)
-            elif args.action in {'upgrade-recording-gateway','upgrade-directory-gateway'}:
+            elif args.action in {'upgrade-recording-gateway','upgrade-directory-gateway','upgrade-incoming-gateway'}:
                 with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=8) as response:health=json.load(response)
-                if health.get('calling_enabled') is not False:
+                if args.action!='upgrade-incoming-gateway' and health.get('calling_enabled') is not False:
                     raise PreflightError('Désactivez les appels avant de modifier la passerelle.')
-                upgrade_recording_gateway(config,directory=args.action=='upgrade-directory-gateway')
+                if args.action=='upgrade-incoming-gateway' and (health.get('status')!='ready' or health.get('migration') not in {'0011_long_recordings','0012_incoming_runtime'}):
+                    raise PreflightError('Runtime compatible requis.')
+                upgrade_recording_gateway(config,directory=args.action in {'upgrade-directory-gateway','upgrade-incoming-gateway'})
             elif args.action=='enable-hooks':
                 with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=8) as response:health=json.load(response)
                 if health.get('communications')!='webhooks_only' or health.get('calling_enabled') is not False:
                     raise PreflightError('Déployez d’abord la réception signée sans appels.')
                 original=CADDY.read_text();candidate=render_hooks(original)
                 if candidate!=original:replace_caddy(candidate)
-        print(json.dumps({'prepared':True,'action':args.action,'calling_enabled':False}))
+        print(json.dumps({'prepared':True,'action':args.action,'calling_mode_changed':False}))
         return 0
     except PreflightError as error:print(str(error),file=sys.stderr)
     except Exception:print('Préparation interrompue. Aucun secret affiché ; configuration à vérifier.',file=sys.stderr)

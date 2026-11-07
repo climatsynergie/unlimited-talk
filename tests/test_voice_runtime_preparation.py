@@ -38,7 +38,8 @@ class RuntimePreparationTests(unittest.TestCase):
         base='/2010-04-01/Accounts/'+config['account_sid']+'/Recordings'
         self.assertIsNotNone(re.fullmatch(regex,base+'/RE'+'1'*32+'.json'))
         self.assertIsNotNone(re.fullmatch(regex,base+'/RE'+'1'*32+'.wav?RequestedChannels=2'))
-        for path in [base+'.json',base+'/RE'+'1'*32+'.wav',base+'/RE'+'1'*32+'.wav?RequestedChannels=1',
+        self.assertIsNotNone(re.fullmatch(regex,base+'/RE'+'1'*32+'.wav?RequestedChannels=1'))
+        for path in [base+'.json',base+'/RE'+'1'*32+'.wav',base+'/RE'+'1'*32+'.wav?RequestedChannels=3',
             base+'/RE'+'1'*32+'.mp3',base+'/RE'+'1'*32+'.json?next=https://untrusted.invalid']:
             self.assertIsNone(re.fullmatch(regex,path))
     def test_firewall_interface_is_bound_to_the_expected_private_network(self):
@@ -55,7 +56,7 @@ class RuntimePreparationTests(unittest.TestCase):
         import json
         regex=json.loads(expression.split('.matches(',1)[1].rsplit(')',1)[0])
         base='/2010-04-01/Accounts/'+config['account_sid']
-        for path in [base+'/Calls/CA'+'1'*32+'.json',base+'/Calls.json?ParentCallSid=CA'+'1'*32+'&PageSize=2']:
+        for path in [base+'/Calls/CA'+'1'*32+'.json',base+'/Calls.json?ParentCallSid=CA'+'1'*32+'&PageSize=2',base+'/Calls.json?ParentCallSid=CA'+'1'*32+'&PageSize=21']:
             self.assertIsNotNone(re.fullmatch(regex,path))
         for path in [base+'/Calls.json',base+'/Calls.json?PageSize=2',base+'/Calls/CA'+'1'*32+'.json?x=1',
                      base+'/Calls.json?ParentCallSid=CA'+'1'*32+'&PageSize=2&_method=POST',
@@ -88,3 +89,18 @@ class RuntimePreparationTests(unittest.TestCase):
         self.assertEqual(module.render_hooks(documented),rendered)
         with self.assertRaises(module.PreflightError):module.render_hooks(original.replace('8110','9999'))
         with self.assertRaises(module.PreflightError):module.render_hooks('unreviewed configuration')
+
+
+class IncomingGatewayTests(unittest.TestCase):
+    def test_legacy_gateway_is_retained_and_only_bounded_gets_are_added(self):
+        import json
+        config=dict(account_sid='AC'+'a'*32,api_key_sid='SK'+'b'*32,api_key_secret='c'*32)
+        before=module.render_gateway(config,'d'*64,True,True,incoming=False)
+        after=module.render_gateway(config,'d'*64,True,True)
+        self.assertEqual(after.replace('(2|21)','2').replace('RequestedChannels=[12]','RequestedChannels=2'),before)
+        expression=next(line for line in after.splitlines() if 'expression' in line)
+        regex=json.loads(expression.split('.matches(',1)[1].rsplit(')',1)[0])
+        base='/2010-04-01/Accounts/'+config['account_sid']
+        for page in [0,1,3,20,22,100]:
+            self.assertIsNone(re.fullmatch(regex,base+'/Calls.json?ParentCallSid=CA'+'1'*32+'&PageSize='+str(page)))
+        self.assertIn('method GET',after);self.assertNotIn('method POST',after)

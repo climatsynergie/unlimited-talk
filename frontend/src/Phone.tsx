@@ -15,15 +15,25 @@ import type {
   MediaDevice,
   AutomaticTransport,
 } from "./phone-controller";
+import { IncomingController } from "./incoming-controller";
+import type { IncomingSession, IncomingOffer } from "./incoming-controller";
+import { createIncomingDevice } from "./incoming-device";
 import { createPhoneDevice } from "./phone-device";
 import { Field, Notice } from "./ui";
 
+const IncomingContext = createContext<IncomingController | null>(null);
 const Context = createContext<PhoneController | null>(null);
 export function makePhoneController(
   factory: (token: string) => Promise<MediaDevice> = createPhoneDevice,
 ) {
   return new PhoneController(
     {
+      voicemail: (id, signal) =>
+        api(`/telephony/test/intents/${id}/voicemail`, {
+          method: "POST",
+          body: {},
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        }),
       session: (signal) =>
         api<Session>("/telephony/test/session", {
           signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
@@ -69,6 +79,81 @@ export function makePhoneController(
     } satisfies AutomaticTransport,
   );
 }
+function makeIncomingController(outgoing: PhoneController) {
+  const timed = (signal: AbortSignal) =>
+    AbortSignal.any([signal, AbortSignal.timeout(10000)]);
+  return new IncomingController(
+    {
+      session: (signal) =>
+        api<IncomingSession>("/inbound/reception", { signal: timed(signal) }),
+      register: (browser_id, signal) =>
+        api("/inbound/reception/register", {
+          method: "POST",
+          body: { browser_id },
+          signal: timed(signal),
+        }),
+      heartbeat: (id, available, media_ready, signal) =>
+        api(`/inbound/reception/${id}`, {
+          method: "PATCH",
+          body: { available, media_ready },
+          signal: timed(signal),
+        }),
+      token: (id, signal) =>
+        api(`/inbound/reception/${id}/token`, {
+          method: "POST",
+          body: {},
+          signal: timed(signal),
+        }),
+      offer: (id, signal) =>
+        api<IncomingOffer>(`/inbound/reception/offers/${id}`, {
+          signal: timed(signal),
+        }),
+      choose: (id, registration_id, accept, signal) =>
+        api(`/inbound/reception/offers/${id}`, {
+          method: "POST",
+          body: { registration_id, accept },
+          signal: timed(signal),
+        }),
+      leave: (id) =>
+        api(`/inbound/reception/${id}`, {
+          method: "PATCH",
+          body: { available: false, media_ready: false },
+          keepalive: true,
+        }),
+    },
+    createIncomingDevice,
+    {
+      onBusy: (value) => outgoing.setInboundBusy(value),
+      input: () => outgoing.state.inputDevice,
+      outgoingMedia: () =>
+        outgoing.state.local &&
+        [
+          "connecting",
+          "ringing",
+          "connected",
+          "reconnecting",
+          "ending",
+        ].includes(outgoing.state.phase),
+      probe: async () => {
+        if (outgoing.state.phase !== "idle")
+          throw new Error(
+            "Terminez l’appel en cours avant d’ouvrir la réception.",
+          );
+        const input = outgoing.state.inputDevice;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: input ? { deviceId: { exact: input } } : true,
+        });
+        for (const track of stream.getTracks()) track.stop();
+      },
+    },
+  );
+}
+export function useIncomingPhone() {
+  const controller = useContext(IncomingContext);
+  if (!controller) throw new Error("Réception indisponible");
+  const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
+  return { controller, state };
+}
 export function PhoneProvider({
   children,
   create = makePhoneController,
@@ -77,16 +162,21 @@ export function PhoneProvider({
   create?: () => PhoneController;
 }) {
   const [controller] = useState(create);
+  const [incoming] = useState(() => makeIncomingController(controller));
+  const reception = useSyncExternalStore(incoming.subscribe, incoming.snapshot);
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const active = state.phase !== "idle";
   useLayoutEffect(() => {
     controller.activate();
+    incoming.activate();
     function leaving() {
+      incoming.dispose();
       controller.dispose();
     }
     function restored(event: PageTransitionEvent) {
       if (event.persisted) {
         controller.activate();
+        incoming.activate();
         if (controller.state.loaded) void controller.refresh();
       }
     }
@@ -97,9 +187,10 @@ export function PhoneProvider({
       window.removeEventListener("pagehide", leaving);
       window.removeEventListener("pageshow", restored);
       window.removeEventListener("ut-session-expired", leaving);
+      incoming.dispose();
       controller.dispose();
     };
-  }, [controller]);
+  }, [controller, incoming]);
   useEffect(() => {
     if (
       !state.automaticRunning ||
@@ -135,12 +226,36 @@ export function PhoneProvider({
     );
     return () => clearInterval(timer);
   }, [controller, state.automaticRunning, state.automatic?.mode]);
-  return <Context.Provider value={controller}>{children}</Context.Provider>;
+  useEffect(() => {
+    if (!reception.registrationId && !reception.offer) return;
+    const timer = window.setInterval(() => void incoming.tick(), 2000);
+    return () => clearInterval(timer);
+  }, [incoming, reception.registrationId, reception.offer?.id]);
+  useEffect(() => {
+    if (!reception.local) return;
+    function warning(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warning);
+    return () => window.removeEventListener("beforeunload", warning);
+  }, [reception.local]);
+  return (
+    <Context.Provider value={controller}>
+      <IncomingContext.Provider value={incoming}>
+        {children}
+      </IncomingContext.Provider>
+    </Context.Provider>
+  );
 }
 export function usePhone() {
   const controller = usePhoneController();
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
-  return { controller, state, busy: state.phase !== "idle" };
+  return {
+    controller,
+    state,
+    busy: state.phase !== "idle" || state.inboundBusy,
+  };
 }
 export function usePhoneController() {
   const controller = useContext(Context);
@@ -167,8 +282,9 @@ const results: Record<string, string> = {
   expired: "Préparation expirée.",
   finished: "Appel terminé.",
 };
-export function PhoneBar() {
+function ActivePhoneBar() {
   const { state, controller, busy } = usePhone();
+  if (state.inboundBusy) return null;
   if (!busy && state.automaticRunning && state.automaticNextAt !== null)
     return (
       <AutomaticWait
@@ -187,13 +303,25 @@ export function PhoneBar() {
         ) : null}
       </div>
       {state.local ? (
-        <button
-          type="button"
-          className="button danger"
-          onClick={() => controller.hangup()}
-        >
-          Raccrocher
-        </button>
+        <div className="actions">
+          <button
+            type="button"
+            className="button danger"
+            onClick={() => controller.hangup()}
+          >
+            Raccrocher
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={
+              !state.intent || state.voicemailPending.includes(state.intent.id)
+            }
+            onClick={() => void controller.voicemail()}
+          >
+            Boîte vocale
+          </button>
+        </div>
       ) : null}
       <button
         type="button"
@@ -203,6 +331,39 @@ export function PhoneBar() {
         Vérifier l’appel
       </button>
     </aside>
+  );
+}
+export function PhoneBar() {
+  const { state, controller } = usePhone();
+  useEffect(() => {
+    if (!state.voicemailPending.length && !state.voicemailFailures.length)
+      return;
+    function warning(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warning);
+    return () => window.removeEventListener("beforeunload", warning);
+  }, [state.voicemailPending.length, state.voicemailFailures.length]);
+  return (
+    <>
+      {state.voicemailFailures.map((entry) => (
+        <aside className="phone-disposition-alert" role="alert" key={entry.id}>
+          <p>
+            Le classement « Boîte vocale » de {entry.destination} n’a pas encore
+            pu être enregistré.
+          </p>
+          <button
+            className="button secondary"
+            disabled={state.voicemailPending.includes(entry.id)}
+            onClick={() => void controller.retryVoicemail(entry.id)}
+          >
+            Réessayer l’enregistrement
+          </button>
+        </aside>
+      ))}
+      <ActivePhoneBar />
+    </>
   );
 }
 function AutomaticWait({

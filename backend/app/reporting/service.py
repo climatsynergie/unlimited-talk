@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import HTTPException
 from app.identity.service import query
 
-COUNTERS = ('calls','answered','no_answer','busy','failed','cancelled','in_progress','manual','automatic',
+COUNTERS = ('calls','answered','voicemail','no_answer','busy','failed','cancelled','in_progress','manual','automatic',
             'contacts','bookings','cancelled_bookings','pauses','stops','starts','automatic_pauses',
             'talk_seconds','duration_known','duration_missing')
 
@@ -48,6 +48,7 @@ AGGREGATE = '''WITH chosen_calls AS MATERIALIZED (
  JOIN chosen_calls i ON i.id=r.intent_id GROUP BY r.intent_id
 ), progress AS (
  SELECT e.intent_id,bool_or(e.kind='status' AND e.details->>'status'='in-progress') AS answered,
+ bool_or(e.kind='disposition.voicemail') AS voicemail,
  max(CASE WHEN e.kind='status' AND e.details->>'status'='completed' THEN
    CASE WHEN e.details->>'duration_seconds' ~ '^[0-9]{1,5}$' THEN
     CASE WHEN (e.details->>'duration_seconds')::integer<=86400
@@ -56,14 +57,14 @@ AGGREGATE = '''WITH chosen_calls AS MATERIALIZED (
 ), facts AS (
  SELECT i.actor_id,i.consumed_at AS at,'call' AS kind,i.destination,i.outcome,
  i.state IN ('authorized','ringing','answered') AS ongoing,i.dialer_generation IS NOT NULL AS automatic,
- (i.outcome='completed' OR i.state='answered' OR coalesce(p.answered,false) OR coalesce(r.seconds,0)>0) AS answered,
- coalesce(p.seconds,r.seconds) AS seconds,false AS cancelled_booking
+ ((i.outcome='completed' OR i.state='answered' OR coalesce(p.answered,false) OR coalesce(r.seconds,0)>0) AND NOT coalesce(p.voicemail,false)) AS answered,
+ coalesce(p.seconds,r.seconds) AS seconds,false AS cancelled_booking,coalesce(p.voicemail,false) AS voicemail
  FROM chosen_calls i LEFT JOIN progress p ON p.intent_id=i.id LEFT JOIN recorded r ON r.intent_id=i.id
  UNION ALL
- SELECT a.created_by,a.created_at,'booking',NULL,NULL,false,false,false,NULL,a.status='cancelled'
+ SELECT a.created_by,a.created_at,'booking',NULL,NULL,false,false,false,NULL,a.status='cancelled',false
  FROM staging.appointments a WHERE a.created_by=ANY(CAST(:actors AS uuid[])) AND a.created_at>=:since AND a.created_at<:until
  UNION ALL
- SELECT a.actor_id,a.created_at,a.action,NULL,NULL,false,false,false,NULL,false
+ SELECT a.actor_id,a.created_at,a.action,NULL,NULL,false,false,false,NULL,false,false
  FROM staging.identity_audit a WHERE a.actor_id=ANY(CAST(:actors AS uuid[])) AND a.created_at>=:since AND a.created_at<:until
  AND a.action IN ('dialer.pause','dialer.stop','dialer.start','dialer.pause_automatic')
 ), buckets AS (
@@ -74,6 +75,7 @@ SELECT actor_id,CASE WHEN grouping(actor_id)=1 THEN 'global' WHEN grouping(day)=
  day::text AS day,__HOUR_VALUE__,
  count(*) FILTER(WHERE kind='call') AS calls,
  count(*) FILTER(WHERE kind='call' AND answered) AS answered,
+ count(*) FILTER(WHERE kind='call' AND voicemail) AS voicemail,
  count(*) FILTER(WHERE kind='call' AND outcome='no-answer') AS no_answer,
  count(*) FILTER(WHERE kind='call' AND outcome='busy') AS busy,
  count(*) FILTER(WHERE kind='call' AND outcome='failed') AS failed,
@@ -140,8 +142,9 @@ def report(db,period,agent_id=None):
         agents=summaries,daily=days,hourly=hours,totals=combined,
         definitions={
             'calls':'Appels lancés : réservations effectivement autorisées par Twilio ; les préparations annulées sont exclues.',
-            'answered':'Connexion téléphonique établie ; un répondeur peut aussi décrocher.',
-            'talk':'Durée fournisseur, sinon durée de l’enregistrement. Une durée absente reste inconnue.',
+            'answered':'Connexions téléphoniques établies, hors boîtes vocales signalées par les agents. Une boîte vocale non signalée ne peut pas être reconnue automatiquement.',
+            'voicemail':'Boîtes vocales signalées par les agents ; une seule par appel, exclue des décrochés clients et des durées de conversation.',
+            'talk':'Durée fournisseur, sinon durée de l’enregistrement, hors boîtes vocales signalées. Une durée absente reste inconnue.',
             'bookings':'RDV comptés à leur création, au nom de leur créateur ; les annulations indiquent le statut actuel.',
             'pauses':'Actions de pause et d’arrêt journalisées. Des pauses automatiques peuvent être incluses dans les anciens journaux.',
             'time':'Appels attribués à leur heure de lancement, durées à leur appel d’origine. Présence récente ≠ temps travaillé.'})
@@ -161,9 +164,22 @@ def live(db):
           AND v.state IN ('reserved','authorized','ringing','answered') AND (v.state<>'reserved' OR v.expires_at>clock_timestamp())
           ORDER BY v.created_at DESC LIMIT 1) i ON true
         WHERE u.role='agent' OR i.id IS NOT NULL ORDER BY lower(u.display_name),u.id''').mappings().all()
+    from app.telephony.incoming_schema import installed
+    reception={}
+    if installed(db):
+        reception={row['actor_id']:row for row in query(db,'''SELECT o.actor_id,o.id AS call_id,o.state AS call_state,
+            c.caller_number AS destination,c.connected_at AS consumed_at,o.offered_at AS call_created_at,
+            q.name AS campaign_name FROM staging.inbound_offers o JOIN staging.inbound_calls c ON c.id=o.call_id
+            JOIN staging.inbound_queues q ON q.id=c.queue_id WHERE o.state<>'finished'
+            ''').mappings()}
     items=[]
     for row in rows:
         item=dict(row)
+        incoming=reception.get(row['id'])
+        if incoming:
+            item.update(incoming);item['call_state']='answered' if incoming['call_state']=='connected' else 'ringing'
+        item['direction']='incoming' if incoming else 'outgoing' if item['call_id'] else None
+        row=item
         item['status']=('connected' if row['call_state']=='answered' else 'calling') if row['call_id'] else (
             'offline' if not row['online'] else 'booking' if row['dialer_mode']=='booking' and row['dialer_alive'] else
             'dialing' if row['dialer_mode']=='running' and row['dialer_alive'] else

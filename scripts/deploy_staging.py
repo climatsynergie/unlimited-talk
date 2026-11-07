@@ -24,7 +24,7 @@ ROOT = Path('/etc/unlimited-talk-staging')
 BASE = Path('/srv/unlimited-talk-staging')
 TEMPLATE = ROOT / 'deployment-template'
 VOICE_OPERATOR = Path('/root/unlimited-talk-voice-tools/control_manual_voice.py')
-DIALER_SCHEMAS = frozenset({'0010_dialer', '0011_long_recordings'})
+DIALER_SCHEMAS = frozenset({'0010_dialer', '0011_long_recordings', '0012_incoming_runtime'})
 
 
 class ActiveCallsError(RuntimeError):
@@ -128,6 +128,8 @@ try:
  with engine.connect() as db:
   db.execute(text('SET TRANSACTION READ ONLY'))
   active=db.execute(text("SELECT count(*) FROM staging.voice_intents WHERE state IN ('reserved','authorized','ringing','answered') AND (state<>'reserved' OR expires_at>clock_timestamp())")).scalar_one()
+  if db.execute(text("SELECT to_regclass('staging.inbound_calls')")).scalar_one() is not None:
+   active+=db.execute(text("SELECT count(*) FROM staging.inbound_calls WHERE state<>'finished' OR EXISTS(SELECT 1 FROM staging.inbound_offers o WHERE o.call_id=inbound_calls.id AND o.state<>'finished')")).scalar_one()
  print(active)
 finally:engine.dispose()
 """
@@ -199,6 +201,16 @@ def preserve_calling(labels, previous, release, *, env=None):
 
 
 def require_recording_compatibility(labels, previous):
+    if labels.get('io.unlimitedtalk.schema') == '0012_incoming_runtime':
+        state=calling_state(previous)
+        identifier=compose(previous,'ps','-q','api')
+        current=json.loads(run(['docker','inspect',identifier,'--format','{{json .Config.Labels}}']))
+        if (state.get('migration') in {'0011_long_recordings','0012_incoming_runtime'}
+                and current.get('io.unlimitedtalk.schema12-compatible')=='1'
+                and current.get('io.unlimitedtalk.incoming-runtime')=='1'
+                and current.get('org.opencontainers.image.revision')==state['revision']
+                and current.get('org.opencontainers.image.source')=='https://github.com/'+REPOSITORY):return
+        raise ValueError('Deploy the reviewed incoming compatibility release first')
     if labels.get('io.unlimitedtalk.schema') != '0011_long_recordings':
         return
     state = calling_state(previous)
@@ -215,6 +227,10 @@ def require_recording_compatibility(labels, previous):
 
 
 def require_identity_rollback_target(labels):
+    if labels.get('io.unlimitedtalk.schema') == '0012_incoming_runtime':
+        require_recording_compatibility(labels,(BASE/'current').resolve(strict=True))
+        if check_health().get('migration') in {'0011_long_recordings','0012_incoming_runtime'}:return
+        raise ValueError('Incoming compatibility is required')
     if labels.get('io.unlimitedtalk.schema') == '0011_long_recordings':
         running = check_health()
         require_recording_compatibility(labels, (BASE / 'current').resolve(strict=True))
@@ -312,17 +328,19 @@ def deploy(request):
         labels = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .Config.Labels}}'], env=env))
         if labels.get('org.opencontainers.image.revision') != revision or labels.get('org.opencontainers.image.source') != 'https://github.com/' + REPOSITORY:
             raise ValueError('Image provenance labels do not match deployment request')
-        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings','0009_inbound','0010_dialer','0011_long_recordings'}:
+        if labels.get('io.unlimitedtalk.schema') not in {'0003_contacts','0004_campaigns','0005_calendar','0006_callbacks','0007_voice','0008_recordings','0009_inbound','0010_dialer','0011_long_recordings','0012_incoming_runtime'}:
             raise ValueError('This deployment template requires a compatible worker image')
-        if labels.get('io.unlimitedtalk.schema') in {'0009_inbound','0010_dialer','0011_long_recordings'} and labels.get('io.unlimitedtalk.inbound-config') != '1':
+        if labels.get('io.unlimitedtalk.schema') in {'0009_inbound','0010_dialer','0011_long_recordings','0012_incoming_runtime'} and labels.get('io.unlimitedtalk.inbound-config') != '1':
             raise ValueError('This deployment template requires inbound settings capability')
         if labels.get('io.unlimitedtalk.schema') == '0007_voice' and labels.get('io.unlimitedtalk.voice-runtime') != '1':
             raise ValueError('This deployment template requires the reviewed Voice worker capability')
-        if labels.get('io.unlimitedtalk.schema') in {'0008_recordings','0009_inbound','0010_dialer','0011_long_recordings'} and labels.get('io.unlimitedtalk.voice-archive') != '1':
+        if labels.get('io.unlimitedtalk.schema') in {'0008_recordings','0009_inbound','0010_dialer','0011_long_recordings','0012_incoming_runtime'} and labels.get('io.unlimitedtalk.voice-archive') != '1':
             raise ValueError('This deployment template requires the recording archive capability')
         if labels.get('io.unlimitedtalk.schema') in DIALER_SCHEMAS and any(labels.get(k)!='1' for k in
                 ('io.unlimitedtalk.voice-manual','io.unlimitedtalk.dialer-compatible','io.unlimitedtalk.dialer')):
             raise ValueError('This deployment template requires the reviewed dialer capability')
+        if labels.get('io.unlimitedtalk.schema') == '0012_incoming_runtime' and any(labels.get(k)!='1' for k in ('io.unlimitedtalk.incoming-runtime','io.unlimitedtalk.schema12-compatible')):
+            raise ValueError('Incoming runtime compatibility required')
         release.mkdir(mode=0o750, parents=False, exist_ok=True)
         manifest = release / 'deployment.json'
         metadata = {'revision': revision, 'image': image}
@@ -349,7 +367,7 @@ def deploy(request):
             raise ValueError('Unexpected root-owned deployment template')
         if any(config['services'][name]['image'] != image for name in ('api','migrate','worker','dispatcher','voice-reconciler','voice-archiver')):
             raise ValueError('Migration and API must use the same tested image')
-        if labels.get('io.unlimitedtalk.schema') == '0011_long_recordings':
+        if labels.get('io.unlimitedtalk.schema') in {'0011_long_recordings','0012_incoming_runtime'}:
             if labels.get('io.unlimitedtalk.long-recordings') != '1':
                 raise ValueError('Long-recording runtime capability required')
             archiver = config['services']['voice-archiver']

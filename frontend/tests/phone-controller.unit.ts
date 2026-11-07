@@ -910,3 +910,112 @@ test("composeur : une file vide ne crée ni réservation, ni SDK, ni faux histor
   assert.equal(f.device.connections.length, 0);
   assert.equal(f.controller.state.automaticRunning, true);
 });
+
+test("boîte vocale : raccroche immédiatement et enregistre le bon appel malgré le suivant", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  const saved = deferred<unknown>();
+  const recorded: string[] = [];
+  f.api.voicemail = async (id) => {
+    recorded.push(id);
+    return saved.promise;
+  };
+  await f.controller.refresh();
+  await f.controller.start("", "+14165550101");
+  const first = f.controller.state.intent!;
+  first.state = "answered";
+  const saving = f.controller.voicemail();
+  assert.equal(f.device.call.disconnected, 1);
+  assert.deepEqual(recorded, [first.id]);
+  f.rows.set(first.id, { ...first, state: "finished", outcome: "completed" });
+  await setImmediate();
+  await f.controller.refresh();
+  await f.controller.start("", "+14165550102");
+  const second = f.controller.state.intent!;
+  assert.notEqual(second.id, first.id);
+  saved.resolve({});
+  await saving;
+  assert.equal(f.controller.state.intent?.id, second.id);
+  assert.equal(f.controller.state.voicemailPending.length, 0);
+  assert.deepEqual(recorded, [first.id]);
+});
+
+test("boîte vocale : une réponse perdue est reprise sans perdre le contexte après réactivation", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  const response = deferred<unknown>();
+  const recorded: string[] = [];
+  f.api.voicemail = async (id) => {
+    recorded.push(id);
+    return response.promise;
+  };
+  await f.controller.refresh();
+  await f.controller.start("", "+14165550101");
+  const id = f.controller.state.intent!.id;
+  const saving = f.controller.voicemail();
+  f.controller.dispose();
+  f.controller.activate();
+  response.reject(new Error("synthetic lost response"));
+  await saving;
+  assert.deepEqual(
+    f.controller.state.voicemailFailures.map((row) => row.id),
+    [id],
+  );
+  f.api.voicemail = async (target) => {
+    recorded.push(target);
+  };
+  await f.controller.retryVoicemail(id);
+  assert.equal(f.controller.state.voicemailFailures.length, 0);
+  assert.deepEqual(recorded, [id, id]);
+});
+
+test("un appel entrant suspend les départs sortants, garde la présence et laisse dix secondes après sa fin", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.refreshAutomatic();
+  f.controller.setInboundBusy(true);
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  assert.equal(f.creations(), 0);
+  assert.ok(f.heartbeatCount > 0);
+  now = 20000;
+  f.controller.setInboundBusy(false);
+  assert.equal(f.controller.state.automaticNextAt, 30000);
+  now = 29999;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 0);
+  now = 30000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+});
+
+test("boîte vocale : une ancienne réponse après réactivation ne supprime pas la nouvelle tentative", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  const old = deferred<unknown>(),
+    retry = deferred<unknown>();
+  let requests = 0;
+  f.api.voicemail = async () =>
+    ++requests === 1 ? old.promise : retry.promise;
+  await f.controller.refresh();
+  await f.controller.start("", "+14165550101");
+  const id = f.controller.state.intent!.id;
+  const saving = f.controller.voicemail();
+  f.controller.dispose();
+  f.controller.activate();
+  const resaving = f.controller.retryVoicemail(id);
+  assert.equal(requests, 2);
+  assert.deepEqual(f.controller.state.voicemailPending, [id]);
+  old.resolve({});
+  await saving;
+  assert.deepEqual(f.controller.state.voicemailPending, [id]);
+  assert.equal(f.controller.state.voicemailFailures.length, 1);
+  retry.resolve({});
+  await resaving;
+  assert.deepEqual(f.controller.state.voicemailPending, []);
+  assert.deepEqual(f.controller.state.voicemailFailures, []);
+});

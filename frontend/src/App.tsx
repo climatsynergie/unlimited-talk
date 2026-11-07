@@ -13,6 +13,7 @@ import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
 import { Conversations } from "./Conversations";
 import { Workstation } from "./Workstation";
+import { IncomingPhoneBar } from "./IncomingPhone";
 import { PhoneBar, PhoneProvider, usePhoneController } from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
@@ -398,6 +399,7 @@ function Workspace({
           </div>
         </header>
         <PhoneBar />
+        <IncomingPhoneBar />
         <main id="main" className="workspace-main">
           {error ? <Notice error>{error}</Notice> : null}
           {selected === "account" ||
