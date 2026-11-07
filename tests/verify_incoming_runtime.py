@@ -10,7 +10,7 @@ compose=['sudo','-n','docker','compose','--project-directory',str(root),*shlex.s
 config=json.loads(subprocess.check_output([*compose,'config','--format','json']))
 assert 'db' in config['services'] and config['services']['api']['environment']['DB_HOST']=='db'
 assert config['services']['api']['environment']['COMMUNICATIONS_MODE']=='disabled'
-future=(root/'deployment/telephony/0012_incoming_runtime.py').read_text()
+future=(root/'backend/migrations/versions/0012_incoming_runtime.py').read_text()
 upgrade='''from sqlalchemy import text
 from alembic.migration import MigrationContext
 from alembic.operations import Operations

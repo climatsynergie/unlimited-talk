@@ -1,6 +1,6 @@
 # Réception des appels et classements agents
 
-La livraison de compatibilité conserve la migration courante `0011_long_recordings`.
+La livraison de compatibilité `40e4f6f8223d0ae3c489a0bf04abd034577507e1` conserve la migration `0011_long_recordings`.
 Elle contient l’intégralité du futur runtime entrant, mais les nouvelles commandes
 ne peuvent recevoir de média avant la migration additive et la connexion d’une
 ligne. Les fonctions « Boîte vocale » et « Parle anglais » fonctionnent sur le
@@ -30,10 +30,10 @@ Ne pas contacter. Les RDV/rappels futurs et restrictions existants sont protég�
    réellement servie et les étiquettes `schema12-compatible=1` et
    `incoming-runtime=1`. Ne pas avancer main vers la seconde livraison avant
    d’avoir déployé celle-ci : Deploy staging exige le SHA actuel de main.
-2. Copier le fichier revu `deployment/telephony/0012_incoming_runtime.py` dans
-   `backend/migrations/versions/0012_incoming_runtime.py`, retirer sa copie future,
-   passer l’étiquette Docker de schéma à 12 et adapter les preuves de migration
-   et de readiness. Garder la compatibilité 11/12 du runtime précédent. Publier,
+2. Cette seconde livraison place le fichier revu dans
+   `backend/migrations/versions/0012_incoming_runtime.py` et porte l’étiquette
+   Docker à 12. Les preuves CI couvrent la migration de données existantes et le
+   repli sur l’image exacte de compatibilité ci-dessus. Publier,
    tester et déployer par le même workflow ; aucune DDL manuelle sur la base.
 3. Avant cette seconde livraison, installer les opérateurs root revus
    `deploy_staging.py`, `control_manual_voice.py`, `resume_managed_runtime.py`,
@@ -62,7 +62,9 @@ Ne pas contacter. Les RDV/rappels futurs et restrictions existants sont protég�
    par GET avant de rendre la réception disponible aux agents. Une réponse POST
    perdue est résolue par lecture, sans créer d’appel. `restore` restaure le
    snapshot si la route n’a pas été modifiée par un tiers. Aucun SMS, achat,
-   appel de test ou changement de trunk n’est effectué par cet opérateur.
+   appel de test ou modification de la configuration d’un trunk n’est effectué
+   par cet opérateur. L’association éventuelle de cette seule ligne à un trunk
+   ou à une application est sauvegardée puis remplacée pour permettre le webhook.
 
 ## Fonctionnement et validation
 

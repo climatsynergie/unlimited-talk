@@ -32,8 +32,10 @@ def ready(expected,version=None):
         if version: assert row['migration']==version
 
 
-ready(200,'0011_long_recordings')
+ready(200,'0012_incoming_runtime')
 try:
+    sql("UPDATE staging.alembic_version SET version_num='0011_long_recordings'")
+    ready(200,'0011_long_recordings')
     sql("UPDATE staging.alembic_version SET version_num='0010_dialer'")
     ready(503)
     sql("UPDATE staging.alembic_version SET version_num='0009_inbound'")
@@ -51,6 +53,6 @@ try:
     sql("UPDATE staging.alembic_version SET version_num='9999_unknown'")
     ready(503)
 finally:
-    sql("UPDATE staging.alembic_version SET version_num='0011_long_recordings'")
-ready(200,'0011_long_recordings')
-print('Application schema guard: older and unknown revisions rejected, current revision restored: PASS')
+    sql("UPDATE staging.alembic_version SET version_num='0012_incoming_runtime'")
+ready(200,'0012_incoming_runtime')
+print('Application schema guard: preceding compatibility accepted, incompatible/unknown revisions rejected, current revision restored: PASS')
