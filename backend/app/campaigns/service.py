@@ -68,8 +68,9 @@ def contact_access(db,campaign_id,contact_id):
     return row
 
 
-def move(db,user,campaign_id,contact_id,stage_id,version,request_id):
+def move(db,user,campaign_id,contact_id,stage_id,version,request_id,source_intent_id=None):
     body=dict(action='card.moved',contact=str(contact_id),stage=str(stage_id),version=version)
+    if source_intent_id is not None:body['source_intent_id']=str(source_intent_id)
     previous=replay(db,user,campaign_id,request_id,body)
     if previous is not None:
         return previous
@@ -78,12 +79,26 @@ def move(db,user,campaign_id,contact_id,stage_id,version,request_id):
     if contact is None:
         raise HTTPException(404,'Contact introuvable.')
     card=contact_access(db,campaign_id,contact_id)
-    if card['version']!=version:
-        raise HTTPException(409,'Cette fiche a changé. Actualisez le pipeline avant de la déplacer.')
     target=query(db,'SELECT * FROM staging.campaign_stages WHERE campaign_id=:campaign AND id=:id AND is_active',
         campaign=campaign_id,id=stage_id).mappings().first()
     if target is None:
         raise HTTPException(400,'Étape invalide pour cette campagne.')
+    source=None
+    if source_intent_id is not None:
+        source=query(db,'''SELECT actor_id,campaign_id,contact_id,membership_version,settled_membership_version,state
+            FROM staging.voice_intents WHERE id=:id''',id=source_intent_id).mappings().first()
+        if (not source or source['actor_id']!=user['id'] or source['campaign_id']!=campaign_id or source['contact_id']!=contact_id):
+            raise HTTPException(403,'Cet appel ne correspond pas à cette fiche ou à votre compte.',headers={'X-Error-Code':'call_context_mismatch'})
+    if card['version']!=version:
+        # Rebase only this agent's explicit restriction over the exact automatic
+        # completion of the very same call. Any intervening human change makes
+        # the membership version differ from that settled version and wins.
+        automatic_only=(target['kind'] in {'non_interested','do_not_contact'} and source
+            and source['state']=='finished' and source['membership_version']==version
+            and source['settled_membership_version']==card['version'])
+        if not automatic_only:
+            raise HTTPException(409,'Cette fiche a changé. Actualisez le pipeline avant de la déplacer.',headers={'X-Error-Code':'stale_campaign_contact'})
+        version=card['version']
     if contact['do_not_contact'] and target['kind']!='do_not_contact':
         raise HTTPException(409,'Ce contact est bloqué globalement. Un administrateur doit lever la restriction.')
     if contact['non_interested'] and target['kind'] not in {'non_interested','do_not_contact'}:

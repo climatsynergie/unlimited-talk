@@ -303,7 +303,14 @@ async function setup(page: Page, role = "agent", sameContact = false) {
       } else if (action === "move") {
         moveRequests.push(body.request_id);
         if (!appliedMoves.has(body.request_id)) {
-          expect(body.version).toBe(versions.get(contact) || 0);
+          if (body.version !== (versions.get(contact) || 0))
+            return route.fulfill({
+              status: 409,
+              json: {
+                detail:
+                  "Cette fiche a changé. Actualisez le pipeline avant de la déplacer.",
+              },
+            });
           stageByContact.set(contact, body.stage_id);
           versions.set(contact, body.version + 1);
           moves.push({ contact, stage: body.stage_id });
@@ -401,6 +408,8 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     controls,
     notes,
     moves,
+    versions,
+    stageByContact,
     moveRequests,
     qualifications,
     restrictions,
@@ -574,7 +583,7 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
 }) => {
   const f = await setup(page);
   await start(page);
-  const sheet = page.getByRole("region", {
+  const sheet = page.locator(".current-call-sheet").getByRole("region", {
     name: "Fiche du contact",
     exact: true,
   });
@@ -588,29 +597,44 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   await sheet
     .getByRole("textbox", { name: "Ajouter une note", exact: true })
     .fill("Client propriétaire, souhaite un rendez-vous.");
+  await sheet
+    .getByRole("group", { name: /Le client est-il propriétaire/ })
+    .getByRole("radio", { name: "Oui", exact: true })
+    .check();
   const first = [...f.rows.values()][0];
   first.state = "finished";
   first.outcome = "completed";
   await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
   await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
   await expect(
-    page.getByText(/Vous complétez encore la fiche de l’appel précédent/),
+    sheet.getByRole("heading", { name: "Client 2", exact: true }),
   ).toBeVisible();
+  const previous = page.locator(".previous-call-sheet");
+  await sheet
+    .getByRole("group", { name: /Le client est-il propriétaire/ })
+    .getByRole("radio", { name: "Non", exact: true })
+    .check();
+  await previous.locator("summary").click();
   await expect(
-    sheet.getByRole("heading", { name: "Client 1", exact: true }),
+    previous
+      .getByRole("group", { name: /Le client est-il propriétaire/ })
+      .getByRole("radio", { name: "Oui", exact: true }),
+  ).toBeChecked();
+  await expect(
+    previous.getByRole("heading", { name: "Client 1", exact: true }),
   ).toBeVisible();
   f.failures.note = true;
-  await sheet
+  await previous
     .getByRole("button", { name: "Enregistrer la note", exact: true })
     .click();
-  await expect(sheet.getByRole("alert")).toContainText(
+  await expect(previous.getByRole("alert")).toContainText(
     "Enregistrement indisponible",
   );
   await expect(
-    sheet.getByRole("textbox", { name: "Ajouter une note", exact: true }),
+    previous.getByRole("textbox", { name: "Ajouter une note", exact: true }),
   ).toHaveValue("Client propriétaire, souhaite un rendez-vous.");
   f.failures.note = false;
-  await sheet
+  await previous
     .getByRole("button", { name: "Enregistrer la note", exact: true })
     .click();
   await expect.poll(() => f.notes.length).toBe(1);
@@ -618,6 +642,12 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
   expect(f.notes[0].content).toBe(
     "Client propriétaire, souhaite un rendez-vous.",
   );
+  await expect(previous).toHaveCount(0);
+  await expect(
+    sheet
+      .getByRole("group", { name: /Le client est-il propriétaire/ })
+      .getByRole("radio", { name: "Non", exact: true }),
+  ).toBeChecked();
   await expect(
     sheet.getByRole("heading", { name: "Client 2", exact: true }),
   ).toBeVisible();
@@ -672,6 +702,103 @@ test("fiche pendant l’appel : conserve la saisie sur le bon client lorsque l�
     })
     .click();
   await expect.poll(() => f.moves.length).toBe(2);
+});
+
+test("fin d’appel : une confirmation Non intéressé périmée se recharge et reste liée au bon contact", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const current = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await expect(
+    current.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  await current
+    .getByRole("combobox", { name: "Étape du pipeline", exact: true })
+    .selectOption("stage-restricted");
+  await current
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  const first = [...f.rows.values()][0];
+  await page
+    .getByRole("button", { name: "Mettre en pause", exact: true })
+    .click();
+  f.versions.set(first.contact_id, 1);
+  f.stageByContact.set(first.contact_id, "stage-other");
+  first.state = "finished";
+  first.outcome = "no-answer";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  await current
+    .getByRole("button", {
+      name: "Confirmer pour toutes les campagnes",
+      exact: true,
+    })
+    .click();
+  await expect(current.getByText(/La fiche a été actualisée/)).toBeVisible();
+  expect(f.moves).toHaveLength(0);
+  await current
+    .getByRole("button", {
+      name: "Confirmer pour toutes les campagnes",
+      exact: true,
+    })
+    .click();
+  await expect.poll(() => f.moves.length).toBe(1);
+  expect(f.moves[0]).toEqual({
+    contact: first.contact_id,
+    stage: "stage-restricted",
+  });
+  await page
+    .getByRole("button", { name: "Reprendre les appels", exact: true })
+    .click();
+  await expect.poll(() => f.nextCount, { timeout: 20000 }).toBe(2);
+  await expect(
+    current.getByRole("heading", { name: "Client 2", exact: true }),
+  ).toBeVisible();
+  await expect(
+    current.getByRole("region", {
+      name: "Confirmer la restriction",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  expect(f.moves.every((move) => move.contact === first.contact_id)).toBe(true);
+});
+
+test("fiche courante : une ancienne confirmation ne masque pas le client suivant", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const current = page.locator(".current-call-sheet");
+  await expect(
+    page.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Étape du pipeline", exact: true })
+    .selectOption("stage-restricted");
+  await page
+    .getByRole("button", { name: "Déplacer vers cette étape", exact: true })
+    .click();
+  const first = [...f.rows.values()][0];
+  first.state = "finished";
+  first.outcome = "no-answer";
+  await page.evaluate(() => window.phoneProof.call!.emit("disconnect"));
+  await expect.poll(() => f.nextCount, { timeout: 20000 }).toBe(2);
+  await expect(
+    current.getByRole("heading", { name: "Client 2", exact: true }),
+  ).toBeVisible();
+  const previous = page.locator(".previous-call-sheet");
+  await previous.locator("summary").click();
+  await expect(
+    previous.getByRole("heading", { name: "Client 1", exact: true }),
+  ).toBeVisible();
+  await previous.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(previous).toHaveCount(0);
+  await expect(
+    current.getByRole("heading", { name: "Client 2", exact: true }),
+  ).toBeVisible();
 });
 
 test("qualification : sans RDV, la fiche passe directement au prochain contact", async ({

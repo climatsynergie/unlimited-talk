@@ -1049,6 +1049,7 @@ export function EnrollContacts({
 export function CallContactDialog({
   campaignId,
   contactId,
+  callId,
   admin,
   onClose,
   inline = false,
@@ -1056,6 +1057,7 @@ export function CallContactDialog({
 }: {
   campaignId: string;
   contactId: string;
+  callId?: string;
   admin: boolean;
   onClose: () => void;
   inline?: boolean;
@@ -1106,7 +1108,7 @@ export function CallContactDialog({
       onEditingChange={onEditingChange}
       onClose={onClose}
       onMove={async (card, stage) => {
-        const key = `${campaignId}:${contactId}:${card.version}:${stage.id}`;
+        const key = `${campaignId}:${contactId}:${callId ?? ""}:${card.version}:${stage.id}`;
         if (moveRequest.current?.key !== key)
           moveRequest.current = { key, id: crypto.randomUUID() };
         await api(`/campaigns/${campaignId}/contacts/${contactId}/move`, {
@@ -1115,6 +1117,10 @@ export function CallContactDialog({
             request_id: moveRequest.current.id,
             stage_id: stage.id,
             version: card.version,
+            ...(callId &&
+            ["non_interested", "do_not_contact"].includes(stage.kind)
+              ? { source_intent_id: callId }
+              : {}),
           },
         });
         moveRequest.current = null;
@@ -1209,6 +1215,7 @@ function CardDetail({
   const qualificationLoaded = useRef(false);
   const qualificationRequest = useRef(crypto.randomUUID());
   const [pendingStage, setPendingStage] = useState<Stage | null>(null);
+  const [moveNotice, setMoveNotice] = useState("");
   const noteId = useRef(crypto.randomUUID());
   const actionId = useRef(crypto.randomUUID());
   useEffect(() => {
@@ -1249,6 +1256,7 @@ function CardDetail({
       });
     return () => abort.abort();
   }, [campaign.id, identifier, revision, reloadKey]);
+  const stageDirty = !!data && !!target && target !== data.contact.stage_id;
   useEffect(() => {
     onEditingChange?.(
       !!note.trim() ||
@@ -1256,7 +1264,8 @@ function CardDetail({
         callback ||
         busy ||
         !!pendingStage ||
-        reconsider,
+        reconsider ||
+        stageDirty,
     );
   }, [
     note,
@@ -1265,6 +1274,7 @@ function CardDetail({
     busy,
     pendingStage,
     reconsider,
+    stageDirty,
     onEditingChange,
   ]);
   function changeQualification(value: QualificationValue) {
@@ -1310,11 +1320,40 @@ function CardDetail({
     if (!data || busy) return;
     setBusy(true);
     setError("");
+    setMoveNotice("");
     try {
       await onMove(data.contact, stage);
       setPendingStage(null);
     } catch (e) {
-      setError(message(e));
+      if (e instanceof ApiError && e.status === 409) {
+        try {
+          const fresh = await api<Detail>(
+            `/campaigns/${campaign.id}/contacts/${identifier}`,
+          );
+          setData(fresh);
+          const alreadyApplied =
+            fresh.contact.stage_id === stage.id ||
+            (stage.kind === "non_interested" && fresh.contact.non_interested) ||
+            (stage.kind === "do_not_contact" && fresh.contact.do_not_contact);
+          const forbidden =
+            (fresh.contact.do_not_contact && stage.kind !== "do_not_contact") ||
+            (fresh.contact.non_interested &&
+              !["non_interested", "do_not_contact"].includes(stage.kind));
+          setTarget(
+            alreadyApplied || forbidden ? fresh.contact.stage_id : stage.id,
+          );
+          if (alreadyApplied || forbidden) setPendingStage(null);
+          setMoveNotice(
+            alreadyApplied
+              ? "Ce statut est déjà enregistré sur la fiche."
+              : forbidden
+                ? "La fiche a été actualisée. Consultez la restriction du contact avant de continuer."
+                : "La fiche a été actualisée après une autre modification. Confirmez de nouveau votre choix.",
+          );
+        } catch (refreshError) {
+          setError(message(refreshError));
+        }
+      } else setError(message(e));
     } finally {
       setBusy(false);
     }
@@ -1433,6 +1472,7 @@ function CardDetail({
     >
       {error ? <Notice error>{error}</Notice> : null}
       {loadError ? <Notice error>{loadError}</Notice> : null}
+      {moveNotice ? <Notice>{moveNotice}</Notice> : null}
       <button
         className="button secondary"
         disabled={busy || detailLoading}
@@ -1440,6 +1480,10 @@ function CardDetail({
           actionId.current = crypto.randomUUID();
           setRestore(false);
           setRemove(false);
+          setPendingStage(null);
+          setMoveNotice("");
+          setError("");
+          setTarget(data?.contact.stage_id || "");
           if (!qualificationDirty) qualificationLoaded.current = false;
           setRevision((n) => n + 1);
         }}
@@ -1724,7 +1768,11 @@ function CardDetail({
                 callback ||
                 !campaign.is_active
               }
-              onChange={(e) => setTarget(e.target.value)}
+              onChange={(e) => {
+                setTarget(e.target.value);
+                setPendingStage(null);
+                setMoveNotice("");
+              }}
             >
               {stages.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -1770,7 +1818,12 @@ function CardDetail({
                 <button
                   className="button secondary"
                   disabled={busy}
-                  onClick={() => setPendingStage(null)}
+                  onClick={() => {
+                    setPendingStage(null);
+                    setTarget(data.contact.stage_id);
+                    setMoveNotice("");
+                    setError("");
+                  }}
                 >
                   Annuler
                 </button>

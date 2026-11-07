@@ -330,6 +330,12 @@ test("calendrier : vues visuelles, couleurs, fuseaux et fiche du rendez-vous", a
     .click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Jour", exact: true }).click();
+  const scrolling = page
+    .locator(".calendar-canvas [data-calendar-scroll]")
+    .first();
+  await expect(scrolling).toHaveAttribute("tabindex", "0");
+  await scrolling.focus();
+  await expect(scrolling).toBeFocused();
   await page.screenshot({
     path: "/tmp/ut-calendar-mobile.png",
     fullPage: true,

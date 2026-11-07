@@ -105,6 +105,8 @@ jobs:
         run: python3 tests/verify_reporting.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
+      - name: Verify real browser, API and PostgreSQL call-disposition workflow
+        run: python3 tests/verify_agent_workflow.py
       - name: Verify additive schema readiness guards
         run: python3 tests/verify_schema_revision.py
       - name: Verify rollback preserves the identity schema and data

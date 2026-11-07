@@ -12,6 +12,53 @@ type Campaign = {
   automatic_enabled: boolean;
 };
 
+type ContactSheet = {
+  campaign: string;
+  id: string;
+  call: string;
+  destination: string;
+};
+
+function AgentCallSheet({
+  entry,
+  current,
+  admin,
+  onEditingChange,
+}: {
+  entry: ContactSheet;
+  current: boolean;
+  admin: boolean;
+  onEditingChange: (entry: ContactSheet, editing: boolean) => void;
+}) {
+  const { campaign, id, call, destination } = entry;
+  const editing = useCallback(
+    (value: boolean) =>
+      onEditingChange({ campaign, id, call, destination }, value),
+    [campaign, id, call, destination, onEditingChange],
+  );
+  return (
+    <details
+      className={current ? "current-call-sheet" : "previous-call-sheet"}
+      open={current ? true : undefined}
+    >
+      <summary>
+        {current
+          ? "Fiche actuelle"
+          : `Fiche précédente · ${destination} · À terminer`}
+      </summary>
+      <CallContactDialog
+        campaignId={campaign}
+        contactId={id}
+        callId={call}
+        admin={admin}
+        inline
+        onEditingChange={editing}
+        onClose={() => editing(false)}
+      />
+    </details>
+  );
+}
+
 export function AutoDialerPanel({
   admin,
   beforeStart,
@@ -25,11 +72,7 @@ export function AutoDialerPanel({
   const [error, setError] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [contact, setContact] = useState<{
-    campaign: string;
-    id: string;
-    call: string;
-  } | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, ContactSheet>>({});
   const [revision, setRevision] = useState(0);
   const lifetime = useRef(0);
   useEffect(() => {
@@ -109,31 +152,42 @@ export function AutoDialerPanel({
     booking: "Suspendu pendant la saisie du rendez-vous",
   };
   const active = state.intent || state.lastIntent;
-  const shownCampaign = contact?.campaign || active?.campaign_id;
-  const shownContact = contact?.id || active?.contact_id;
-  const shownCall = contact?.call || active?.id;
+  const currentContact: ContactSheet | null =
+    active?.campaign_id && active.contact_id
+      ? {
+          campaign: active.campaign_id,
+          id: active.contact_id,
+          call: active.id,
+          destination: active.destination || "",
+        }
+      : null;
   const editingContact = useCallback(
-    (editing: boolean) => {
-      setContact((previous) => {
-        if (!editing || !shownCampaign || !shownContact || !shownCall)
-          return null;
+    (entry: ContactSheet, editing: boolean) => {
+      setDrafts((previous) => {
+        if (!editing) {
+          if (!previous[entry.call]) return previous;
+          const next = { ...previous };
+          delete next[entry.call];
+          return next;
+        }
         if (
-          previous?.campaign === shownCampaign &&
-          previous.id === shownContact &&
-          previous.call === shownCall
+          previous[entry.call]?.id === entry.id &&
+          previous[entry.call]?.campaign === entry.campaign
         )
           return previous;
-        return { campaign: shownCampaign, id: shownContact, call: shownCall };
+        return { ...previous, [entry.call]: entry };
       });
     },
-    [shownCampaign, shownContact, shownCall],
+    [],
   );
-  const previousContact =
-    !!contact &&
-    !!active &&
-    (contact.campaign !== active.campaign_id ||
-      contact.id !== active.contact_id ||
-      contact.call !== active.id);
+  const previousContacts = Object.values(drafts).filter(
+    (entry) => entry.call !== currentContact?.call,
+  );
+  // Stable keys preserve each previous form when React moves it beneath the
+  // current call. No field or late response can be transferred to another lead.
+  const sheets = currentContact
+    ? [currentContact, ...previousContacts]
+    : previousContacts;
   const selectedCampaign = campaigns.find(
     (campaign) => campaign.id === state.campaignId,
   );
@@ -304,24 +358,21 @@ export function AutoDialerPanel({
           }}
         />
       ) : null}
-      {previousContact ? (
-        <Notice>
-          Vous complétez encore la fiche de l’appel précédent. Enregistrez la
-          note ou terminez le formulaire de rendez-vous ou de rappel pour
-          afficher le contact de l’appel en cours.
-        </Notice>
+      {previousContacts.length ? (
+        <p className="audio-hint" role="status">
+          {previousContacts.length} fiche(s) précédente(s) à terminer, sous la
+          fiche actuelle.
+        </p>
       ) : null}
-      {shownCampaign && shownContact ? (
-        <CallContactDialog
-          key={`${shownCampaign}-${shownContact}-${shownCall}`}
-          campaignId={shownCampaign}
-          contactId={shownContact}
+      {sheets.map((entry) => (
+        <AgentCallSheet
+          key={entry.call}
+          entry={entry}
+          current={entry.call === currentContact?.call}
           admin={admin}
-          inline
           onEditingChange={editingContact}
-          onClose={() => setContact(null)}
         />
-      ) : null}
+      ))}
     </section>
   );
 }

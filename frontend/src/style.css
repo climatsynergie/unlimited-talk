@@ -4453,3 +4453,26 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   gap: 0.4rem;
   margin-block: 0.8rem;
 }
+.current-call-sheet > summary {
+  display: none;
+}
+.previous-call-sheet {
+  margin-block: 1rem;
+  border: 1px solid #cbd9e9;
+  border-radius: 12px;
+  background: #f6faff;
+}
+.previous-call-sheet > summary {
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  color: #174a75;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.previous-call-sheet[open] > .call-contact-sheet {
+  padding: 0 1rem 1rem;
+}
+.calendar-canvas [data-calendar-scroll]:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: -3px;
+}

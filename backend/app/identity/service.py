@@ -92,6 +92,8 @@ def authenticate(db, request, *, enrollment=False, recent=False, touch=True):
                  if touch else 'SELECT token_hash FROM staging.identity_sessions WHERE token_hash=:token')
     if query(db,statement,token=row['session_hash']).first() is None:
         raise HTTPException(401, 'Connexion requise')
+    state=getattr(request,'state',None)
+    if state is not None:state.actor_id=str(row['id'])
     return row
 
 

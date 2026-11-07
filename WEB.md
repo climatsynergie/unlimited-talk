@@ -201,10 +201,12 @@ the existing view while background data loads.
 
 The dialer displays the current contact sheet inline, so the global hang-up
 button remains available while an agent writes notes or books an appointment.
-An unfinished note, appointment/callback form or pending mutation keeps that
-sheet attached to its original contact if the next call starts. A notice explains
-why the previous sheet remains visible; finishing or cancelling the edit follows
-the current call again. Drafts live only in the mounted page, and notes require
+The current call always displays its own sheet first. An unfinished note,
+appointment/callback form, selected stage or pending mutation stays attached to
+its original call in a collapsed “Fiche précédente” section below. Stable call
+keys preserve that form without transferring inputs or late responses to the
+next contact. Completing or cancelling its last edit removes the old section.
+Separate questionnaire radio groups also isolate answers across open sheets. Drafts live only in the mounted page, and notes require
 an explicit save. Imported profile fields remain read-only. The legacy structured
 qualification is visible during the call. The live sheet follows the next contact
 without requiring a save if no appointment is booked. Outside the live dialer,
@@ -215,3 +217,31 @@ qualification edits cannot change that earlier snapshot. See
 [QUALIFICATION.md](QUALIFICATION.md) for the exact questionnaire and concurrency
 contract. Appointment notes are saved with the appointment, and booking uses the
 existing atomic appointment/pipeline update.
+
+
+## Agent workflow release gate
+
+`tests/verify_agent_workflow.py` runs two browser → real API → local PostgreSQL
+scenarios in addition to the normal browser suite. They exercise real agent
+sessions, automatic reservations, signed synthetic provider completion,
+“Non intéressé”, moving to the next client and rejection of a disposition bound
+to a different call/contact. One scenario changes the pipeline between completion
+and confirmation: the UI reloads metadata while preserving drafts, then requires
+confirmation again. The other confirms on the first click after the automatic
+completion update. Independent SQL evidence prevents skipped tests from passing
+the gate. Foundation CI must pass this gate before publishing the tested image.
+
+Only the media SDK is simulated; the fixture emits no PSTN calls or SMS. Its
+server is mounted temporarily from `tests/`, is excluded from the application
+image, and requires a disposable local database marked `synthetic_only`. The
+wrapper restores the normal API command in a `finally` block. These checks prove
+application transitions and isolation, not real carrier audio, microphone quality
+or twenty simultaneous media sessions.
+
+Failed requests and requests slower than one second now log a structured route
+template, actor, image revision, status, duration and request reference. Unexpected
+failures log exception class and code locations without submitted values or
+exception text. The UI shows a short reference for 409/500 errors. Healthy fast
+phone polling stays out of these incident logs. Investigate by full request ID
+and revision before changing production data; do not log call destinations,
+notes, passwords, tokens or qualification answers.

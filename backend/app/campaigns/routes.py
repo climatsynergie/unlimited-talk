@@ -87,6 +87,7 @@ class Move(Body):
     request_id:uuid.UUID
     stage_id:uuid.UUID
     version:int=Field(ge=0)
+    source_intent_id:uuid.UUID|None=None
 
 
 class QualificationSave(Body):
@@ -367,7 +368,7 @@ def enroll(identifier:uuid.UUID,body:Enroll,request:Request):
 def move(identifier:uuid.UUID,contact_id:uuid.UUID,body:Move,request:Request):
     with request.app.state.engine.begin() as db:
         user=authenticate(db,request);service.access(db,user,identifier)
-        return service.move(db,user,identifier,contact_id,body.stage_id,body.version,body.request_id)
+        return service.move(db,user,identifier,contact_id,body.stage_id,body.version,body.request_id,source_intent_id=body.source_intent_id)
 
 
 @router.get('/{identifier}/contacts/{contact_id}')

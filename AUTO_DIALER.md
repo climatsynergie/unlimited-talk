@@ -102,6 +102,18 @@ peut accorder au numéro déjà vérifié une continuité jusqu’à 48 heures d
 dernière vérification. Un numéro retiré, désactivé, jamais vérifié ou une erreur
 d’authentification ne bénéficie pas de cette continuité.
 
+La fiche de l’appel courant reste toujours affichée en premier. Une note ou un
+formulaire précédent non terminé reste dans une section repliable liée à son
+appel ; il ne retient plus l’affichage sur l’ancien client. Sans rendez-vous ni
+autre saisie à conserver, la qualification repart sur le contact suivant.
+
+Une confirmation « Non intéressé » ou « Ne pas contacter » peut suivre la seule
+mise à jour automatique de fin du même appel sans second clic. Le serveur vérifie
+l’agent, la campagne, le contact et les versions de réservation et de classement
+figées dans cet appel. Un changement humain intervenu depuis conserve la priorité :
+la fiche se recharge et une nouvelle confirmation explicite est requise. Les
+anciennes requêtes sans contexte d’appel conservent leur garde de version strict.
+
 ## Déploiements courants
 
 Terminer les appels et mettre les composeurs en pause, puis utiliser **Deploy

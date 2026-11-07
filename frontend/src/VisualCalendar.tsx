@@ -100,7 +100,31 @@ export default function VisualCalendar({ userId }: { userId: string }) {
   const [knownAgents, setKnownAgents] = useState<[string, string][]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const firstDate = useRef(date);
+  const canvas = useRef<HTMLDivElement>(null);
   const loadedWindow = useRef("");
+  useEffect(() => {
+    const root = canvas.current;
+    if (!root) return;
+    // FullCalendar 7.1.3's internalScroller (.fc-ox) can have no focus target
+    // in empty/mobile views. Focus an existing cell, preserving the widget's
+    // table/row hierarchy across view replacements.
+    const accessibleScrollers = () => {
+      root.querySelectorAll<HTMLElement>(".fc-ox").forEach((scroller) => {
+        const cell =
+          scroller.querySelector<HTMLElement>('[role="gridcell"]') ||
+          scroller.querySelector<HTMLElement>('[role="cell"]') ||
+          scroller.querySelector<HTMLElement>('[role="columnheader"]');
+        if (cell) {
+          cell.tabIndex = 0;
+          cell.dataset.calendarScroll = "";
+        }
+      });
+    };
+    accessibleScrollers();
+    const observer = new MutationObserver(accessibleScrollers);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   const changedDates = useCallback((info: DatesSetInfo) => {
     setDate(day(info.view.currentStart.toISOString(), info.timeZone));
     setRange((previous) =>
@@ -406,6 +430,7 @@ export default function VisualCalendar({ userId }: { userId: string }) {
             </Notice>
           ) : null}
           <div
+            ref={canvas}
             className={`calendar-canvas view-${view}`}
             aria-label="Grille des rendez-vous"
             aria-busy={loading}

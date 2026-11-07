@@ -34,6 +34,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public reference = "",
   ) {
     super(message);
   }
@@ -89,7 +90,12 @@ export async function api<T>(
         : response.status === 422
           ? "Vérifiez les champs du formulaire."
           : "Le service est indisponible. Réessayez dans un instant.";
-    throw new ApiError(response.status, message);
+    const reference = response.headers.get("X-Request-ID") || "";
+    throw new ApiError(
+      response.status,
+      message,
+      /^[a-f0-9]{32}$/.test(reference) ? reference : "",
+    );
   }
   if (payload === null)
     throw new ApiError(
@@ -100,6 +106,12 @@ export async function api<T>(
 }
 
 export function message(error: unknown): string {
+  if (
+    error instanceof ApiError &&
+    error.reference &&
+    (error.status >= 500 || error.status === 409)
+  )
+    return `${error.message} Référence : ${error.reference.slice(0, 12)}.`;
   return error instanceof Error
     ? error.message
     : "Une erreur est survenue. Réessayez.";

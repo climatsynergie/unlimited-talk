@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
+import json
+import traceback
 import os
 import time
 import uuid
@@ -98,14 +100,31 @@ async def validation_error(request, error):
 async def request_metadata(request: Request, call_next):
     request_id = uuid.uuid4().hex
     started = time.monotonic()
-    response = await call_next(request)
+    failure=None
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        # Diagnostic locations, never exception messages, request bodies,
+        # tokens, query strings or customer fields.
+        failure={'exception_type':type(error).__name__,'frames':[
+            {'file':Path(frame.filename).name,'line':frame.lineno,'function':frame.name}
+            for frame in traceback.extract_tb(error.__traceback__)[-10:]]}
+        response=JSONResponse(status_code=500,content={'detail':'Une erreur est survenue. Réessayez ou communiquez la référence au responsable.'})
     response.headers['X-Request-ID'] = request_id
     response.headers['Cache-Control'] = 'public, max-age=31536000, immutable' if request.url.path.startswith('/assets/') and response.status_code == 200 else 'no-store'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    logger.info('request_id=%s method=%s path=%s status=%s duration_ms=%.1f',
-                request_id, request.method, request.url.path, response.status_code,
-                (time.monotonic() - started) * 1000)
+    duration_ms=round((time.monotonic()-started)*1000,1)
+    # Frequent healthy phone polls must not rotate genuine incidents out of logs.
+    if not failure and response.status_code<400 and duration_ms<1000:return response
+    route=getattr(request.scope.get('route'),'path','unmatched')
+    record={'event':'request_failed' if failure else 'http_request','request_id':request_id,
+            'method':request.method,'route':route,'status':response.status_code,
+            'duration_ms':duration_ms,
+            'actor_id':getattr(request.state,'actor_id',None),'revision':os.environ.get('APP_REVISION','development'),
+            'error_code':response.headers.get('X-Error-Code'),**(failure or {})}
+    emit=logger.error if failure or response.status_code>=500 else logger.info
+    emit(json.dumps(record,separators=(',',':')))
     return response
 
 
