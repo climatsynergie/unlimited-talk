@@ -14,9 +14,13 @@ def dispatch_once(engine, publish):
         rows=query(db,"""SELECT id FROM staging.contact_imports WHERE status IN ('queued','running')
             AND next_publish_at<=now() ORDER BY next_publish_at LIMIT 10 FOR UPDATE SKIP LOCKED""").mappings().all()
         for row in rows:
-            publish(str(row['id']))
             query(db,"UPDATE staging.contact_imports SET next_publish_at=now()+interval '30 seconds' WHERE id=:id",id=row['id'])
-        return len(rows)
+    # A fast consumer must see the committed claim, not skip our row lock and
+    # acknowledge a task that did no work. The durable lease also reconciles a
+    # crash or publication failure; duplicate delivery remains safe in SQL.
+    for row in rows:
+        publish(str(row['id']))
+    return len(rows)
 
 
 def main():

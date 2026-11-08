@@ -46,6 +46,9 @@ with engine.begin() as db:
         identifier=record_missed(db,queue_id=uuid.UUID(payload['queue_id']),account_sid='AC'+'a'*32,call_sid='CA'+uuid.uuid4().hex,
             caller_number=payload.get('phone'),called_number=queue,outcome='missed',received_at=now-timedelta(seconds=30),ended_at=now)
         result={'id':str(identifier)}
+    elif payload['op']=='login_factor':
+        encrypted=query(db,"SELECT mfa_secret FROM staging.identity_users WHERE id=:id AND email LIKE 'browser-admin-%@example.invalid'",id=payload['id']).scalar_one()
+        result={'code':pyotp.TOTP(cipher.decrypt(encrypted.encode()).decode()).now()}
     elif payload['op']=='otp':
         result={'code':pyotp.TOTP(payload['secret']).now()}
     elif payload['op']=='expire':

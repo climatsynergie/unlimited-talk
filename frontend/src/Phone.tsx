@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -148,21 +149,36 @@ function makeIncomingController(outgoing: PhoneController) {
     },
   );
 }
-export function useIncomingPhone() {
+export function useIncomingPhoneController() {
   const controller = useContext(IncomingContext);
   if (!controller) throw new Error("Réception indisponible");
+  return controller;
+}
+export function useIncomingPhone() {
+  const controller = useIncomingPhoneController();
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
   return { controller, state };
 }
 export function PhoneProvider({
   children,
   create = makePhoneController,
+  sessionRevision = 0,
 }: {
   children: ReactNode;
   create?: () => PhoneController;
+  sessionRevision?: number;
 }) {
-  const [controller] = useState(create);
-  const [incoming] = useState(() => makeIncomingController(controller));
+  const [createController] = useState(() => create);
+  // Password changes rotate the server session even when the user is unchanged.
+  // Replace session-bound media without remounting the account confirmation.
+  const controller = useMemo(createController, [
+    createController,
+    sessionRevision,
+  ]);
+  const incoming = useMemo(
+    () => makeIncomingController(controller),
+    [controller],
+  );
   const reception = useSyncExternalStore(incoming.subscribe, incoming.snapshot);
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const active = state.phase !== "idle";

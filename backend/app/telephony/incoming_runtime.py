@@ -31,7 +31,7 @@ def parent(db,profile,identifier,params,*,lock=False):
     return row
 
 
-def receive(db,profile,params,*,verified_voice=True):
+def receive(db,profile,params,*,verified_voice=True,admit_new=True):
     called=params.get('To','');raw=params.get('From','')
     if (not re.fullmatch(r'\+[1-9][0-9]{8,14}',called) or not raw
             or params.get('Direction','inbound')!='inbound'):
@@ -46,6 +46,9 @@ def receive(db,profile,params,*,verified_voice=True):
     if row:
         if row['caller_fingerprint']!=binding:raise HTTPException(403,'Appel entrant incohérent.')
         return dict(row)
+    # Admission closure must not answer or persist a new live call. Existing
+    # parent retries and terminal callback recovery retain their original path.
+    if not admit_new:return None
     identifier=uuid4()
     row=query(db,'''INSERT INTO staging.inbound_calls(id,queue_id,account_sid,parent_call_sid,caller_number,called_number,caller_fingerprint)
         VALUES (:id,:queue,:account,:sid,:caller,:called,:hash) RETURNING *''',id=identifier,queue=line['queue_id'],account=profile.account_sid,

@@ -154,12 +154,25 @@ def create(body:Booking,request:Request):
 def update(identifier:uuid.UUID,body:Update,request:Request):
     with request.app.state.engine.begin() as db:
         user=authenticate(db,request)
-        row=query(db,'SELECT * FROM staging.appointments WHERE id=:id FOR UPDATE',id=identifier).mappings().first()
-        if row is None:raise HTTPException(404,'Rendez-vous introuvable.')
-        if user['role']!='admin' and row['created_by']!=user['id']:
+        reference=query(db,'SELECT campaign_id,contact_id,created_by FROM staging.appointments WHERE id=:id',id=identifier).mappings().first()
+        if reference is None:raise HTTPException(404,'Rendez-vous introuvable.')
+        if user['role']!='admin' and reference['created_by']!=user['id']:
             raise HTTPException(403,'Seuls le créateur et les administrateurs peuvent modifier ce rendez-vous.')
+        if body.status=='booked':
+            # Re-read the appointment after campaign -> contact locks, matching
+            # creation/callback ordering. An intervening cancellation must not
+            # turn an ordinary edit into an unchecked reconfirmation.
+            query(db,'SELECT id FROM staging.campaigns WHERE id=:id FOR SHARE',id=reference['campaign_id'])
+            contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=reference['contact_id']).mappings().one()
+        row=query(db,'SELECT * FROM staging.appointments WHERE id=:id FOR UPDATE',id=identifier).mappings().one()
         if row['version']!=body.version:
             raise HTTPException(409,'Ce rendez-vous a changé. Fermez puis rouvrez sa fiche avant de le modifier.')
+        reconfirming=row['status']!='booked' and body.status=='booked'
+        if reconfirming:
+            service.access(db,user,row['campaign_id'])
+            if contact['do_not_contact'] or contact['non_interested']:
+                raise HTTPException(409,'Un administrateur doit réactiver ce contact avant de prendre rendez-vous.')
+            card=service.contact_access(db,row['campaign_id'],row['contact_id'])
         starts=resolve(body.local_start,body.timezone,body.utc_offset_minutes)
         ends=starts+timedelta(minutes=body.duration_minutes)
         fields=('starts_at','ends_at','timezone','notes','status')
@@ -174,8 +187,12 @@ def update(identifier:uuid.UUID,body:Update,request:Request):
             after['qualification']=complete_snapshot(body.qualification)
         elif previous_qualification is not None:
             after['qualification']=previous_qualification
-        if row['status']=='cancelled' and body.status=='booked' and 'qualification' not in after:
+        if reconfirming and 'qualification' not in after:
             raise HTTPException(422,'Complétez la qualification avant de confirmer à nouveau ce rendez-vous.')
+        if reconfirming:
+            stage=query(db,"SELECT id FROM staging.campaign_stages WHERE campaign_id=:id AND kind='appointment' AND is_active",id=row['campaign_id']).scalar_one()
+            service.move(db,user,row['campaign_id'],row['contact_id'],stage,card['version'],uuid.uuid4())
+            cancel_for_contact(db,user,row['contact_id'],'appointment.booked')
         query(db,'''UPDATE staging.appointments SET starts_at=:starts_at,ends_at=:ends_at,timezone=:timezone,notes=:notes,
             status=:status,version=version+1,updated_at=clock_timestamp() WHERE id=:id''',id=identifier,**{k:after[k] for k in fields})
         record(db,user,identifier,'appointment.updated',{'before':before,'after':after})

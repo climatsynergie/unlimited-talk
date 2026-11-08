@@ -20,7 +20,11 @@ one active call per agent, shared destination exclusion, private recordings and
 administrator supervision. Incoming queue settings and manual missed-call follow-up
 are implemented. Automatic progressive dialling, agent pause/resume, due callbacks
 and verified campaign/regional caller IDs are implemented; see [AUTO_DIALER.md](AUTO_DIALER.md)
-for configuration, rollout and acceptance. Incoming media routing remains unfinished.
+for configuration, rollout and acceptance. Schema12 includes incoming browser routing,
+shared occupancy, signed provider recovery and private voicemail archiving. Live
+carrier/media acceptance remains a separate release gate; implemented code does
+not establish production acceptance. See [qa-reports/release-readiness.md](qa-reports/release-readiness.md)
+for this audit’s evidence and remaining blockers.
 See [TELEPHONY.md](TELEPHONY.md) for activation and the acceptance-test boundary.
 
 ## Local development

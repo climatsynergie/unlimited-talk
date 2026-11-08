@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import { disabledDialer } from "./fixtures/dialer-disabled";
 const queue = "00000000-0000-0000-0000-000000000050";
 const offer = "00000000-0000-0000-0000-000000000051";

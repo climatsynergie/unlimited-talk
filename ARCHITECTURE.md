@@ -43,8 +43,10 @@ allowed within the modular backend. Microservices are not a prerequisite.
 - Agents add shared, attributed notes but cannot edit contact coordinates.
 - Non-interested is global across campaigns. Do-not-contact blocks calls and
   SMS globally and survives reimport. Automatic callers recheck these rules.
-- At most two outbound attempts per contact per local day, globally across
-  campaigns, at least two hours apart. Campaign schedules also apply.
+- Campaign policy sets automatic attempt limits and retry spacing (defaults:
+  two attempts per local day, two hours apart), using shared destination history.
+  Optional campaign schedules apply. Manual calls retain the documented flexible
+  path, including non-interested contacts; do-not-contact remains a global block.
 - No-answer and machine attempts count and return to the queue tail when
   eligible. Machines are disconnected without leaving a message.
 - Callbacks have a chosen date/time and belong to the scheduling agent. They
@@ -57,21 +59,22 @@ allowed within the modular backend. Microservices are not a prerequisite.
 - The shared Unlimited Talks calendar accepts simultaneous appointments.
   All agents see appointments; agents edit/cancel theirs, admins edit all and
   assign sellers later. Sellers have no accounts in the initial scope.
-- All agents can read/reply to shared SMS threads, subject to global blocks.
+- Shared SMS threads remain a target requirement, outside this delivery.
   Recordings: agent accesses their calls; admins access all.
 - Admins explicitly assign which agents receive inbound calls. Unanswered
   inbound calls create durable follow-up in an Appels entrants pipeline, linked
   to the call history and any voicemail. Follow-up calls remain manual. See the
   inbound operating contract below for confirmed requirements and pending choices.
 - Agent-to-agent hold/transfer and appointment confirmation automation remain
-  outside the agreed initial scope. A bounded incoming waiting queue is a
-  proposed extension, not an enabled feature.
+  outside the agreed initial scope. Schema12 implements a bounded incoming
+  waiting queue; activation requires explicit line ownership and media acceptance.
 
 ## Inbound operating contract — scope added 31 October 2026
 
-Inbound configuration and manual missed-call follow-up are implemented on the
-schema-9 branch; routing/media reception remain unconnected. This contract also
-records the boundaries for their later activation. See [INBOUND.md](INBOUND.md).
+Inbound configuration and manual missed-call follow-up were delivered in schema9.
+The schema12 candidate adds browser reception, shared occupancy, provider recovery
+and private media archiving. This does not claim live-carrier acceptance: see
+[qa-reports/release-readiness.md](qa-reports/release-readiness.md) and [INBOUND.md](INBOUND.md).
 
 Confirmed requirements:
 
@@ -96,9 +99,9 @@ opening hours remain configurable implementation choices:
   optional after-call work, appointment form, pause and stopped. An online browser alone
   never establishes readiness. Expired presence stops new offers without freeing
   an established call whose provider outcome remains uncertain.
-- Preserve the agreed automatic outbound continuation: do not impose a new
-  mandatory wrap-up delay after every call. The appointment form and explicit
-  pause/stop keep their existing precedence.
+- Preserve automatic outbound continuation with the agreed ten-second after-call
+  window and explicit hold button. The appointment form and explicit pause/stop
+  keep their existing precedence.
 - Reserve one eligible agent atomically across incoming and outgoing work.
   Never interrupt an established conversation or offer a second call to a busy
   agent. Inbound-only, outbound-only and mixed permissions are admin settings;

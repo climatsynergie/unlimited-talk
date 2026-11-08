@@ -101,9 +101,26 @@ try:
    VALUES (:id,:account,:sid,:phone,:origin,'active',clock_timestamp())''',id=queue,account=profile.account_sid,sid='PN'+uuid4().hex,phone=profile.caller_number,origin=profile.public_origin)
  assert agents[0].request('GET','/api/inbound/reception')['enabled']
  outsider.request('POST','/api/inbound/reception/register',dict(browser_id=str(uuid4())),409)
+ # Deployment admission closure rejects new media but preserves terminal-ledger
+ # recovery. These signed HTTP requests must not create an active call.
+ app.state.voice_calling_enabled=False
+ closed_fields=dict(CallSid='CA'+uuid4().hex,From='+16135550100',To=profile.caller_number,Direction='inbound',CallStatus='ringing')
+ refused=signed('incoming',fields=closed_fields)
+ assert refused.find('Reject').attrib['reason']=='busy'
+ assert all(refused.find(verb) is None for verb in ('Say','Record','Dial','Redirect'))
+ with engine.connect() as db:
+  assert query(db,'SELECT count(*) FROM staging.inbound_calls WHERE parent_call_sid=:sid',sid=closed_fields['CallSid']).scalar_one()==0
+ signed('incoming-parent-status',fields={**closed_fields,'CallStatus':'busy','CallDuration':'0'})
+ assert process_once(engine,profile)==1 and process_once(engine,profile)==0
+ with engine.connect() as db:
+  closed=query(db,'SELECT * FROM staging.inbound_calls WHERE parent_call_sid=:sid',sid=closed_fields['CallSid']).mappings().one()
+  assert closed['state']=='finished' and closed['followup_id'] is not None
+ app.state.voice_calling_enabled=True
  first=receive('+16135550101')
  assert step(first).find('Dial') is None
+ app.state.voice_calling_enabled=False
  replay=signed('incoming',fields=first[1]);assert replay.find('Redirect').text.endswith(str(first[0]))
+ app.state.voice_calling_enabled=True
  registrations=[]
  for agent in agents:
   reg=agent.request('POST','/api/inbound/reception/register',dict(browser_id=str(uuid4())),201)
@@ -157,10 +174,12 @@ try:
  assert step(second).find('Record') is None
  recording_sid='RE'+uuid4().hex
  record_fields=dict(CallSid=second[1]['CallSid'],RecordingSid=recording_sid,RecordingStatus='completed',RecordingSource='RecordVerb',RecordingChannels='1',RecordingDuration='3')
+ app.state.voice_calling_enabled=False
  signed('incoming-recording',second[0],record_fields);signed('incoming-recording',second[0],record_fields)
  signed('incoming-recording',third[0],record_fields,403)
  signed('incoming-recording',second[0],{**record_fields,'RecordingSid':'RE'+uuid4().hex,'RecordingChannels':'2'},403)
  signed('incoming-voicemail-finish',second[0],second[1])
+ app.state.voice_calling_enabled=True
  assert process_once(engine,profile)==1 and process_once(engine,profile)==0
  with engine.connect() as db:
   assert query(db,'SELECT count(*) FROM staging.inbound_recordings WHERE call_id=:id',id=second[0]).scalar_one()==1

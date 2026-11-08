@@ -48,6 +48,15 @@ campaign unassignment or archival. Those actions prevent new bookings there. The
 shared calendar permission grants only appointment-related contact coordinates;
 it does not grant another campaign's board, imports or unrelated history.
 
+Reconfirming a cancelled, completed or absent appointment as `booked` is a new
+booking decision. It requires the same active campaign access, active contact
+membership and absence of global restrictions as creation, plus a complete saved
+or supplied qualification. Reconfirmation atomically restores the campaign's
+appointment stage and closes any pending callback. Ordinary edits to an already
+booked appointment, and historical notes/status edits, retain creator ownership
+after unassignment or archival. Concurrent updates still require the current
+appointment version; campaign, contact and appointment locks follow that order.
+
 ## API and interface
 
 All endpoints use the existing session, CSRF and exact-origin protections:

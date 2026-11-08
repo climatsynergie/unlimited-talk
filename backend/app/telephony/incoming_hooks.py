@@ -19,6 +19,7 @@ router=APIRouter(prefix='/api/telephony/twilio')
 def render(profile,decision):
     response=VoiceResponse();action=decision['action'];call=decision.get('call')
     if action=='answer':return str(response)
+    if action=='reject':response.reject(reason='busy');return str(response)
     if action=='hangup':response.hangup();return str(response)
     if action=='offer':
         offer=decision['offer'];identifier=offer['id']
@@ -83,7 +84,8 @@ def apply(request,profile,kind,identifier,params):
         if not installed(db) or not isinstance(profile,ManualVoiceProfile):
             raise HTTPException(503,'La réception des appels est indisponible.')
         if kind=='incoming':
-            call=runtime.receive(db,profile,params)
+            call=runtime.receive(db,profile,params,admit_new=bool(getattr(request.app.state,'voice_calling_enabled',False)))
+            if call is None:return {'action':'reject'}
             return {'action':'hangup' if call['state']=='finished' else 'initial','call':call}
         if kind=='incoming-step':
             return runtime.step(db,profile,identifier,params,enabled=getattr(request.app.state,'voice_calling_enabled',False))

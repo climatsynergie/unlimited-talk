@@ -8,7 +8,7 @@ from app.identity.service import query
 
 COUNTERS = ('calls','answered','voicemail','no_answer','busy','failed','cancelled','in_progress','manual','automatic',
             'contacts','bookings','cancelled_bookings','pauses','stops','starts','automatic_pauses',
-            'talk_seconds','duration_known','duration_missing')
+            'talk_seconds','duration_known','duration_missing','incoming_calls','incoming_answered','incoming_talk_seconds')
 
 @dataclass(frozen=True)
 class Period:
@@ -31,11 +31,12 @@ class Period:
         return datetime.combine(self.start,time.min,zone).astimezone(timezone.utc),datetime.combine(self.end+timedelta(days=1),time.min,zone).astimezone(timezone.utc)
 
 
-def agents(db, since, until):
+def agents(db, since, until, *, include_incoming=False):
     return [dict(row) for row in query(db,'''SELECT u.id,u.display_name,u.email,u.role,u.is_active
         FROM staging.identity_users u WHERE u.role='agent'
         OR EXISTS(SELECT 1 FROM staging.voice_intents i WHERE i.actor_id=u.id AND i.consumed_at>=:since AND i.consumed_at<:until)
         OR EXISTS(SELECT 1 FROM staging.appointments a WHERE a.created_by=u.id AND a.created_at>=:since AND a.created_at<:until)
+        '''+(" OR EXISTS(SELECT 1 FROM staging.inbound_offers o WHERE o.actor_id=u.id AND o.offered_at>=:since AND o.offered_at<:until)" if include_incoming else '')+'''
         ORDER BY lower(u.display_name),u.id''',since=since,until=until).mappings()]
 
 
@@ -54,7 +55,7 @@ AGGREGATE = '''WITH chosen_calls AS MATERIALIZED (
     CASE WHEN (e.details->>'duration_seconds')::integer<=86400
      THEN (e.details->>'duration_seconds')::integer END END END) AS seconds
  FROM staging.voice_events e JOIN chosen_calls i ON i.id=e.intent_id GROUP BY e.intent_id
-), facts AS (
+), __INCOMING_CTES__ facts AS (
  SELECT i.actor_id,i.consumed_at AS at,'call' AS kind,i.destination,i.outcome,
  i.state IN ('authorized','ringing','answered') AS ongoing,i.dialer_generation IS NOT NULL AS automatic,
  ((i.outcome='completed' OR i.state='answered' OR coalesce(p.answered,false) OR coalesce(r.seconds,0)>0) AND NOT coalesce(p.voicemail,false)) AS answered,
@@ -67,6 +68,7 @@ AGGREGATE = '''WITH chosen_calls AS MATERIALIZED (
  SELECT a.actor_id,a.created_at,a.action,NULL,NULL,false,false,false,NULL,false,false
  FROM staging.identity_audit a WHERE a.actor_id=ANY(CAST(:actors AS uuid[])) AND a.created_at>=:since AND a.created_at<:until
  AND a.action IN ('dialer.pause','dialer.stop','dialer.start','dialer.pause_automatic')
+ __INCOMING_FACTS__
 ), buckets AS (
  SELECT *,(at AT TIME ZONE :zone)::date AS day,
  date_bin(interval '1 hour',at,CAST(:since AS timestamptz)) AS hour FROM facts
@@ -93,9 +95,28 @@ SELECT actor_id,CASE WHEN grouping(actor_id)=1 THEN 'global' WHEN grouping(day)=
  coalesce(sum(seconds) FILTER(WHERE kind='call' AND answered),0) AS talk_seconds,
  count(*) FILTER(WHERE kind='call' AND answered AND seconds IS NOT NULL) AS duration_known,
  count(*) FILTER(WHERE kind='call' AND answered AND seconds IS NULL) AS duration_missing,
+ count(*) FILTER(WHERE kind='incoming') AS incoming_calls,
+ count(*) FILTER(WHERE kind='incoming' AND answered) AS incoming_answered,
+ coalesce(sum(seconds) FILTER(WHERE kind='incoming' AND answered),0) AS incoming_talk_seconds,
  min(at) FILTER(WHERE kind='call') AS first_call_at,max(at) FILTER(WHERE kind='call') AS last_call_at
 FROM buckets GROUP BY GROUPING SETS ((),(actor_id),(actor_id,day)__HOUR_GROUP__)
 '''
+
+
+INCOMING_CTES = """chosen_incoming AS MATERIALIZED (
+ SELECT o.id,o.actor_id,o.offered_at,o.outcome,o.connected_at,o.duration_seconds
+ FROM staging.inbound_offers o WHERE o.actor_id=ANY(CAST(:actors AS uuid[]))
+ AND o.offered_at>=:since AND o.offered_at<:until
+), incoming_recorded AS (
+ SELECT r.offer_id,max(r.duration) AS seconds FROM staging.inbound_recordings r
+ JOIN chosen_incoming o ON o.id=r.offer_id WHERE r.kind='conversation' GROUP BY r.offer_id
+), """
+
+INCOMING_FACTS = """UNION ALL
+ SELECT o.actor_id,o.offered_at,'incoming',NULL,o.outcome,false,false,
+ o.connected_at IS NOT NULL,coalesce(o.duration_seconds,r.seconds),false,false
+ FROM chosen_incoming o LEFT JOIN incoming_recorded r ON r.offer_id=o.id
+"""
 
 
 def metrics(row=None):
@@ -109,7 +130,9 @@ def metrics(row=None):
 
 def report(db,period,agent_id=None):
     since,until=period.bounds()
-    roster=agents(db,since,until)
+    from app.telephony.incoming_schema import installed
+    include_incoming=installed(db)
+    roster=agents(db,since,until,include_incoming=include_incoming)
     if agent_id is not None:
         roster=[dict(row) for row in query(db,'SELECT id,display_name,email,role,is_active FROM staging.identity_users WHERE id=:id',id=agent_id).mappings()]
         if not roster:raise HTTPException(404,'Agent introuvable.')
@@ -117,7 +140,7 @@ def report(db,period,agent_id=None):
     query(db,"SET LOCAL statement_timeout='15s'")
     # Team views only need daily aggregates. Hour buckets are requested for a
     # single selected agent, keeping three-month responses and exports bounded.
-    sql=(AGGREGATE.replace('__HOUR_CASE__',"WHEN grouping(hour)=0 THEN 'hour'" if agent_id else '')
+    sql=(AGGREGATE.replace('__INCOMING_CTES__',INCOMING_CTES if include_incoming else '').replace('__INCOMING_FACTS__',INCOMING_FACTS if include_incoming else '').replace('__HOUR_CASE__',"WHEN grouping(hour)=0 THEN 'hour'" if agent_id else '')
         .replace('__HOUR_VALUE__','hour' if agent_id else 'NULL::timestamptz AS hour')
         .replace('__HOUR_GROUP__',',(actor_id,hour)' if agent_id else ''))
     rows=list(query(db,sql,actors=[str(agent['id']) for agent in roster],since=since,until=until,zone=period.zone).mappings()) if roster else []
@@ -145,12 +168,15 @@ def report(db,period,agent_id=None):
             'answered':'Connexions téléphoniques établies, hors boîtes vocales signalées par les agents. Une boîte vocale non signalée ne peut pas être reconnue automatiquement.',
             'voicemail':'Boîtes vocales signalées par les agents ; une seule par appel, exclue des décrochés clients et des durées de conversation.',
             'talk':'Durée fournisseur, sinon durée de l’enregistrement, hors boîtes vocales signalées. Une durée absente reste inconnue.',
+            'incoming':'Appels entrants proposés aux agents, attribués à leur heure de présentation. Chaque agent sollicité compte une proposition ; les décrochés et durées connues sont indiqués séparément des appels sortants. Les appels restés dans la file sans agent ne sont pas attribués.',
             'bookings':'RDV comptés à leur création, au nom de leur créateur ; les annulations indiquent le statut actuel.',
             'pauses':'Actions de pause et d’arrêt journalisées. Des pauses automatiques peuvent être incluses dans les anciens journaux.',
             'time':'Appels attribués à leur heure de lancement, durées à leur appel d’origine. Présence récente ≠ temps travaillé.'})
 
 
 def live(db):
+    from app.telephony.incoming_schema import installed
+    include_incoming=installed(db)
     rows=query(db,'''SELECT u.id,u.display_name,u.email,u.role,u.is_active,
         seen.last_seen_at,coalesce(u.is_active AND seen.last_seen_at>clock_timestamp()-interval '90 seconds',false) AS online,
         d.mode AS dialer_mode,d.lease_until>clock_timestamp() AS dialer_alive,c.name AS campaign_name,
@@ -163,10 +189,11 @@ def live(db):
         LEFT JOIN LATERAL(SELECT id,state,destination,consumed_at,created_at FROM staging.voice_intents v WHERE v.actor_id=u.id
           AND v.state IN ('reserved','authorized','ringing','answered') AND (v.state<>'reserved' OR v.expires_at>clock_timestamp())
           ORDER BY v.created_at DESC LIMIT 1) i ON true
-        WHERE u.role='agent' OR i.id IS NOT NULL ORDER BY lower(u.display_name),u.id''').mappings().all()
-    from app.telephony.incoming_schema import installed
+        WHERE u.role='agent' OR i.id IS NOT NULL
+        '''+(" OR EXISTS(SELECT 1 FROM staging.inbound_offers o WHERE o.actor_id=u.id AND o.state<>'finished')" if include_incoming else '')+'''
+        ORDER BY lower(u.display_name),u.id''').mappings().all()
     reception={}
-    if installed(db):
+    if include_incoming:
         reception={row['actor_id']:row for row in query(db,'''SELECT o.actor_id,o.id AS call_id,o.state AS call_state,
             c.caller_number AS destination,c.connected_at AS consumed_at,o.offered_at AS call_created_at,
             q.name AS campaign_name FROM staging.inbound_offers o JOIN staging.inbound_calls c ON c.id=o.call_id

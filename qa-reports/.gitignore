@@ -1,0 +1,11 @@
+evidence/**/*.zip
+evidence/**/test-results/
+coverage/.coverage*
+coverage/*/.coverage*
+
+coverage/stop-*
+
+evidence/**/*.png
+
+# Raw forensic outputs stay local; repository secret protection rejects synthetic SIDs.
+evidence/

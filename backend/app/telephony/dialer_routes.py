@@ -74,8 +74,11 @@ def control(body:Control,request:Request):
 @router.post('/next')
 def next_call(body:Next,request:Request):
     configured=profile(request)
-    identity.limited(request.app.state.engine,'dialer-next',request.cookies.get('__Host-ut_session',''),
-                     limit=120,seconds=60,global_limit=3000)
+    with request.app.state.engine.begin() as db:
+        actor=identity.authenticate(db,request,touch=False)
+        budget_actor=str(actor['id'])
+    identity.limited(request.app.state.engine,'dialer-next',budget_actor,
+                     limit=120,seconds=60,global_limit=3000,authenticated=True)
     with request.app.state.engine.begin() as db:
         actor=identity.authenticate(db,request,touch=False)
         result=dialer.next_call(db,actor,configured,body.browser_id,body.generation,body.id)

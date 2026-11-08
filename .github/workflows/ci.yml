@@ -2,7 +2,7 @@ name: Foundation CI
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main, "feature/**", "qa/**"]
   pull_request:
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -91,10 +91,14 @@ jobs:
         run: python3 tests/verify_identity.py
       - name: Verify imports, transactional recovery and broker execution
         run: python3 tests/verify_imports.py
+      - name: Verify fast import consumer and durable dispatcher recovery races
+        run: python3 tests/verify_import_dispatch_race.py
       - name: Verify campaigns, permissions and concurrent pipeline moves
         run: python3 tests/verify_campaigns.py
       - name: Verify shared calendar permissions and appointment transactions
         run: python3 tests/verify_calendar.py
+      - name: Verify reconfirmation authorization and callback handoff regressions
+        run: python3 tests/verify_backend_reconfirmation.py
       - name: Verify callback reservations and priority
         run: python3 tests/verify_callbacks.py
       - name: Verify signed Voice API, durable reservations and concurrent replays
@@ -103,12 +107,22 @@ jobs:
         run: python3 tests/verify_inbound.py
       - name: Verify automatic queues, callback ownership, regional callers and pause races
         run: python3 tests/verify_dialer.py
+      - name: Verify authenticated call budgets and concurrent admission
+        run: python3 tests/verify_call_budgets.py
+      - name: Verify bounded public webhook ingress and authentication payloads
+        run: python3 tests/verify_webhook_ingress.py
+      - name: Verify malformed JSON resource bounds through the production gateway
+        run: QA_API_IMAGE=unlimited-talk-staging-api:foundation python3 tests/verify_json_resource_budget.py --gateway
       - name: Verify administrator reporting and Excel exports
         run: python3 tests/verify_reporting.py
+      - name: Verify incoming reporting and Excel counters
+        run: python3 tests/verify_reporting_incoming.py
       - name: Verify browser flows through local HTTPS
         run: python3 tests/verify_browser.py
       - name: Verify real browser, API and PostgreSQL call-disposition workflow
         run: python3 tests/verify_agent_workflow.py
+      - name: Verify real incoming browser, API and PostgreSQL workflow
+        run: python3 tests/verify_incoming_browser.py
       - name: Verify additive schema readiness guards
         run: python3 tests/verify_schema_revision.py
       - name: Verify rollback preserves the identity schema and data
@@ -139,6 +153,19 @@ jobs:
         run: |
           docker compose ps -a
           docker compose logs --tail 50 api migrate gateway
+      - name: Keep browser diagnostics from failed verification
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-diagnostics-${{ github.sha }}
+          path: |
+            qa-reports/evidence/browser-artifacts/
+            qa-reports/evidence/browser-*-results.json
+            qa-reports/evidence/browser-observations.jsonl
+            qa-reports/evidence/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 1
       - name: Stop disposable environment
         if: always()
         run: docker compose down

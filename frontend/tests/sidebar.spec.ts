@@ -1,8 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page, Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function administrator(page: Page) {
+  const unexpected: string[] = [];
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     const responses: Record<string, unknown> = {
@@ -16,6 +17,7 @@ async function administrator(page: Page) {
         },
         mfa_enrollment_required: false,
       },
+      "/api/reporting/presence": { ok: true },
       "/api/admin/users": { users: [], total: 0 },
       "/api/admin/audit": { events: [] },
       "/api/admin/invitations": { invitations: [], total: 0 },
@@ -25,6 +27,8 @@ async function administrator(page: Page) {
         dialer: { mode: "stopped", generation: 0, campaign_id: null },
       },
     };
+    if (!(path in responses))
+      unexpected.push(`${route.request().method()} ${path}`);
     return route.fulfill({
       status: path in responses ? 200 : 404,
       json: responses[path] ?? { detail: "Fixture manquante" },
@@ -34,6 +38,7 @@ async function administrator(page: Page) {
   await expect(
     page.getByRole("navigation", { name: "Navigation principale" }),
   ).toBeVisible();
+  return unexpected;
 }
 
 async function inViewport(page: Page, element: Locator) {
@@ -50,7 +55,7 @@ test("menu administrateur : petit écran, molette et clavier atteignent tous les
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 600 });
-  await administrator(page);
+  const unexpected = await administrator(page);
   const nav = page.getByRole("navigation", { name: "Navigation principale" });
   const account = page.getByRole("link", { name: "Mon compte", exact: true });
   const logout = page.getByRole("button", {
@@ -93,12 +98,13 @@ test("menu administrateur : petit écran, molette et clavier atteignent tous les
   await inViewport(page, logout);
   await account.click();
   await expect(page).toHaveURL(/\/compte$/);
+  expect(unexpected).toEqual([]);
 });
 
 test("menu mobile et tablette : aucune sortie horizontale, même entre 700 et 760 pixels", async ({
   page,
 }) => {
-  await administrator(page);
+  const unexpected = await administrator(page);
   const nav = page.getByRole("navigation", { name: "Navigation principale" });
   for (const viewport of [
     { width: 320, height: 568 },
@@ -139,4 +145,5 @@ test("menu mobile et tablette : aucune sortie horizontale, même entre 700 et 76
       })),
     })),
   ).toEqual([]);
+  expect(unexpected).toEqual([]);
 });

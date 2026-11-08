@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import AxeBuilder from "@axe-core/playwright";
 import { silentWav as wav } from "./fixtures/audio";
 import { disabledDialer } from "./fixtures/dialer-disabled";

@@ -4486,6 +4486,7 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 }
 
 .reception-control {
+  padding: 24px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

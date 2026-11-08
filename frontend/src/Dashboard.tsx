@@ -6,6 +6,9 @@ import { Notice } from "./ui";
 type Metrics = {
   calls: number;
   answered: number;
+  incoming_calls?: number;
+  incoming_answered?: number;
+  incoming_talk_seconds?: number;
   voicemail?: number;
   no_answer: number;
   busy: number;
@@ -146,6 +149,24 @@ function Measures({ metrics }: { metrics: Metrics }) {
           value: number(metrics.voicemail ?? 0),
           hint: "Signalées par les agents · hors conversations",
           tone: "blue",
+        },
+        {
+          title: "Appels entrants proposés",
+          value: number(metrics.incoming_calls ?? 0),
+          hint: "Présentés aux agents · séparés des appels sortants",
+          tone: "blue",
+        },
+        {
+          title: "Entrants décrochés",
+          value: number(metrics.incoming_answered ?? 0),
+          hint: "Appels entrants pris en charge par les agents",
+          tone: "green",
+        },
+        {
+          title: "Conversation entrante connue",
+          value: duration(metrics.incoming_talk_seconds ?? 0),
+          hint: "Durées confirmées des appels entrants décrochés",
+          tone: "green",
         },
         {
           title: "RDV créés",
@@ -750,6 +771,12 @@ export function Dashboard() {
                 </div>
               ) : null}
               <Measures metrics={current.totals} />
+              <p className="report-footnote">
+                Appels lancés, décrochés clients et graphiques : appels
+                sortants. Les appels entrants sont comptés séparément. Un même
+                appel présenté à plusieurs agents compte une proposition par
+                agent.
+              </p>
               {selected ? (
                 <p className="report-footnote">
                   Durée moyenne connue :{" "}
@@ -820,7 +847,17 @@ export function Dashboard() {
                             <small>UTC{hour.utc_offset}</small>
                           </span>
                           <strong>{number(hour.calls)}</strong>
-                          <small>{number(hour.answered)} décrochés</small>
+                          <small>
+                            {number(hour.answered)} décrochés sortants
+                          </small>
+                          <small>
+                            {number(hour.incoming_calls ?? 0)} entrants proposés
+                            · {number(hour.incoming_answered ?? 0)} décrochés
+                          </small>
+                          <small>
+                            {duration(hour.incoming_talk_seconds ?? 0)} de
+                            conversation entrante
+                          </small>
                         </div>
                       ))}
                     </div>
@@ -853,6 +890,9 @@ export function Dashboard() {
                               "Appels",
                               "Décrochés clients",
                               "Boîtes vocales",
+                              "Entrants proposés",
+                              "Entrants décrochés",
+                              "Conversation entrante connue",
                               "Taux",
                               "RDV",
                               "Pauses",
@@ -870,6 +910,11 @@ export function Dashboard() {
                               <td>{number(day.calls)}</td>
                               <td>{number(day.answered)}</td>
                               <td>{number(day.voicemail ?? 0)}</td>
+                              <td>{number(day.incoming_calls ?? 0)}</td>
+                              <td>{number(day.incoming_answered ?? 0)}</td>
+                              <td>
+                                {duration(day.incoming_talk_seconds ?? 0)}
+                              </td>
                               <td>
                                 <Rate value={day.answer_rate} />
                               </td>
@@ -936,6 +981,9 @@ export function Dashboard() {
                             "Appels",
                             "Décrochés clients",
                             "Boîtes vocales",
+                            "Entrants proposés",
+                            "Entrants décrochés",
+                            "Conversation entrante connue",
                             "RDV",
                             "Pauses",
                             "Arrêts",
@@ -971,6 +1019,15 @@ export function Dashboard() {
                             <td>{number(agent.metrics.calls)}</td>
                             <td>{number(agent.metrics.answered)}</td>
                             <td>{number(agent.metrics.voicemail ?? 0)}</td>
+                            <td>{number(agent.metrics.incoming_calls ?? 0)}</td>
+                            <td>
+                              {number(agent.metrics.incoming_answered ?? 0)}
+                            </td>
+                            <td>
+                              {duration(
+                                agent.metrics.incoming_talk_seconds ?? 0,
+                              )}
+                            </td>
                             <td>{number(agent.metrics.bookings)}</td>
                             <td>{number(agent.metrics.pauses)}</td>
                             <td>{number(agent.metrics.stops)}</td>
@@ -1027,6 +1084,10 @@ export function Dashboard() {
                           calls: "Appels lancés",
                           answered: "Décrochés clients",
                           voicemail: "Boîtes vocales",
+                          incoming: "Appels entrants",
+                          incoming_calls: "Entrants proposés",
+                          incoming_answered: "Entrants décrochés",
+                          incoming_talk_seconds: "Conversation entrante connue",
                           talk: "Durées",
                           bookings: "Rendez-vous",
                           pauses: "Pauses et arrêts",

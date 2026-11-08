@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
@@ -8,6 +8,11 @@ import {
   fillQualification,
 } from "./fixtures/qualification";
 import type { SavedQualification } from "../src/Qualification";
+
+const unknownRequests = new WeakMap<Page, string[]>();
+test.afterEach(({ page }) => {
+  expect(unknownRequests.get(page) ?? []).toEqual([]);
+});
 
 test.use({
   launchOptions: {
@@ -41,6 +46,8 @@ type Dialer = {
   hold_token: string | null;
 };
 async function setup(page: Page, role = "agent", sameContact = false) {
+  const unexpected: string[] = [];
+  unknownRequests.set(page, unexpected);
   const rows = new Map<string, Row>();
   let dialer: Dialer = {
     mode: "stopped",
@@ -109,6 +116,11 @@ async function setup(page: Page, role = "agent", sameContact = false) {
         },
         mfa_enrollment_required: false,
       };
+    else if (
+      path === "/api/reporting/presence" &&
+      route.request().method() === "POST"
+    )
+      result = { ok: true };
     else if (path === "/api/telephony/test/session")
       result = {
         enabled: true,
@@ -387,11 +399,13 @@ async function setup(page: Page, role = "agent", sameContact = false) {
       stageByContact.set(body.contact_id, "stage-appointment");
       versions.set(body.contact_id, (versions.get(body.contact_id) || 0) + 1);
       result = { id: body.id };
-    } else
+    } else {
+      unexpected.push(`${route.request().method()} ${path}`);
       return route.fulfill({
         status: 404,
         json: { detail: "Fixture API manquante : " + path },
       });
+    }
     return route.fulfill({ json: result });
   });
   await page.route("**/assets/twilio-*.js", (route) =>

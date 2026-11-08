@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 
 // Isolate display boundaries with synthetic read responses. Real booking,
 // authorization and persistence flows run separately in identity.spec.ts.
@@ -6,6 +6,7 @@ test("une fin à minuit appartient seulement au jour précédent", async ({
   page,
 }) => {
   const id = "00000000-0000-0000-0000-000000000001";
+  const unexpected: string[] = [];
   let end = "2026-11-03T05:00:00Z"; // midnight Toronto, after DST fall-back
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -21,6 +22,11 @@ test("une fin à minuit appartient seulement au jour précédent", async ({
         },
         mfa_enrollment_required: false,
       };
+    } else if (
+      url.pathname === "/api/reporting/presence" &&
+      route.request().method() === "POST"
+    ) {
+      body = { ok: true };
     } else if (url.pathname === "/api/calendar/resolve") {
       body = {
         options: [
@@ -56,6 +62,7 @@ test("une fin à minuit appartient seulement au jour précédent", async ({
         ],
       };
     } else {
+      unexpected.push(`${route.request().method()} ${url.pathname}`);
       await route.fulfill({
         status: 404,
         json: { detail: "Ressource introuvable." },
@@ -74,4 +81,5 @@ test("une fin à minuit appartient seulement au jour précédent", async ({
   await expect(
     page.locator(".appointment-card").filter({ hasText: "Fin de journée" }),
   ).toHaveCount(2);
+  expect(unexpected).toEqual([]);
 });

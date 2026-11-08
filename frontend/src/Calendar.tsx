@@ -98,7 +98,7 @@ export function AppointmentForm({
     !appointment ||
     (status !== "cancelled" &&
       (includeQualification ||
-        (appointment.status === "cancelled" && status === "booked")));
+        (appointment.status !== "booked" && status === "booked")));
   const [choices, setChoices] = useState<Choice[]>([]);
   const [offset, setOffset] = useState("");
   const [resolving, setResolving] = useState(false);

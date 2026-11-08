@@ -36,9 +36,15 @@ append-only history, visible from the Contacts screen.
 
 PostgreSQL owns source fingerprints, staged rows, explicit confirmation,
 progress, counters and history. `next_publish_at` on a confirmed import is its
-transactional outbox record. A separate dispatcher publishes only UUIDs into
-an authenticated private Redis broker, then retries eligible jobs every 30
-seconds until PostgreSQL says they completed. Lost publication or broker data
+transactional outbox record. A dispatcher claims eligible jobs with a 30-second
+publication lease and **commits that lease before publishing** UUIDs into the
+authenticated private Redis broker. A fast worker can therefore lock the job
+when its message arrives instead of acknowledging a skipped locked job. Competing
+dispatchers respect the committed lease. A publication failure or dispatcher
+crash leaves accepted work in PostgreSQL for retry when the lease expires; the
+5-second polling loop discovers it then. Partial batch publication does not roll
+back completed worker transactions, and repeated deliveries remain idempotent.
+Lost publication or broker data
 cannot erase accepted work. JSON is the only accepted Celery serializer;
 there is no Redis result backend or contact payload in broker messages.
 
@@ -80,7 +86,11 @@ Moto is a test fixture, never a production storage recommendation.
 CI tests HTTP/database isolation, existing identity/browser behavior, private
 import flow, crash rollback, duplicate delivery, broker publication/worker
 execution, source fingerprint tampering, blank preservation, global contact
-restrictions and session idle behavior. Actual predecessor image rollback
+restrictions and session idle behavior. `verify_import_dispatch_race.py` uses
+independent PostgreSQL engines to prove immediate broker delivery can apply work
+before publication returns, actual worker return behavior, duplicate delivery,
+publication failure/retry, competing dispatchers and partial batch recovery.
+Actual predecessor image rollback
 checks identity/contact fingerprints and import history/row counts. Synthetic
 fixtures never use managed data. This is not a 20-agent telephony load test.
 

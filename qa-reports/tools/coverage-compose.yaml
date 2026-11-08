@@ -1,0 +1,49 @@
+services:
+  api:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage
+  migrate:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage
+  worker:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage
+  dispatcher:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage
+  voice-reconciler:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage
+  voice-archiver:
+    environment:
+      COVERAGE_PROCESS_START: /qa-coverage.ini
+      COVERAGE_CORE: ctrace
+    volumes:
+      - /tmp/ut-qa-coverage-musl:/qa-tools:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/tools/coverage.ini:/qa-coverage.ini:ro
+      - /home/codexdev/unlimited-talk-qa-audit/qa-reports/coverage/final-data:/qa-coverage

@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='ut-browser-https-') as tmp:
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)
         server.socket=context.wrap_socket(server.socket,server_side=True)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-        env={**os.environ,'UI_TEST_URL':'https://localhost:18443'}
+        env={**os.environ,'UI_TEST_URL':'https://localhost:18443', 'UI_SCREENSHOTS_DIR':str(root/'qa-reports/evidence/screenshots')}
         subprocess.run(['npm','run','test:browser',*(['--',*sys.argv[1:]] if len(sys.argv)>1 else [])],cwd=root/'frontend',env=env,check=True)
     finally:
         if server: server.shutdown();server.server_close()

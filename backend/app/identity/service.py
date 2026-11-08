@@ -30,22 +30,35 @@ def public_user(row):
             for key in ('id', 'email', 'display_name', 'role', 'is_active')}
 
 
-def limited(engine, operation, identity, *, limit=10, seconds=900, global_limit=200):
-    """Independent committed counters survive bad-password transaction rollback."""
-    exceeded = False
+def limited(engine, operation, identity, *, limit=10, seconds=900, global_limit=200,
+            authenticated=False):
+    """Commit denials independently, without letting rejected callers drain other budgets.
+
+    Authenticated operations use a verified actor ID and charge its bucket first.
+    Public authentication operations charge the global bucket first to bound keys.
+    Never invoke while retaining another engine transaction/connection.
+    """
+    exceeded = None
+    shared = ('voice-global' if operation == 'voice-reserve' else
+              'dialer-global' if operation == 'dialer-next' else 'global')
+    personal = (operation + ':' + digest(identity), limit, seconds)
+    global_bucket = (shared, global_limit, 60)
+    buckets = [personal, global_bucket] if authenticated else [global_bucket, personal]
     with engine.begin() as db:
         query(db, 'DELETE FROM staging.identity_rate_limits WHERE expires_at<now()-interval \'1 day\'')
-        for bucket, limit, seconds in [('voice-global' if operation == 'voice-reserve' else 'dialer-global' if operation == 'dialer-next' else 'global', global_limit, 60),
-                                       (operation + ':' + digest(identity), limit, seconds)]:
+        for bucket, maximum, duration in buckets:
             row = query(db, '''INSERT INTO staging.identity_rate_limits(bucket,attempts,expires_at)
                 VALUES (:bucket,1,now()+make_interval(secs=>:seconds))
                 ON CONFLICT(bucket) DO UPDATE SET
                 attempts=CASE WHEN identity_rate_limits.expires_at<=now() THEN 1 ELSE identity_rate_limits.attempts+1 END,
                 expires_at=CASE WHEN identity_rate_limits.expires_at<=now() THEN excluded.expires_at ELSE identity_rate_limits.expires_at END
-                RETURNING attempts''', bucket=bucket, seconds=seconds).scalar_one()
-            exceeded |= row > limit
-    if exceeded:
-        raise HTTPException(429, 'Trop de tentatives. Réessayez plus tard.', headers={'Retry-After': str(seconds)})
+                RETURNING attempts''', bucket=bucket, seconds=duration).scalar_one()
+            if row > maximum:
+                exceeded = duration
+                break
+    if exceeded is not None:
+        raise HTTPException(429, 'Trop de tentatives. Réessayez plus tard.',
+                            headers={'Retry-After': str(exceeded)})
 
 
 def new_session(db, user, verified, previous=None):

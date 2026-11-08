@@ -1,8 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 function fixture<T>(payload: object): T {
   const r = spawnSync(
@@ -23,10 +24,14 @@ async function login(page: Page, c: Credentials) {
   await page.goto("/connexion");
   await page.getByLabel("Adresse courriel", { exact: true }).fill(c.email);
   await page.getByLabel("Mot de passe", { exact: true }).fill(c.password);
-  if (c.factor)
+  if (c.factor) {
+    // Fixture setup can outlive a TOTP step under coverage. Obtain a current
+    // code immediately before real login; server verification stays unchanged.
+    const current = fixture<{ code: string }>({ op: "login_factor", id: c.id });
     await page
       .getByLabel("Code d’authentification ou de récupération", { exact: true })
-      .fill(c.factor);
+      .fill(current.code);
+  }
   await page.getByRole("button", { name: "Se connecter", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Appels entrants", exact: true }),
@@ -35,6 +40,58 @@ async function login(page: Page, c: Credentials) {
     .getByRole("link", { name: "Appels entrants", exact: true })
     .click();
 }
+async function captureReceptionMetrics(
+  page: Page,
+  viewport: "mobile" | "desktop",
+) {
+  const target = process.env.QA_RECEPTION_METRICS;
+  if (!target) return;
+  const metrics = await page.locator(".reception-control").evaluate((panel) => {
+    const style = getComputedStyle(panel);
+    const bounds = panel.getBoundingClientRect();
+    const child = panel.firstElementChild?.getBoundingClientRect();
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      padding: {
+        top: style.paddingTop,
+        right: style.paddingRight,
+        bottom: style.paddingBottom,
+        left: style.paddingLeft,
+      },
+      border: {
+        top: style.borderTopWidth,
+        right: style.borderRightWidth,
+        bottom: style.borderBottomWidth,
+        left: style.borderLeftWidth,
+      },
+      panel: {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      },
+      firstChildOffset: child
+        ? { x: child.x - bounds.x, y: child.y - bounds.y }
+        : null,
+    };
+  });
+  let captures: Record<string, unknown> = {};
+  try {
+    captures = JSON.parse(await readFile(target, "utf8"));
+  } catch (error) {
+    if (!(
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ))
+      throw error;
+  }
+  captures[viewport] = metrics;
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, JSON.stringify(captures, null, 2) + "\n");
+}
+
 async function accessible(page: Page) {
   const r = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
@@ -242,11 +299,13 @@ test("réception : réglages admin, prise en charge, rappel et historique partag
   ).toBe(true);
   expect(errors).toEqual([]);
   await page.screenshot({ path: "/tmp/ut-inbound-mobile.png", fullPage: true });
+  await captureReceptionMetrics(page, "mobile");
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({
     path: "/tmp/ut-inbound-desktop.png",
     fullPage: true,
   });
+  await captureReceptionMetrics(page, "desktop");
 });
 
 test("erreur de chargement : aucune fausse liste vide ni création annoncée", async ({

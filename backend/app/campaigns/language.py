@@ -55,8 +55,8 @@ def refer(db,actor,campaign_id,contact_id,version,request_id,source_intent_id=No
         raise HTTPException(409,'La fiche a changé. Actualisez-la avant de confirmer le transfert.',headers={'X-Error-Code':'stale_campaign_contact'})
     if query(db,"SELECT 1 FROM staging.appointments WHERE contact_id=:id AND status='booked' AND ends_at>clock_timestamp() LIMIT 1",id=contact_id).first():
         raise HTTPException(409,'Conservez le rendez-vous ou le rappel existant. Modifiez son attribution avant de transférer ce contact.')
-    if query(db,"SELECT 1 FROM staging.callbacks WHERE contact_id=:id AND status='scheduled' AND due_at>clock_timestamp() LIMIT 1",id=contact_id).first():
-        raise HTTPException(409,'Ce contact possède un rappel à venir. Son responsable doit confirmer la réattribution avant le transfert.')
+    if query(db,"SELECT 1 FROM staging.callbacks WHERE contact_id=:id AND status='scheduled' LIMIT 1",id=contact_id).first():
+        raise HTTPException(409,'Ce contact possède un rappel programmé, même s’il est déjà arrivé à échéance. Son responsable ou un administrateur doit le clôturer avant le transfert.')
     target=destination(db,actor)
     # Reuse the source's known caller for a newly configured destination; an
     # administrator's existing choices always win, including disabled calling.

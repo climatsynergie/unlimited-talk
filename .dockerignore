@@ -11,3 +11,5 @@ artifacts
 frontend/dist
 frontend/test-results
 frontend/playwright-report
+
+qa-reports

@@ -13,7 +13,8 @@ COLUMNS=[('calls','Appels lancés'),('answered','Décrochés clients'),('voicema
  ('bookings','RDV créés'),('cancelled_bookings','RDV annulés (statut actuel)'),('bookings_per_100_calls','RDV / 100 appels'),
  ('pauses','Pauses enregistrées'),('stops','Arrêts enregistrés'),('starts','Démarrages / reprises'),
  ('automatic_pauses','Pauses automatiques identifiées'),('talk_seconds','Conversation connue (secondes)'),
- ('average_talk_seconds','Durée moyenne connue (secondes)'),('duration_known','Appels avec durée connue'),('duration_missing','Décrochés sans durée connue')]
+ ('average_talk_seconds','Durée moyenne connue (secondes)'),('duration_known','Appels avec durée connue'),('duration_missing','Décrochés sans durée connue'),
+ ('incoming_calls','Appels entrants proposés'),('incoming_answered','Entrants décrochés'),('incoming_talk_seconds','Conversation entrante connue (secondes)')]
 
 
 def workbook(report):
@@ -54,7 +55,7 @@ def workbook(report):
         ['Début',str(report['period']['start'])],['Fin incluse',str(report['period']['end'])],
         ['Fuseau horaire',report['period']['timezone']],['Extraction (UTC)',report['generated_at'].isoformat()],
         ['Jours sans activité','Les lignes à zéro sont incluses. Une absence d’activité enregistrée ne prouve pas une absence au travail.'],
-        *[[{'calls':'Appels lancés','answered':'Décrochés clients','voicemail':'Boîtes vocales','talk':'Durées de conversation','bookings':'Rendez-vous','pauses':'Pauses et arrêts','time':'Temps et fuseaux'}.get(key,key),value] for key,value in report['definitions'].items()],
+        *[[{'calls':'Appels lancés','answered':'Décrochés clients','voicemail':'Boîtes vocales','talk':'Durées de conversation','bookings':'Rendez-vous','pauses':'Pauses et arrêts','time':'Temps et fuseaux','incoming':'Appels entrants'}.get(key,key),value] for key,value in report['definitions'].items()],
         ['RDV / 100 appels','RDV créés sur la période / appels lancés sur la période × 100. Les RDV ne sont pas forcément issus des appels de cette même période.'],
         ['Durée moyenne connue','Somme des durées connues / nombre de décrochés disposant d’une durée. Les durées inconnues sont exclues.']])
     target=BytesIO();book.save(target)

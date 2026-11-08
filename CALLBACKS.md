@@ -40,6 +40,12 @@ actor, timestamp and reason. Reactivation never resurrects a cancelled callback.
 Archival, owner deactivation or assignment revocation block priority processing;
 the record remains visible for its owner/admin to resolve or cancel.
 
+English-language handoff refuses any still-scheduled callback, including overdue
+ones. Its owner or an administrator must explicitly close that reservation before
+the transfer, preserving the promised callback and avoiding a reservation that
+blocks both automatic queues after English handoff. Reconfirming an appointment also closes the
+pending callback in the same transaction as the restored appointment stage.
+
 ## Priority and automatic phone integration
 
 `due_candidates` returns the requesting agent's due, pending, unblocked callbacks

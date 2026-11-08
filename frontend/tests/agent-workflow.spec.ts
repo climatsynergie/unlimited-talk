@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import { readFileSync } from "node:fs";
 
 for (const concurrentChange of [false, true]) {

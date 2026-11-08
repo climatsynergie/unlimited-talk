@@ -12,7 +12,7 @@ from app.contacts.csv_input import validate_csv
 from app.contacts.storage import client, put_source, read_source
 from app.contacts.dispatch import dispatch_once
 from app.contacts.tasks import apply, celery
-from app.identity.security import COOKIE,CSRF_COOKIE,digest
+from app.identity.security import COOKIE,CSRF_COOKIE,digest,new_token
 from app.identity.service import authenticate
 
 assert os.environ['DB_HOST']=='db' and os.environ.get('DB_DEPLOYMENT','local')=='local'
@@ -38,7 +38,14 @@ def prepare(source, mapping):
     return identifier
 
 
-source=b'telephone,prenom,courriel\n4165550123,Alice,alice@example.test\n4165550123,,\ninvalid,Bad,\n'
+# Fresh identities keep crash/duplicate assertions meaningful on an audit rerun.
+with engine.connect() as db:
+    for _ in range(100):
+        local_phone='416555'+f'{uuid.uuid4().int%10000:04d}'
+        phone='+1'+local_phone
+        if not db.execute(text("SELECT 1 FROM staging.contacts WHERE phone=:phone UNION ALL SELECT 1 FROM staging.contact_import_rows WHERE profile->>'phone'=:phone LIMIT 1"),dict(phone=phone)).first():break
+    else:raise AssertionError('Synthetic phone pool exhausted')
+source=f'telephone,prenom,courriel\n{local_phone},Alice,alice@example.test\n{local_phone},,\ninvalid,Bad,\n'.encode()
 identifier=prepare(source,dict(phone='telephone',first_name='prenom',email='courriel'))
 # Confirmed outbox survives publication failure.
 try:
@@ -64,7 +71,7 @@ try:
     except RuntimeError: pass
 finally: service.query=original
 with engine.connect() as db:
-    assert db.execute(text("SELECT count(*) FROM staging.contacts WHERE phone='+14165550123'")).scalar_one()==0
+    assert db.execute(text('SELECT count(*) FROM staging.contacts WHERE phone=:phone'),dict(phone=phone)).scalar_one()==0
 assert service.apply_chunk(engine,identifier,limit=1)
 # Duplicate delivery + resumption do not repeat committed rows.
 assert service.apply_chunk(engine,identifier)
@@ -72,8 +79,8 @@ assert not service.apply_chunk(engine,identifier)
 with engine.begin() as db:
     row=service.job(db,identifier)
     assert (row['processed'],row['created'],row['unchanged'],row['invalid'])==(3,1,1,1)
-    contact=db.execute(text("UPDATE staging.contacts SET do_not_contact=true,non_interested=true WHERE phone='+14165550123' RETURNING id")).scalar_one()
-second=prepare(b'telephone,prenom,courriel\n4165550123,Alicia,\n',dict(phone='telephone',first_name='prenom',email='courriel'))
+    contact=db.execute(text('UPDATE staging.contacts SET do_not_contact=true,non_interested=true WHERE phone=:phone RETURNING id'),dict(phone=phone)).scalar_one()
+second=prepare(f'telephone,prenom,courriel\n{local_phone},Alicia,\n'.encode(),dict(phone='telephone',first_name='prenom',email='courriel'))
 # Real broker publication; the separately running worker consumes JSON task IDs.
 dispatch_once(engine,lambda identifier: apply.apply_async(args=[identifier],retry=False))
 import time
@@ -95,7 +102,7 @@ except ValueError: pass
 else: raise AssertionError('Changed source accepted')
 s3.delete_object(Bucket=bucket,Key='tampered.csv')
 # Background polling checks session validity without extending its idle deadline.
-token='a'*43;csrf='b'*43
+token=new_token();csrf=new_token()
 with engine.begin() as db:
     db.execute(text("INSERT INTO staging.identity_sessions(token_hash,csrf_hash,user_id,mfa_verified,expires_at,last_seen_at) VALUES (:token,:csrf,:actor,true,now()+interval '1 hour',now()-interval '5 minutes')"),dict(token=digest(token),csrf=digest(csrf),actor=actor))
     before=db.execute(text('SELECT last_seen_at FROM staging.identity_sessions WHERE token_hash=:token'),dict(token=digest(token))).scalar_one()

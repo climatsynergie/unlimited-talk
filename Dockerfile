@@ -25,7 +25,13 @@ ENV APP_REVISION=$GIT_REVISION
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /app
 COPY backend/requirements.lock /app/requirements.lock
-RUN pip install --no-cache-dir -r requirements.lock && addgroup -g 10001 staging && adduser -D -u 10001 -G staging staging
+RUN python -m pip install --no-cache-dir --upgrade --only-binary=:all: pip==26.3 \
+    && python -m pip --version \
+    && python -m pip install --no-cache-dir -r requirements.lock \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip \
+    && python -c "import ensurepip, shutil, sysconfig; from pathlib import Path; target=Path(ensurepip.__file__).resolve().parent; assert target==Path(sysconfig.get_path('stdlib'))/'ensurepip'; shutil.rmtree(target)" \
+    && addgroup -g 10001 staging && adduser -D -u 10001 -G staging staging
 RUN mkdir -p /var/spool/unlimited-talk-recordings && chown 10001:10001 /var/spool/unlimited-talk-recordings && chmod 700 /var/spool/unlimited-talk-recordings
 COPY backend/ /app/
 COPY --from=web /web/dist /app/web

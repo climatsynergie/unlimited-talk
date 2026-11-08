@@ -1,6 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+const unknownRequests = new WeakMap<Page, string[]>();
+test.afterEach(({ page }) => {
+  expect(unknownRequests.get(page) ?? []).toEqual([]);
+});
 
 const uuid = (n: number) =>
   `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
@@ -14,6 +18,8 @@ const campaign = {
   contact_count: 0,
 };
 async function fixture(page: Page, dense = false) {
+  const unexpected: string[] = [];
+  unknownRequests.set(page, unexpected);
   const agents = Array.from({ length: 65 }, (_, i) => ({
     id: uuid(i + 10),
     display_name: `Agent ${String(i + 1).padStart(2, "0")}`,
@@ -70,6 +76,11 @@ async function fixture(page: Page, dense = false) {
         },
         mfa_enrollment_required: false,
       };
+    else if (
+      path === "/api/reporting/presence" &&
+      route.request().method() === "POST"
+    )
+      body = { ok: true };
     else if (path === "/api/telephony/test/session")
       body = { enabled: true, active: null, max_duration_seconds: 600 };
     else if (path === "/api/telephony/dialer/session")
@@ -154,11 +165,13 @@ async function fixture(page: Page, dense = false) {
         events: [],
         has_more: false,
       };
-    else
+    else {
+      unexpected.push(`${route.request().method()} ${path}`);
       return route.fulfill({
         status: 404,
         json: { detail: "Ressource indisponible dans ce test." },
       });
+    }
     await route.fulfill({ json: body });
   });
   return proof;

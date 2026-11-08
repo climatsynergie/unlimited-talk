@@ -130,4 +130,5 @@ def state(actor:UUID,request:Request):
     return dict(contacts=[dict(c) for c in contacts],calls=[dict(c) for c in calls])
 
 
-uvicorn.run(app,host='0.0.0.0',port=8000,log_level='warning',access_log=False)
+if __name__=='__main__':
+    uvicorn.run(app,host='0.0.0.0',port=8000,log_level='warning',access_log=False)

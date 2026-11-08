@@ -14,7 +14,12 @@ import { Contacts, Imports } from "./Contacts";
 import { Conversations } from "./Conversations";
 import { Workstation } from "./Workstation";
 import { IncomingPhoneBar } from "./IncomingPhone";
-import { PhoneBar, PhoneProvider, usePhoneController } from "./Phone";
+import {
+  PhoneBar,
+  PhoneProvider,
+  usePhoneController,
+  useIncomingPhoneController,
+} from "./Phone";
 import { Brand, Field, Icon, Notice, Password, Submit } from "./ui";
 
 type Page =
@@ -220,8 +225,10 @@ function Workspace({
     () => currentPage() ?? (identity.user.role === "admin" ? "users" : "home"),
   );
   const phone = usePhoneController();
+  const incoming = useIncomingPhoneController();
   async function leave(all = false) {
-    // Stop pending media immediately, before the logout response or React unmount.
+    // Stop both media directions before waiting for logout or React unmount.
+    incoming.dispose();
     phone.hangup();
     phone.dispose();
     try {
@@ -229,12 +236,15 @@ function Workspace({
     } catch (failure) {
       if (!(failure instanceof ApiError && failure.status === 401)) {
         phone.activate();
+        incoming.activate();
         void phone.refresh(); // Recover state, never reconnect the old call.
+        void incoming.prepare();
       }
       throw failure;
     }
   }
   function reauthenticate() {
+    incoming.dispose();
     phone.hangup();
     phone.dispose();
     onSessionEnded();
@@ -517,6 +527,7 @@ function Workspace({
 export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
   const [entry, setEntry] = useState<PrivateEntry>(initialEntry);
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const [mediaSessionRevision, setMediaSessionRevision] = useState(0);
   const [loading, setLoading] = useState(!initialEntry);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -684,10 +695,16 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
     );
   if (identity)
     return (
-      <PhoneProvider key={identity.user.id}>
+      <PhoneProvider
+        key={identity.user.id}
+        sessionRevision={mediaSessionRevision}
+      >
         <Workspace
           identity={identity}
-          setIdentity={setIdentity}
+          setIdentity={(value) => {
+            setIdentity(value);
+            setMediaSessionRevision((revision) => revision + 1);
+          }}
           onSessionEnded={() =>
             signedOut("Reconnectez-vous pour confirmer votre identité.")
           }

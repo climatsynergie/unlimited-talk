@@ -89,8 +89,13 @@ def reserve(body: Reservation, request: Request):
     if not getattr(request.app.state, 'voice_calling_enabled', False):
         raise HTTPException(503, 'Les appels ne sont pas activés.')
     configured = profile(request)
-    identity.limited(request.app.state.engine, 'voice-reserve', request.cookies.get('__Host-ut_session', ''),
-                     limit=30, seconds=60, global_limit=600)
+    # Authenticate before charging a shared budget. Release the connection before
+    # the limiter's independent transaction; authenticate again before mutation.
+    with request.app.state.engine.begin() as db:
+        actor = caller(db, request, configured)
+        budget_actor = str(actor['id'])
+    identity.limited(request.app.state.engine, 'voice-reserve', budget_actor,
+                     limit=30, seconds=60, global_limit=600, authenticated=True)
     try:
         with request.app.state.engine.begin() as db:
             actor = caller(db, request, configured)

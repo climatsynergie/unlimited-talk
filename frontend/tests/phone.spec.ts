@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
@@ -20,14 +20,30 @@ declare global {
   }
 }
 const userId = "00000000-0000-0000-0000-000000000011";
+const unknownRequests = new WeakMap<Page, string[]>();
+test.afterEach(({ page }) => {
+  expect(unknownRequests.get(page) ?? []).toEqual([]);
+});
 async function setup(
   page: Page,
   enabled = true,
   role: "admin" | "agent" = "admin",
 ) {
+  const unexpected: string[] = [];
+  unknownRequests.set(page, unexpected);
+  await page.route("**/api/**", (route) => {
+    unexpected.push(
+      `${route.request().method()} ${new URL(route.request().url()).pathname}`,
+    );
+    return route.fulfill({
+      status: 404,
+      json: { detail: "Unexpected isolated phone request" },
+    });
+  });
   await disabledDialer(page);
   const state = {
     enabled,
+    unexpected,
     reservations: 0,
     sdkLoads: 0,
     rows: new Map<
@@ -53,6 +69,11 @@ async function setup(
         },
         mfa_enrollment_required: false,
       },
+    }),
+  );
+  await page.route("**/api/inbound/reception", (route) =>
+    route.fulfill({
+      json: { enabled: false, queues: [], registration: null, active: null },
     }),
   );
   await page.route("**/api/telephony/active-calls", (route) =>
@@ -493,6 +514,7 @@ test("échec de déconnexion : session conservée et média fermé sans relance"
   ).toBeDisabled();
   expect(state.reservations).toBe(1);
   expect(state.sdkLoads).toBe(1);
+  expect(state.unexpected).toEqual([]);
 });
 
 test("saisie libre conservée pendant la navigation, numéro invalide sans appel", async ({

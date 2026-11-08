@@ -105,6 +105,7 @@ export class IncomingController {
   private requests = new AbortController();
   private closed = false;
   private generation = 0;
+  private contextRevision = 0;
   private device: IncomingMediaDevice | null = null;
   private call: IncomingMediaCall | null = null;
   private polling = false;
@@ -145,15 +146,26 @@ export class IncomingController {
   snapshot = () => this.state;
   private update(patch: Partial<IncomingState>) {
     if (this.closed) return;
+    if ("offer" in patch || "registrationId" in patch || "local" in patch)
+      ++this.contextRevision;
     this.state = { ...this.state, ...patch };
     this.options.onBusy(!!this.state.offer || !!this.call);
     for (const listener of this.listeners) listener();
   }
   async prepare() {
     const lifecycle = this.requests;
+    const generation = this.generation;
+    const context = this.contextRevision;
+    const current = () =>
+      !this.closed &&
+      lifecycle === this.requests &&
+      generation === this.generation &&
+      context === this.contextRevision;
     try {
       const data = await this.transport.session(lifecycle.signal);
-      if (this.closed || lifecycle !== this.requests) return;
+      // An older session snapshot cannot settle an offer or registration that
+      // appeared while its request was in flight.
+      if (!current()) return;
       this.update({ loaded: true, enabled: data.enabled, queues: data.queues });
       if (
         data.registration?.owned_session &&
@@ -170,7 +182,7 @@ export class IncomingController {
       } else if (!data.active && this.state.offer && !this.call)
         this.clearOffer();
     } catch {
-      if (!this.closed && lifecycle === this.requests)
+      if (current())
         this.update({
           loaded: true,
           error: "La réception n’a pas pu être vérifiée. Réessayez.",
@@ -258,6 +270,18 @@ export class IncomingController {
       await this.beat();
     } catch (error) {
       if (!this.closed && generation === this.generation) {
+        if (this.call && this.state.offer) {
+          // Registration can already have admitted an incoming call before
+          // the final setup heartbeat returns. Keep its media on control-plane
+          // failure, just as later heartbeat failures preserve ongoing calls.
+          this.update({
+            wanted: false,
+            error:
+              "La réception est en pause. L’appel actuel est conservé pendant la vérification du réseau.",
+          });
+          this.lastHeartbeat = 0;
+          return;
+        }
         ++this.generation;
         try {
           this.call?.reject();

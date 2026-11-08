@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 const id = (n: number) =>
@@ -29,7 +29,7 @@ const empty = {
   first_call_at: null,
   last_call_at: null,
 };
-async function fixture(page: Page, role = "admin") {
+async function fixture(page: Page, role = "admin", incoming = false) {
   await page.clock.install({ time: new Date("2026-11-05T12:00:00Z") });
   const agents = Array.from({ length: 22 }, (_, i) => ({
     id: id(i + 20),
@@ -39,6 +39,9 @@ async function fixture(page: Page, role = "admin") {
     is_active: i !== 21,
     metrics: {
       ...empty,
+      ...(incoming
+        ? { incoming_calls: 7, incoming_answered: 3, incoming_talk_seconds: 95 }
+        : {}),
       calls: 24 + i,
       answered: 12,
       contacts: 18,
@@ -54,7 +57,22 @@ async function fixture(page: Page, role = "admin") {
       average_talk_seconds: 60,
     },
   }));
+  if (incoming)
+    agents.push({
+      ...agents[0],
+      id: id(99),
+      display_name: "Admin réception",
+      role: "admin",
+      metrics: {
+        ...agents[0].metrics,
+        calls: 0,
+        answered: 0,
+        talk_seconds: 0,
+        duration_known: 0,
+      },
+    });
   const requests: URL[] = [];
+  const unexpected: string[] = [];
   let failedExport = false;
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -88,11 +106,16 @@ async function fixture(page: Page, role = "admin") {
         paused: 1,
         items: agents.map((agent, i) => ({
           ...agent,
-          status: i === 0 ? "connected" : i === 1 ? "paused" : "offline",
+          status:
+            i === 0 || agent.id === id(99)
+              ? "connected"
+              : i === 1
+                ? "paused"
+                : "offline",
           online: i < 2,
           last_seen_at: null,
           campaign_name: "Campagne Canada",
-          call_id: i === 0 ? id(500) : null,
+          call_id: i === 0 || agent.id === id(99) ? id(500) : null,
           destination: i === 0 ? "+14165550100" : null,
           consumed_at: null,
         })),
@@ -152,6 +175,13 @@ async function fixture(page: Page, role = "admin") {
                     (i === 24 ? "01" : "00") +
                     ":00Z",
                   ...empty,
+                  ...(incoming
+                    ? {
+                        incoming_calls: 2,
+                        incoming_answered: 1,
+                        incoming_talk_seconds: 45,
+                      }
+                    : {}),
                   calls: i % 5,
                   answered: i % 2,
                 }),
@@ -167,12 +197,19 @@ async function fixture(page: Page, role = "admin") {
           time: "Présence récente et temps travaillé sont distincts.",
         },
       };
-    } else body = {};
+    } else {
+      unexpected.push(url.pathname);
+      return route.fulfill({
+        status: 404,
+        json: { detail: "Unexpected isolated dashboard request" },
+      });
+    }
     return route.fulfill({ json: body });
   });
   return {
     agents,
     requests,
+    unexpected,
     failExport: () => {
       failedExport = true;
     },
@@ -328,4 +365,76 @@ test("dashboard administrateur : filtres explicites, lisibilité et accessibilit
   ).toBeDisabled();
   await page.getByRole("button", { name: "Appliquer", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("trois mois maximum");
+});
+
+test("dashboard : entrants séparés des sortants dans les indicateurs, agents, jours et heures", async ({
+  page,
+}) => {
+  const proof = await fixture(page, "admin", true);
+  await page.goto("/admin/tableau-de-bord");
+  const kpi = (title: string) =>
+    page
+      .locator(".report-kpi")
+      .filter({
+        has: page.locator("span").filter({ hasText: new RegExp(`^${title}$`) }),
+      })
+      .locator("strong");
+  await expect(kpi("Appels entrants proposés")).toHaveText("7");
+  await expect(kpi("Entrants décrochés")).toHaveText("3");
+  await expect(kpi("Conversation entrante connue")).toHaveText(
+    "0 h 01 min 35 s",
+  );
+  await expect(kpi("Appels lancés")).toHaveText("24");
+  await expect(kpi("Décrochés clients")).toHaveText("12");
+  await expect(kpi("Conversation connue")).toHaveText("0 h 12 min 00 s");
+  await expect(
+    page.locator(".report-agent").filter({ hasText: "Admin réception" }),
+  ).toBeVisible();
+  const comparison = page.getByRole("table");
+  await expect(
+    comparison.getByRole("columnheader", {
+      name: "Entrants proposés",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const agent = comparison.getByRole("row").filter({
+    has: page.getByRole("button", { name: "Agent 01", exact: true }),
+  });
+  await expect(agent.getByRole("cell").nth(4)).toHaveText("7");
+  await expect(agent.getByRole("cell").nth(5)).toHaveText("3");
+  await expect(agent.getByRole("cell").nth(6)).toHaveText("0 h 01 min 35 s");
+  await page.getByRole("tab", { name: "Agent 01", exact: true }).click();
+  const journal = page.getByRole("table");
+  await expect(
+    journal.getByRole("columnheader", {
+      name: "Conversation entrante connue",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const day = journal.getByRole("row").nth(1);
+  await expect(day.getByRole("cell").nth(3)).toHaveText("7");
+  await expect(day.getByRole("cell").nth(4)).toHaveText("3");
+  await expect(day.getByRole("cell").nth(5)).toHaveText("0 h 01 min 35 s");
+  const hour = page.locator(".report-hour-cells > div").first();
+  await expect(hour).toContainText("2 entrants proposés · 1 décrochés");
+  await expect(hour).toContainText("0 h 00 min 45 s de conversation entrante");
+  expect(proof.unexpected).toEqual([]);
+});
+
+test("dashboard : ancien rapport sans compteurs entrants conserve les sortants et affiche zéro", async ({
+  page,
+}) => {
+  const proof = await fixture(page);
+  await page.goto("/admin/tableau-de-bord");
+  const card = page
+    .locator(".report-kpi")
+    .filter({ hasText: "Appels entrants proposés" });
+  await expect(card.locator("strong")).toHaveText("0");
+  await expect(
+    page
+      .locator(".report-kpi")
+      .filter({ hasText: "Appels lancés" })
+      .locator("strong"),
+  ).toHaveText("24");
+  expect(proof.unexpected).toEqual([]);
 });
