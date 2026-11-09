@@ -43,7 +43,7 @@ Unit/controller/build commands and all10 fresh populated migration gates are ind
 - Rollback initially detected a changed fingerprint during a concurrent QA fixture run. Exact overlapping UTC/row-count proof is in security/rollback-concurrent-fixture-proof.json. An exclusive repeat preserved the original complete fingerprint and added per-table diagnostics; both phases pass with no app fix or weakened assertion.
 
 - Re-running imports exposed the original fixture’s fixed phone already present from the first successful run. The fixture now chooses a verified unused synthetic phone and random session tokens; all original crash/duplicate/history assertions remain. The raw failed rerun and successful repeat are preserved.
-- A clean Docker build was attempted but failed with exit1 because the local audit disk filled. Only its own failed intermediate container was removed; no user images/volumes were pruned. Clean release-image verification remains BLOCKED.
+- A clean Docker build was attempted but failed with exit1 because the local audit disk filled. Only its own failed intermediate container was removed; no user images/volumes were pruned. The later GitHub clean build and complete Foundation CI passed; the earlier local failure is retained.
 Failure screenshots/traces: evidence/browser-artifacts/main (initial), evidence/browser-artifacts/recheck (repair run), evidence/frontend/*-artifacts (original focused reproductions). ZIPs are retained locally and ignored by Git; CI uploads new browser diagnostics on failure. Successful selected desktop/mobile screenshots are under evidence/screenshots.
 
 ## Reproduction
@@ -52,4 +52,10 @@ Synthetic lab arguments, image build, frozen-source manifests and commands are i
 
 The original aggregate driver remains FAIL when any of its original gates failed; accepted focused/full repair reruns are shown independently. No failed evidence is deleted or relabelled.
 
-Publication safeguard: GitHub push protection rejected generated synthetic Twilio SIDs in raw QA logs. No bypass was used. Raw evidence remains local and is excluded from Git; source, tests, reports and reproducible tools are retained. The unpublished QA commit was rewritten to remove those artifacts, with main unchanged.
+## Independent clean GitHub validation
+
+Foundation CI **PASS** for code commit `e09d9e496440d333a6433c595b2bf6d46cc66e85`: [run42537634865](https://github.com/climatsynergie/unlimited-talk/actions/runs/42537634865). All test-job steps succeeded; publish was skipped. Exact commands are in `.github/workflows/ci.yml` at that commit; public run/job/step evidence is preserved in `evidence/github-ci-run-final.json` and `github-ci-jobs-final.json`. Process exit codes are not exposed by that API and are not invented. The local equivalents have actual exit codes in the ledger.
+
+CI log archive download was **BLOCKED**, HTTP403, due to missing log-download authorization. No authentication bypass was attempted. The run conclusion and individual step states were retrieved successfully. Main remained662b450; no deploy/merge/publish occurred.
+
+The initial failed aggregate, failed fixtures, read-only coverage-dataset collection error and local disk-space build failure remain preserved. Their successful corrections/replacements are linked independently. Passing compatibility rollback verifies schema/data preservation, not that the older application contains the new security fixes; production needs a reviewed hardened fallback or patch-forward/admission-isolation plan.

@@ -21,7 +21,7 @@ PASS: executed assertions satisfied. FAIL: executed assertions failed. BLOCKED: 
 | DEPENDENCIES | P0 | Native image patch status | BLOCKED | JavaScript/Python scans: zero matches; APK advisory gate requires patch/rescan or precise VEX |
 | CAPACITY | P1 | CSV parser at 100,000 rows / 10 MiB / 512 MiB | PASS | One parse and two overlapping parses; full PostgreSQL import throughput not tested |
 | CARRIER | P0 | Real headset audio, recording and 20 real agents | BLOCKED | No live provider writes or calls; database admission does not establish audio capacity |
-| CLEAN BUILD | P0 | Clean release image, current GitHub CI and provenance | BLOCKED | Full build failed with exit1 because the local audit disk filled; matched-dependency QA image tested |
+| CLEAN BUILD / CI | P0 | Clean Docker build and complete Foundation CI | PASS | GitHub run42537634865, code commit e09d9e4; publication skipped |
 | CLOUD RECOVERY | P0 | Managed failover, host/object restore and cloud IAM | BLOCKED | No destructive production operations; local database recovery is a separate test |
 | EXHAUSTIVE INPUTS | P2 | Every input, browser/device and distributed slow-trickle combination | NOT TESTED | No blanket exhaustive-coverage claim |
 

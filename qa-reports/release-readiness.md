@@ -1,8 +1,8 @@
 # Release readiness
 
-**Verdict: NOT READY for production release.**
+**Verdict: NO-GO for production release.**
 
-The audit repairs confirmed defects and provides executable evidence. Native dependency review, a clean release-image build/CI and live carrier acceptance remain blocked. Production data, routing and deployment were not changed.
+The audit repairs confirmed defects and provides executable evidence. Native dependency review and live carrier acceptance remain blocked. The clean Docker build and complete Foundation CI passed on the QA branch. Production data, routing and deployment were not changed.
 
 ## Reviewed source and environment
 
@@ -22,7 +22,7 @@ Seven high application findings, five medium application findings and two low fi
 ## Required before release
 
 1. **Resolve native image advisories.** Test patched/re-pinned images and rescan, or support each remaining issue with a narrowly justified VEX review. The gateway's latest tag resolves to the same affected digest, so pulling again alone cannot resolve this gate.
-2. **Build and verify the release artifact.** Run the complete Foundation CI on the reviewed commit, then verify the published digest, revision and attestation. The local clean build failed with exit1 due to the audit workspace's disk limit. This is separate from production server capacity. A tested incremental QA image is not a clean, published release artifact.
+2. **Use the reviewed release process after approval.** Foundation CI passed on QA code commit `e09d9e496440d333a6433c595b2bf6d46cc66e85`: [run42537634865](https://github.com/climatsynergie/unlimited-talk/actions/runs/42537634865). This includes a clean Docker build. The earlier local build failure remains preserved. The publish job was skipped; no release image was published, no merge occurred and no deployment ran. A later approved main release must verify its own digest/revision/attestation.
 3. **Complete carrier acceptance.** On a selected UT-only line, test real inbound/outbound calls, two-way headset audio, recording/archive/playback and missed-call/voicemail behavior. Progress from three to twenty real agents with measured latency/CPS and occupancy checks. Local synthetic admission and real browser/API/PostgreSQL flows already pass their stated scopes.
 4. **Review credentials and cloud access.** Confirm previously exposed credentials were rotated/revoked. Verify line ownership/routing, Spaces permissions, trusted sources, IAM and monitoring. Live secret values are excluded from reports; retained traces can contain disposable synthetic credentials.
 5. **Review complete-system recovery.** Verify managed PostgreSQL PITR/failover, object-storage restore/retention, host restore and secret/MFA-key recovery. Local database restore/outage tests do not establish full production disaster recovery.
@@ -35,4 +35,8 @@ Seven high application findings, five medium application findings and two low fi
 - Product review remains for explicit English-language reversal, direct incoming qualification/booking, calendar agent-filter windows and English vendor SDK errors. New product policy was not invented during QA.
 - Coverage measures scoped statements/branches, not correctness or perfection. Raw missing lines/arcs and limitations are in [coverage-summary.md](coverage-summary.md).
 
+The code is pushed only to the QA branch. Raw forensic evidence remains local because repository push protection rejects generated synthetic Twilio identifiers; no bypass was used. Public API download of CI logs returned403, while run/job/step success metadata is preserved. GitHub conclusions do not expose process exit codes; local commands retain actual exits.
+
 No release approval or deployment is inferred from this report. Review the concrete QA patch and evidence, then satisfy the remaining gates.
+
+Final report updates are retained in the isolated worktree. The pushed and CI-tested software commit is e09d9e496440d333a6433c595b2bf6d46cc66e85; subsequent changes affect QA documentation/tools only. Raw forensic files and screenshots remain local.
