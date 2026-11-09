@@ -1,5 +1,7 @@
 # Native refresh production readiness — 9 November 2026
 
+> Later authorization/update: the user approved main promotion and operational deployment. Main405dc5a CI/publication passed; the usual manual deployment is pending. The earlier audit snapshot and its native/carrier NO-GO limits remain historical evidence. See [deployment-preparation.md](deployment-preparation.md) for current operational status.
+
 **Production: NO-GO.** Fresh functional CI: **PASS**. Native security clearance: **FAIL / unresolved**. Real-call acceptance: **BLOCKED**. A green functional pipeline does not resolve the security or carrier gates.
 
 QA source: `405dc5a611da7795ecac85b7302c54702502e9b8` on `qa/full-audit-20261108`. Snapshot: 2026-11-09T19:58:03.404103+00:00. [Fresh Foundation CI](https://github.com/climatsynergie/unlimited-talk/actions/runs/42685739475). New product pins remain confined to QA; main was read-only verified unchanged at `662b450501a70431b0effbb087501e727111099d`. No main merge, deployment, real call, provider-routing change or production-data write occurred.

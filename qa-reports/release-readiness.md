@@ -1,5 +1,7 @@
 # Release readiness
 
+> Later authorization/update: the user approved main promotion and operational deployment. Main405dc5a CI/publication passed; the usual manual deployment is pending. The earlier audit snapshot and its native/carrier NO-GO limits remain historical evidence. See [deployment-preparation.md](deployment-preparation.md) for current operational status.
+
 > Native image refresh, 9 November 2026: new compatible digest pins passed a fresh clean build and full functional CI on source405dc5a. The older CI results below remain historical evidence; native security and real-carrier gates remain open. See [native-refresh-readiness.md](native-refresh-readiness.md). Production release remains NO-GO.
 
 **Verdict: NO-GO for production release.**
