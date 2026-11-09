@@ -1,6 +1,6 @@
 # Release readiness
 
-> Native image refresh, 9 November 2026: new compatible digest pins are under validation. The CI results below apply to the preceding QA source, not this new candidate. See [native-refresh-readiness.md](native-refresh-readiness.md). Production release remains NO-GO.
+> Native image refresh, 9 November 2026: new compatible digest pins passed a fresh clean build and full functional CI on source405dc5a. The older CI results below remain historical evidence; native security and real-carrier gates remain open. See [native-refresh-readiness.md](native-refresh-readiness.md). Production release remains NO-GO.
 
 **Verdict: NO-GO for production release.**
 
@@ -23,7 +23,7 @@ Seven high application findings, five medium application findings and two low fi
 
 ## Required before release
 
-1. **Resolve native image advisories.** Test patched/re-pinned images and rescan, or support each remaining issue with a narrowly justified VEX review. The gateway's latest tag resolves to the same affected digest, so pulling again alone cannot resolve this gate.
+1. **Resolve native image advisories.** Test patched/re-pinned images and rescan, or support each remaining issue with a narrowly justified VEX review. The old gateway namespace remained affected. The new official slim namespace and refreshed compatible digests are now in QA; embedded Expat, wheel-native review and the remaining package-origin gate are tracked in [the native review](native-library-review.md).
 2. **Use the reviewed release process after approval.** Foundation CI passed on QA code commit `e09d9e496440d333a6433c595b2bf6d46cc66e85`: [run42537634865](https://github.com/climatsynergie/unlimited-talk/actions/runs/42537634865). This includes a clean Docker build. The earlier local build failure remains preserved. The publish job was skipped; no release image was published, no merge occurred and no deployment ran. A later approved main release must verify its own digest/revision/attestation.
 3. **Complete carrier acceptance.** On a selected UT-only line, test real inbound/outbound calls, two-way headset audio, recording/archive/playback and missed-call/voicemail behavior. Progress from three to twenty real agents with measured latency/CPS and occupancy checks. Local synthetic admission and real browser/API/PostgreSQL flows already pass their stated scopes.
 4. **Review credentials and cloud access.** Confirm previously exposed credentials were rotated/revoked. Verify line ownership/routing, Spaces permissions, trusted sources, IAM and monitoring. Live secret values are excluded from reports; retained traces can contain disposable synthetic credentials.
@@ -41,4 +41,4 @@ The code is pushed only to the QA branch. Raw forensic evidence remains local be
 
 No release approval or deployment is inferred from this report. Review the concrete QA patch and evidence, then satisfy the remaining gates.
 
-Final report updates are retained in the isolated worktree. The pushed and CI-tested software commit is e09d9e496440d333a6433c595b2bf6d46cc66e85; subsequent changes affect QA documentation/tools only. Raw forensic files and screenshots remain local.
+The earlier application-repair CI source was e09d9e496440d333a6433c595b2bf6d46cc66e85. The new compatible native-image pin source is405dc5a611da7795ecac85b7302c54702502e9b8; its independent validation and remaining blockers are in [native-refresh-readiness.md](native-refresh-readiness.md). Later report/tool updates do not change the product source validated by that run. Raw forensic files and screenshots remain local.

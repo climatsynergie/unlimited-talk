@@ -28,3 +28,7 @@ PASS: executed assertions satisfied. FAIL: executed assertions failed. BLOCKED: 
 Detailed commands and results: [regression results](regression-results.md), [coverage](coverage-summary.md), [security review](security-review.md), [evidence ledger](evidence-ledger.md).
 
 Additional dynamic gaps include delayed campaign navigation/filter responses, every upload/unmount/lost-ack combination, all operating systems/headsets/mobile browsers, live SDK expiry and hardware permissions, managed provider retry timing and continuous distributed slow trickles. Selected failure paths are tested; every combination is not.
+
+## Native refresh and real-call acceptance — 9 November
+
+The compatible-image candidate is tested separately from the earlier application repair baseline. [Fresh validation](native-refresh-validation.md) distinguishes executed PASS/FAIL and pending/not-tested CI steps. Package-only scans cannot establish complete native-component clearance. [Real-call acceptance matrix](real-call-acceptance-matrix.md) maps automation, credentials and human participation; all carrier/media scenarios remain unexecuted. Live audio transfer is unsupported.

@@ -27,3 +27,14 @@ Detailed source references, exact before commands, timestamps and root causes: [
 Residual product/security gaps: provider exceptions may appear in English; language handoff has no explicit reverse-language action; incoming bar lacks direct qualification/booking workflow; calendar agent choices derive from visible dates. These require product acceptance/targeted execution and are **NOT TESTED** as complete journeys. Continuous slow-trickle resistance and large-scale timing/load remain unestablished. See release-readiness.md for external acceptance gates.
 
 QA-12 partial remediation: installed-inventory scanning found pip25.0.1 outside the64-package lock (12 scanner matches, six distinct advisories). The Dockerfile now bootstraps pinned pip26.3, verifies the dependency graph, then removes pip and ensurepip from runtime. Three artifact-policy tests reproduced2FAIL/1PASS before and3PASS after; full hardened units208PASS and actual64-distribution OSV scan0 matches. Native APK findings remain open. Evidence: evidence/backend/dependency-hardening-review.md, evidence/hardened-backend-units.json, evidence/hardened-python-advisories.json.
+
+## Native refresh follow-up — 9 November
+
+Compatible image pins were updated in QA commit `405dc5a611da7795ecac85b7302c54702502e9b8`; no production deploy or main merge occurred. The original repaired application defects and their regression evidence remain intact. The native release gate remains **OPEN**:
+
+- **HIGH component findings:** CPython3.12.16 statically vendors Expat2.9.0, preceding four2.10 security fixes. Updating Alpine Expat does not relink it. No directly exploitable application XML route was established; that does not clear the affected library.
+- **Unresolved native reachability:** Psycopg-binary3.3.6 and latest compatible3.3.8 both bundle OpenSSL3.5.7. The vendor HIGH DTLS issue requires review against libpq's TCP/TLS use; no exploit is asserted.
+- **FAIL package-origin gate:** selected candidate APK inventories still match zlib CVE-2026-4738. Regular libz ELF/build evidence supports a narrowly scoped contributed-code exclusion; supported-branch1.4 exists, but no broad VEX approval or derivative-package upgrade was performed.
+- **Acceptance gap:** live audio transfer is not implemented. Treat it as unsupported scope, not a feature that passed QA. Real PSTN/audio/concurrent-agent acceptance remains blocked without authorization, credentials and participants.
+
+See [native-library-review.md](native-library-review.md) and [current readiness](native-refresh-readiness.md) for evidence and remediation options.

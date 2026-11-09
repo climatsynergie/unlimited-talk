@@ -59,3 +59,7 @@ Foundation CI **PASS** for code commit `e09d9e496440d333a6433c595b2bf6d46cc66e85
 CI log archive download was **BLOCKED**, HTTP403, due to missing log-download authorization. No authentication bypass was attempted. The run conclusion and individual step states were retrieved successfully. Main remained662b450; no deploy/merge/publish occurred.
 
 The initial failed aggregate, failed fixtures, read-only coverage-dataset collection error and local disk-space build failure remain preserved. Their successful corrections/replacements are linked independently. Passing compatibility rollback verifies schema/data preservation, not that the older application contains the new security fixes; production needs a reviewed hardened fallback or patch-forward/admission-isolation plan.
+
+## Native refresh re-execution — 9 November
+
+[Fresh execution ledger](native-refresh-validation.md) records every local command/exit and fresh QA-branch CI step. A local clean build failed for disk capacity and remains preserved; a remote clean build is evaluated independently. Prior source's green CI is not used as proof for the new pins. Public CI metadata reports step conclusions, not numeric shell exits or raw individual-test counts. The [carrier plan](real-call-acceptance-plan.md) contains no executed-call PASS.

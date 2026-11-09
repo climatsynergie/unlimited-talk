@@ -55,3 +55,7 @@ Coverage7.17.2 runs through a QA-only .pth hook with the compatible musllinux na
 Commands: `python3 qa-reports/tools/coverage_containers.py` while executing guarded gates; stop QA Python services gracefully to flush; `/tmp/ut-qa-audit-tools/bin/python qa-reports/tools/combine_coverage.py`; `/tmp/ut-qa-audit-tools/bin/python qa-reports/tools/render_coverage.py`. Installation and native-wheel versions are in evidence. Raw process files remain local and are ignored by Git.
 
 Residual gaps include actual media/token/network behavior on real devices; provider outage/retry timing; distributed call latency; all endpoint/input permutations; every modal/keyboard/screen-reader/browser combination; adversarial filter/navigation/upload interruptions beyond the existing cases. Uncovered branches are review targets, not automatically defects or implicitly waived acceptance gates. See test-matrix.md and release-readiness.md for BLOCKED/NOT TESTED boundaries.
+
+## Native refresh scope — 9 November
+
+This continuation reruns functional gates after compatible base-image pin updates. It does **not** remeasure coverage; the percentages above remain scoped measurements from the preceding audited application source. The application logic and tests are unchanged by the image-pin commit. Fresh execution results, exact local commands/exits and CI-conclusion limits are in [native-refresh-validation.md](native-refresh-validation.md). Native security scans are not coverage measurements.

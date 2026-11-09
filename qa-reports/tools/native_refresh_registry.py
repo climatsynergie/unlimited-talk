@@ -61,7 +61,9 @@ def inventory(record):
     stream=DigestStream(response)
     with tarfile.open(fileobj=stream,mode='r|*') as archive:
      for member in archive:
-      path=member.name.lstrip('./')
+      path=member.name
+      while path.startswith('./'):path=path[2:]
+      path=path.lstrip('/')
       wanted_elf=(path.startswith('usr/local/lib/python3.12/lib-dynload/pyexpat.') and path.endswith('.so')) or (path.startswith('usr/lib/libz.so.') and member.isfile())
       if (path in wanted or wanted_elf) and member.isfile():
        assert member.size<16*1024*1024,(path,member.size)
@@ -70,7 +72,7 @@ def inventory(record):
        parent,_,leaf=path.rpartition('/')
        if leaf=='.wh..wh..opq':
         for key in list(files):
-         if key.startswith(parent+'/'):files.pop(key)
+         if not parent or key.startswith(parent+'/'):files.pop(key)
        elif leaf.startswith('.wh.'):
         removed=(parent+'/' if parent else '')+leaf[4:]
         for key in list(files):

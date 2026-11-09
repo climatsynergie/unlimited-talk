@@ -4,9 +4,10 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'qa-reports/evidence/native-refresh'
 records=json.loads((OUT/'inventories.json').read_text());cache={};reports=[]
 comparator='unlimited-talk-qa-audit:dependency-hardened'
+SELECTED={'python','node','redis','postgres','gateway-current-slim'}
 for record in records:
  if 'error' in record:
-  reports.append(record);continue
+  reports.append({**record,'selected_for_candidate':record['name'] in SELECTED});continue
  branch='v'+'.'.join(record['alpine_release'].split('.')[:2]);advisories={};sources=[]
  for repository in ('main','community'):
   url=f'https://secdb.alpinelinux.org/{branch}/{repository}.json';sources.append(url)
@@ -24,7 +25,9 @@ for record in records:
  result=subprocess.run(command,input=script,capture_output=True,text=True,timeout=60)
  order=result.stdout.splitlines();assert result.returncode==0,(record['name'],result.returncode,result.stderr);assert len(order)==len(checks),(record['name'],len(order),len(checks),result.stderr)
  hits=[dict(package=p['name'],origin=p['origin'],installed=p['version'],fixed=fix,advisories=cves) for (p,fix,cves),comparison in zip(checks,order) if comparison=='<']
- output=dict(name=record['name'],repository=record['repository'],tag=record['tag'],index_digest=record['index_digest'],platform_digest=record['platform_digest'],alpine=record['alpine_release'],package_count=record['package_count'],comparisons=len(checks),scope='APK-origin version ranges only; excludes bundled CPython/Node/wheels and reachability. A hit is not an exploit proof.',sources=sources,known_unfixed=hits,apk_comparator=dict(command=command,exit_code=result.returncode),at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+ output=dict(name=record['name'],selected_for_candidate=record['name'] in SELECTED,repository=record['repository'],tag=record['tag'],index_digest=record['index_digest'],platform_digest=record['platform_digest'],alpine=record['alpine_release'],package_count=record['package_count'],comparisons=len(checks),scope='APK-origin version ranges only; excludes bundled CPython/Node/wheels and reachability. A hit is not an exploit proof.',sources=sources,known_unfixed=hits,apk_comparator=dict(command=command,exit_code=result.returncode),at=datetime.datetime.now(datetime.timezone.utc).isoformat())
  reports.append(output);(OUT/record['name']/'apk-advisories.json').write_text(json.dumps(output,indent=2))
  print(json.dumps(dict(name=record['name'],alpine=record['alpine_release'],package_count=record['package_count'],hits=hits)),flush=True)
 (OUT/'apk-advisories.json').write_text(json.dumps(reports,indent=2))
+
+raise SystemExit(1 if any(record.get('selected_for_candidate') and (record.get('known_unfixed') or record.get('error')) for record in reports) else 0)
