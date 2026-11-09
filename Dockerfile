@@ -1,11 +1,11 @@
-FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS web
+FROM node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS web
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
+FROM python:3.12-alpine@sha256:e064671ca452259bab50e8e2c7bd896e39e9a343bb06ca25234adf6fe18d0fc7
 ARG GIT_REVISION=development
 LABEL org.opencontainers.image.source="https://github.com/climatsynergie/unlimited-talk" org.opencontainers.image.revision="$GIT_REVISION" io.unlimitedtalk.schema="0012_incoming_runtime"
 LABEL io.unlimitedtalk.voice-runtime="1"

@@ -15,7 +15,7 @@ import tempfile
 import time
 
 
-IMAGE = 'nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03'
+IMAGE = 'nginx/nginx-unprivileged:stable-alpine-slim@sha256:e333a5b95605942b5e495645ee54fab02b112081de6dbe45d2ead3ef38e03e31'
 ROOT = Path(__file__).resolve().parents[1]
 
 

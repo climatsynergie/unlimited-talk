@@ -24,7 +24,7 @@ x-app:
       max-file: '2'
 services:
   db:
-    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    image: postgres:18-alpine@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
     environment:
       POSTGRES_DB: unlimited_talk_staging
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
@@ -126,7 +126,7 @@ services:
       timeout: 5s
       retries: 3
   gateway:
-    image: nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+    image: nginx/nginx-unprivileged:stable-alpine-slim@sha256:e333a5b95605942b5e495645ee54fab02b112081de6dbe45d2ead3ef38e03e31
     ports:
     - 127.0.0.1:8110:8080
     volumes:
@@ -282,7 +282,7 @@ services:
       retries: 3
       start_period: 15s
   broker:
-    image: redis:8.2-alpine@sha256:35bf3d49a07b693d8defb4e4fc9ef8c663f71c2993f181eba99c7b72966c1f9b
+    image: redis:8.2-alpine@sha256:fe9daae35cd4fd6ec22416aa4fe0cf6b3e36741e06ff45b9986253fe2a81c041
     user: 999:999
     command:
     - sh

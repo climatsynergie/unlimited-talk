@@ -1,5 +1,7 @@
 # Release readiness
 
+> Native image refresh, 9 November 2026: new compatible digest pins are under validation. The CI results below apply to the preceding QA source, not this new candidate. See [native-refresh-readiness.md](native-refresh-readiness.md). Production release remains NO-GO.
+
 **Verdict: NO-GO for production release.**
 
 The audit repairs confirmed defects and provides executable evidence. Native dependency review and live carrier acceptance remain blocked. The clean Docker build and complete Foundation CI passed on the QA branch. Production data, routing and deployment were not changed.
