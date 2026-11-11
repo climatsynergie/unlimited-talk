@@ -38,3 +38,13 @@ Compatible image pins were updated in QA commit `405dc5a611da7795ecac85b7302c547
 - **Acceptance gap:** live audio transfer is not implemented. Treat it as unsupported scope, not a feature that passed QA. Real PSTN/audio/concurrent-agent acceptance remains blocked without authorization, credentials and participants.
 
 See [native-library-review.md](native-library-review.md) and [current readiness](native-refresh-readiness.md) for evidence and remediation options.
+
+## H-OPS-INCOMING-RESUME — confirmed and repaired 11 November
+
+After the selected incoming number was authorized and connected, the existing root TwiML-application checker treated the intended phone-route change as unauthorized drift. A real GET-only `twilio_voice_application.py check` returned1 while app health remained READY/calling enabled. Future deployment calling-resumption would therefore have been blocked.
+
+The host-only fix preserves the original immutable application baseline and all unrelated-number/application/unknown-field checks. A changed number must have one protected account/origin/PN/phone-bound incoming plan, exact allowed current routing and a full historical resource digest match. Legacy normalized snapshots try only the bounded None/empty variants; v2 plans retain full before snapshots and confirmed connect/restore receipts. Invalid, duplicate, incomplete or unrelated changes remain blocked. Fresh queue version0 and restored nullable representations are supported. Output reports raw number drift separately from proved authorized routes.
+
+Executed evidence: frozen original15 regressions returned1 (5PASS/4FAIL/6ERROR); corrected focused15, fullhost23, existing application12, numberoperator3, preflight12, Voicepreflight6 and runtimepreparation6 all passed:62 unique tests. The initial broad host wildcard import was BLOCKED by absent starlette; it remains preserved. Exact commands/exits and source hashes: `evidence/incoming-application-guard-fix/validation.json`.
+
+The reviewed files were first staged on the host and the actual legacy plan passed a GET-only provider check. Only then were the proof helper and two root-owned operators installed under deployment/application locks with protected backups. Installed check now returns verified/authorized_incoming_routes1, without rebasing the journal. Health remains405dc5a/schema12/calling enabled. No app restart, new app-image release, main promotion, provider write or real call was performed for this fix. Root operator source differs intentionally from main405; the reviewed source remains on the isolated QA branch for the next repository release.

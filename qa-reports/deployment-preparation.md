@@ -26,3 +26,25 @@ Candidate: `405dc5a611da7795ecac85b7302c54702502e9b8`. [Immutable source delta](
 5. Verify actual live revision/schema, preserved calling mode, worker health, UI and access controls after that workflow. A connected incoming line and real audio require their controlled provider/participant acceptance; deployment alone does not certify them.
 
 The manual Deploy staging action is now the remaining owner step, using the full SHA405dc5a611da7795ecac85b7302c54702502e9b8 from branch main. The standard authenticated workflow will resolve the registry digest and verify provenance before migrating. No actual deployment/migration has run yet. Business rows, the current-release pointer and calling mode remain unchanged. Only approved deployment preparation/configuration and private schema-backup files have changed. Live calls were not initiated.
+
+## Read-only incoming status — 11 November 2026, 14:57–15:00 UTC
+
+The user asked whether agents can receive incoming calls and dial/return calls. Fresh SSH health still reports662b450/schema11/manual calling enabled. Public GitHub main remains405dc5a; the latest deployment workflow run is still the successful662b450 run42527348036 from8November. The prepared405 deployment has not been applied.
+
+A read-only database check found active queue « À appeler », number+14502325734, with3active assigned accounts. The number maps to an active/present voice-capable owned Twilio directory entry. A selected-number provider GET independently confirmed account/SID/number identity and Voice capability. Its VoiceUrl does not point to this application's incoming webhook; no other VoiceApplication or Trunk association is present. No routes, call modes or customer rows were changed. No real call was initiated.
+
+Required order remains: deploy405 through the standard workflow; then snapshot/connect only the selected incoming line with the reviewed root operator; then an assigned available agent opens Appels entrants → Recevoir les appels, allows microphone access, and answers the offered call. A controlled external handset call is still needed to validate real audio. Incoming follow-up callbacks are manual through Poste d'appel; no fictitious one-click callback button or completed media test is claimed.
+
+## Activated selected incoming line after deployment — 11 November 2026
+
+Fresh health confirms405dc5a/schema12 READY with manual calling still enabled. The reviewed root operator was hash-verified, selected the existing active queue « À appeler » (+14502325734,3assigned active accounts), preserved its previous provider route with `prepare`, and connected only that selected line. Both operator commands exited0. A fresh provider GET matches every desired routing field and database route_state is active. No real call was initiated and no other number was targeted.
+
+At verification, available browser registrations were0; an assigned agent must refresh the app, open Appels entrants and click Recevoir les appels, grant microphone access and wait for Réception ouverte. The queue is always open (no hours restriction), max wait60seconds, offer20seconds. Public checks passed: homepage200, actual unauthenticated reception endpoint401, unsigned incoming webhook403. The first endpoint probe mistakenly used a nonexistent path, correctly received404 and failed that harness expectation; the corrected source-declared path passed and the original results remain preserved. Evidence: `evidence/incoming-activation-20261111/`.
+
+Real operator-to-browser audio and user acceptance remain NOT TESTED. The next human action is a single controlled external call to the selected company line, with an assigned agent available, followed by answer/audio checks.
+
+### Post-connection deployment guard repaired
+
+The authorized incoming-route change exposed a strict baseline check that would block later deployment call resumption. It was reproduced read-only, repaired/tested locally (62 unique relevant tests), staged against the actual preserved route and installed only in the root-owned host tools. Future connects create exact before/after receipts; the existing v1 plan is proved against the unchanged original digest with bounded normalization. Unrelated changes still fail closed. The deployed app405dc5a stayed READY with calling enabled throughout. No extra application deployment is required for that host-tool repair. See H-OPS-INCOMING-RESUME in findings.md and `evidence/incoming-application-guard-fix/`.
+
+Exact live-image version inventory was also executed (inventory only, not a new vulnerability scan): image`sha256:d655a7916fdea314e18a4dd36700c5cb2d7faa07c3b9fb7873f4a5e1aaf17db3`, CPython3.12.16, Expat2.9.0, systemOpenSSL3.5.9, PsycopgOpenSSL3.5.7, cryptographyOpenSSL4.0.3, libpq18.6,64 distributions, pip/ensurepip absent. Existing native-advisory and real-audio limitations are not represented as cleared.

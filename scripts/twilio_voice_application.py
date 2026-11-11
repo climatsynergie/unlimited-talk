@@ -18,10 +18,14 @@ import sys
 from urllib.parse import urlencode
 import urllib.request
 from uuid import uuid4
+from pathlib import Path
+
+from incoming_route_proof import verify_authorized_changes
 
 import twilio_voice_preflight as voice
 from staging_twilio_preflight import NoRedirect, PreflightError, private_parent, read_private, write_private
 
+INCOMING_ROOT = Path('/etc/unlimited-talk-staging')
 JOURNAL = voice.PLAN.with_name('twilio-voice-application.json')
 LOCK = JOURNAL.with_suffix('.lock')
 NAME = 'unlimited-talk-voice'
@@ -144,10 +148,14 @@ def save(journal, path, replace=False):
         os.close(directory)
 
 
-def unchanged(journal, inventory, exclude=None):
+def unchanged(journal, inventory, exclude=None, config=None):
     apps = {sid: row for sid, row in inventory['Applications'].items() if sid != exclude}
-    if hashes(apps) != journal['before_applications'] or hashes(inventory['IncomingPhoneNumbers']) != journal['before_numbers']:
+    if hashes(apps) != journal['before_applications']:
         raise PreflightError('Les ressources existantes ont changé ; examen requis avant toute suite.')
+    if hashes(inventory['IncomingPhoneNumbers']) != journal['before_numbers']:
+        if journal['state'] != 'verified' or exclude != journal['application_sid'] or config is None:
+            raise PreflightError('Les ressources existantes ont changé ; examen requis avant toute suite.')
+        verify_authorized_changes(journal['before_numbers'], inventory['IncomingPhoneNumbers'], INCOMING_ROOT, config)
 
 
 def validate_application(row, config, sid):
@@ -204,12 +212,16 @@ def run(action, config, path=JOURNAL, provider=None):
             # A list and fetch may differ in timestamps only; compare settings.
             if hashes({sid: inventory['Applications'].get(sid, {})}) != hashes({sid: fetched}):
                 raise PreflightError('Configuration fournisseur incohérente entre liste et lecture.')
-        unchanged(journal, inventory, exclude=sid)
+        unchanged(journal, inventory, exclude=sid, config=config)
         if journal['state'] != 'verified':
             journal['state'] = 'verified'
             save(journal, path, replace=True)
     return {'state': journal['state'], 'application_sid': journal['application_sid'],
-            'existing_applications_unchanged': True, 'phone_numbers_unchanged': True,
+            'existing_applications_unchanged': True,
+            'phone_numbers_unchanged': hashes(inventory['IncomingPhoneNumbers']) == journal['before_numbers'],
+            'phone_numbers_verified': True,
+            'authorized_incoming_routes': sum(hashes(inventory['IncomingPhoneNumbers']).get(sid) != value
+                                              for sid, value in journal['before_numbers'].items()),
             'public_webhooks_ready': False, 'calling_enabled': False, 'live_call_verified': False}
 
 

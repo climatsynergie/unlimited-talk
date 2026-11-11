@@ -16,27 +16,11 @@ import urllib.request
 from uuid import UUID
 from control_voice_test import atomic,protected,run,valid_revision
 from control_manual_voice import health
-from staging_twilio_preflight import NoRedirect
+from staging_twilio_preflight import NoRedirect, read_private
+from incoming_route_proof import FIELDS, routes, desired, resource, digest, validate_plan, original_resource, confirmed_receipt
 
 ROOT=Path('/etc/unlimited-talk-staging')
 BASE=Path('/srv/unlimited-talk-staging')
-FIELDS={'voice_url':'VoiceUrl','voice_method':'VoiceMethod','voice_application_sid':'VoiceApplicationSid',
-        'voice_fallback_url':'VoiceFallbackUrl','voice_fallback_method':'VoiceFallbackMethod',
-        'status_callback':'StatusCallback','status_callback_method':'StatusCallbackMethod','trunk_sid':'TrunkSid'}
-
-
-def routes(number):
-    result={key:number.get(key) or '' for key in FIELDS}
-    if any(not isinstance(value,str) or len(value)>2048 for value in result.values()):raise ValueError('Invalid provider route')
-    return result
-
-
-def desired(origin):
-    if not re.fullmatch(r'https://[a-z0-9.-]+',origin):raise ValueError('Canonical HTTPS origin required')
-    return dict(voice_url=origin+'/api/telephony/twilio/incoming',voice_method='POST',voice_application_sid='',
-        voice_fallback_url='',voice_fallback_method='POST',status_callback=origin+'/api/telephony/twilio/incoming-parent-status',
-        status_callback_method='POST',trunk_sid='')
-
 
 def checked(number,account,pn,phone):
     if (not re.fullmatch('AC[0-9a-fA-F]{32}',account) or not re.fullmatch('PN[0-9a-fA-F]{32}',pn)
@@ -137,25 +121,36 @@ finally:engine.dispose()
         selected=json.loads(run([*command,'exec','-T','api','python','-'],data=code))
         binding=dict(queue=queue,phone=selected['phone'],version=selected['version'],account=profile['account_sid'],pn=pn,origin=profile['public_origin'])
         checked(current,binding['account'],pn,binding['phone']);database(command,'inspect',binding)
-        plan=dict(version=1,binding=binding,previous=before,desired=desired(binding['origin']))
+        plan=dict(version=2,binding=binding,previous=before,desired=desired(binding['origin']),
+                  before_resource=resource(current),before_resource_digest=digest(resource(current)))
+        validate_plan(plan,path)
         if path.exists():
             protected(path)
             if json.loads(path.read_text())!=plan:raise ValueError('Existing preserved routing plan differs')
-        else:atomic(path,(json.dumps(plan,sort_keys=True)+'\n').encode())
+        else:
+            payload=(json.dumps(plan,sort_keys=True)+'\n').encode()
+            if len(payload)>8192:raise ValueError('Preserved incoming plan too large')
+            atomic(path,payload)
         return {'prepared':True,'phone':binding['phone'],'queue':queue,'provider_changed':False}
-    protected(path);plan=json.loads(path.read_text());binding=plan['binding']
+    plan=validate_plan(read_private(path),path,profile);binding=plan['binding']
     if (binding['queue']!=queue or binding['pn']!=pn or binding['account']!=profile['account_sid']
             or binding['origin']!=profile['public_origin'] or plan['desired']!=desired(binding['origin'])):raise ValueError('Preserved route mismatch')
     checked(current,binding['account'],pn,binding['phone']);database(command,'inspect',binding)
     target=plan['desired'] if action=='connect' else plan['previous']
     source=plan['previous'] if action=='connect' else plan['desired']
     if before not in (source,target):raise ValueError('Provider route changed outside this operation; preserved')
+    if plan['version']==2 and original_resource(current,plan)!=plan['before_resource']:
+        raise ValueError('Provider settings changed outside the preserved incoming route')
     if action=='connect':database(command,'connecting',binding)
     if before!=target:
         try:provider.request('POST',target)
         except Exception:pass # Resolve an unknown POST acknowledgement by read.
-    observed=checked(provider.request('GET'),binding['account'],pn,binding['phone'])
+    observed_resource=provider.request('GET')
+    observed=checked(observed_resource,binding['account'],pn,binding['phone'])
     if observed!=target:raise RuntimeError('Provider route not confirmed; retry with preserved plan')
+    if plan['version']==2:
+        receipt=confirmed_receipt(plan,observed_resource,action)
+        atomic(path.with_suffix('.receipt.json'),(json.dumps(receipt,sort_keys=True)+'\n').encode())
     database(command,'active' if action=='connect' else 'disconnected',binding)
     return {'connected':action=='connect','phone':binding['phone'],'queue':queue,'other_numbers_unchanged':True}
 
