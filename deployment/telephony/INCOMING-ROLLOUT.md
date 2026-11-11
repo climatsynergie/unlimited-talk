@@ -38,7 +38,10 @@ Ne pas contacter. Les RDV/rappels futurs et restrictions existants sont protég�
 3. Avant cette seconde livraison, installer les opérateurs root revus
    `deploy_staging.py`, `control_manual_voice.py`, `resume_managed_runtime.py`,
    `prepare_voice_runtime.py`, `connect_incoming_line.py` avec leurs dépendances
-   root déjà installées. Sauvegarder les anciennes versions, vérifier leurs
+   root déjà installées. Le contrôle des routes entrantes nécessite aussi
+   `incoming_route_proof.py` à côté de `twilio_voice_application.py` et de
+   `connect_incoming_line.py` : installer ces trois fichiers revus ensemble sous
+   le verrou de déploiement, après sauvegarde et validation en lecture seule. Sauvegarder les anciennes versions, vérifier leurs
    empreintes et compiler. Le déployeur refuse la migration sans runtime de
    repli complet et refuse le remplacement pendant un appel entrant, y compris
    l’attente ou un message vocal en cours. Le retour automatique au runtime de
@@ -100,3 +103,16 @@ PSTN. Un appel réel entrant depuis un téléphone externe reste nécessaire apr
 connexion de la ligne pour valider le chemin audio opérateur → casque, puis un
 appel sans réponse pour valider le message vocal. Ne pas déclarer cette preuve
 réelle acquise à partir des seuls tests synthétiques.
+
+## Vérification après un raccordement autorisé
+
+Le journal initial de l’application TwiML reste immuable. Un raccordement entrant
+autorisé peut modifier les huit champs de routage du numéro choisi ; le contrôle
+root reconnaît uniquement cette modification prouvée par le plan privé et ses
+empreintes de ressource. Les plans v2 conservent un reçu confirmé après connexion
+ou restauration ; les anciens plans v1 sont vérifiés par reconstruction bornée
+de l’empreinte originale, sans ignorer les autres propriétés. Les modifications
+d’un autre numéro, d’une application, d’un champ inconnu ou d’une liste de
+ressources restent bloquantes. Le résultat distingue le changement brut du numéro
+de sa vérification autorisée. Aucun nouveau déploiement de l’image applicative
+n’est nécessaire pour installer ces outils root ; ne pas arrêter les appels.
