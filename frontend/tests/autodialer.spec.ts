@@ -66,6 +66,8 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     policy: { attempts_per_day: 2, retry_minutes: 120, ring_seconds: 35 },
   };
   const controls: string[] = [];
+  const nextRequests: string[] = [];
+  const nextFailures = { beforeCommit: 0, afterCommit: 0 };
   const restrictions = new Map<
     string,
     { non_interested: boolean; do_not_contact: boolean }
@@ -171,21 +173,36 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     } else if (path === "/api/telephony/dialer/heartbeat")
       result = { dialer: { ...dialer } };
     else if (path === "/api/telephony/dialer/next") {
-      nextCount += 1;
-      const row: Row = {
-        id: body.id,
-        state: "reserved",
-        outcome: null,
-        destination: nextCount === 1 ? "+14165550111" : "+14165550112",
-        caller_number: "+14165550200",
-        campaign_id: campaign,
-        contact_id: `00000000-0000-0000-0000-${String(50 + (sameContact ? 1 : nextCount)).padStart(12, "0")}`,
-        callback_id:
-          nextCount === 1 ? "00000000-0000-0000-0000-000000000061" : null,
-        automatic: true,
-        owned_session: true,
-      };
-      rows.set(row.id, row);
+      nextRequests.push(body.id);
+      if (nextFailures.beforeCommit > 0) {
+        nextFailures.beforeCommit--;
+        return route.fulfill({
+          status: 500,
+          json: { detail: "Temporary isolated failure" },
+        });
+      }
+      let row = rows.get(body.id);
+      if (!row) {
+        nextCount += 1;
+        row = {
+          id: body.id,
+          state: "reserved",
+          outcome: null,
+          destination: nextCount === 1 ? "+14165550111" : "+14165550112",
+          caller_number: "+14165550200",
+          campaign_id: campaign,
+          contact_id: `00000000-0000-0000-0000-${String(50 + (sameContact ? 1 : nextCount)).padStart(12, "0")}`,
+          callback_id:
+            nextCount === 1 ? "00000000-0000-0000-0000-000000000061" : null,
+          automatic: true,
+          owned_session: true,
+        };
+        rows.set(row.id, row);
+      }
+      if (nextFailures.afterCommit > 0) {
+        nextFailures.afterCommit--;
+        return route.abort("failed");
+      }
       result = {
         intent: { ...row },
         token: "synthetic-sdk-token",
@@ -418,6 +435,8 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     }),
   );
   return {
+    nextRequests,
+    nextFailures,
     rows,
     controls,
     notes,
@@ -493,7 +512,77 @@ test("agent : rappel prioritaire, pause sans raccrochage puis reprise explicite"
   await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
 });
 
-for (const source of ["call", "device-call"] as const)
+for (const failure of ["beforeCommit", "afterCommit"] as const)
+  test(`agent : erreur temporaire ${failure}, même demande et un seul appel sans Reprendre`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
+    const f = await setup(page);
+    f.nextFailures[failure] = 1;
+    await page.goto("/poste-appel");
+    await page
+      .getByRole("combobox", { name: "Campagne d’appel", exact: true })
+      .selectOption(campaign);
+    await page
+      .getByRole("button", { name: "Démarrer les appels", exact: true })
+      .click();
+    await expect.poll(() => f.nextRequests.length).toBe(1);
+    await expect(
+      page.getByText(
+        "Connexion temporairement indisponible. Nouvelle vérification avant l’appel…",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => window.phoneProof?.connections.length || 0),
+    ).toBe(0);
+    await page.clock.runFor(1_999);
+    expect(f.nextRequests.length).toBe(1);
+    await page.clock.runFor(1);
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.phoneProof?.connections.length || 0),
+      )
+      .toBe(1);
+    expect(f.nextRequests).toHaveLength(2);
+    expect(new Set(f.nextRequests).size).toBe(1);
+    expect(f.nextCount).toBe(1);
+    expect(f.controls).toEqual(["start"]);
+  });
+
+test("agent : Arrêter pendant la récupération empêche toute répétition tardive", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
+  const f = await setup(page);
+  f.nextFailures.beforeCommit = 1;
+  await page.goto("/poste-appel");
+  await page
+    .getByRole("combobox", { name: "Campagne d’appel", exact: true })
+    .selectOption(campaign);
+  await page
+    .getByRole("button", { name: "Démarrer les appels", exact: true })
+    .click();
+  await expect(
+    page.getByText(
+      "Connexion temporairement indisponible. Nouvelle vérification avant l’appel…",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Arrêter l’enchaînement", exact: true })
+    .click();
+  await expect.poll(() => f.controls.at(-1)).toBe("stop");
+  await page.clock.runFor(60_000);
+  expect(f.nextRequests).toHaveLength(1);
+  expect(
+    await page.evaluate(() => window.phoneProof?.connections.length || 0),
+  ).toBe(0);
+});
+
+for (const source of ["call", "device-call", "device-outbound"] as const)
   test(`agent : erreur ${source} sans réponse, dix secondes puis prochain contact sans Reprendre`, async ({
     page,
   }) => {
@@ -503,10 +592,12 @@ for (const source of ["call", "device-call"] as const)
     await start(page);
     const row = [...f.rows.values()][0];
     row.state = "finished";
-    row.outcome = "no-answer";
+    row.outcome = source === "device-outbound" ? "busy" : "no-answer";
     await page.evaluate((source) => {
       if (source === "call")
         window.phoneProof.call!.emit("error", { code: 31005 });
+      else if (source === "device-outbound")
+        window.phoneProof.error!({ code: 31486 });
       else window.phoneProof.error!({ code: 31005 }, window.phoneProof.call);
     }, source);
     const wait = page.getByRole("complementary", {

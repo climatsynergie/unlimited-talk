@@ -3,7 +3,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter,Depends,HTTPException,Request
-from pydantic import Field,StrictInt
+from pydantic import Field,StrictInt,model_validator
 from app.identity import service as identity
 from app.identity.routes import same_origin
 from app.telephony.inbound_settings import Body
@@ -19,6 +19,15 @@ class Control(Body):
     campaign_id: UUID | None = None
     generation: StrictInt | None = Field(default=None,ge=1)
     hold_token: UUID | None = None
+    pause_cause: Literal['sdk_call','sdk_device','sdk_setup','sdk_connect','next_request'] | None = None
+    failure_code: StrictInt | None = Field(default=None,ge=0,le=99999)
+
+    @model_validator(mode='after')
+    def bounded_pause_diagnostic(self):
+        if ((self.pause_cause is not None and self.action!='pause')
+                or (self.failure_code is not None and self.pause_cause is None)):
+            raise ValueError('Diagnostic réservé à une mise en pause.')
+        return self
 
 
 class Next(Body):
@@ -68,6 +77,11 @@ def control(body:Control,request:Request):
     with request.app.state.engine.begin() as db:
         actor=identity.authenticate(db,request)
         result=dialer.control(db,actor,body.browser_id,body.action,body.campaign_id,body.generation,body.hold_token)
+        if body.pause_cause is not None:
+            # Keep the original dialer.pause fact/count. This separate bounded
+            # client claim explains SDK vs request failures without free text.
+            code=str(body.failure_code) if body.failure_code is not None else 'unknown'
+            identity.audit(db,actor['id'],'dialer.pause_cause.'+body.pause_cause+'.'+code,result.get('campaign_id'))
     return {'dialer':result}
 
 

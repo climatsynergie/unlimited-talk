@@ -19,6 +19,11 @@ export type Session = {
   active: Intent | null;
 };
 export type MediaError = { code?: number };
+type PauseDiagnostic = {
+  cause:
+    "sdk_call" | "sdk_device" | "sdk_setup" | "sdk_connect" | "next_request";
+  code?: number;
+};
 export type MediaCall = {
   on: (event: string, listener: (error?: MediaError) => void) => void;
   disconnect: () => void;
@@ -44,6 +49,35 @@ function requiresDialerPause(error?: MediaError) {
       code === 31401 ||
       code === 31402)
   );
+}
+
+function carrierResult(error?: MediaError) {
+  // These are explicit remote-party SIP results. In SDK 2.18.5 the Device
+  // lookup omits outgoing _activeCall, so the optional Call may be absent.
+  // Generic connection/transport errors remain device-wide failures.
+  return [31480, 31486, 31603].includes(error?.code ?? 0);
+}
+
+function transientRequest(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    [0, 429, 500, 502, 503, 504].includes(error.status)
+  );
+}
+
+function failureCode(error: unknown) {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code =
+    "code" in error ? error.code : "status" in error ? error.status : undefined;
+  return typeof code === "number" &&
+    Number.isInteger(code) &&
+    code >= 0 &&
+    code <= 99999
+    ? code
+    : undefined;
 }
 export type Transport = {
   voicemail?: (id: string, signal: AbortSignal) => Promise<unknown>;
@@ -418,7 +452,7 @@ export class PhoneController {
         this.update({ automaticBusy: false });
     }
   }
-  async pauseAutomatic(stop = false) {
+  async pauseAutomatic(stop = false, diagnostic?: PauseDiagnostic) {
     this.automaticArmed = false;
     const epoch = ++this.automaticEpoch;
     this.update({
@@ -436,14 +470,46 @@ export class PhoneController {
         row?.generation &&
         row.browser_id === this.browserId
       ) {
-        const result = await this.automaticTransport.control(
-          {
-            action: stop ? "stop" : "pause",
-            browser_id: this.browserId,
-            generation: row.generation,
-          },
-          this.requests.signal,
-        );
+        const body = {
+          action: stop ? "stop" : "pause",
+          browser_id: this.browserId,
+          generation: row.generation,
+          ...(!stop && diagnostic
+            ? {
+                pause_cause: diagnostic.cause,
+                failure_code: failureCode(diagnostic),
+              }
+            : {}),
+        };
+        let result;
+        try {
+          result = await this.automaticTransport.control(
+            body,
+            this.requests.signal,
+          );
+        } catch (error) {
+          if (
+            stop ||
+            !diagnostic ||
+            this.closed ||
+            epoch !== this.automaticEpoch ||
+            typeof error !== "object" ||
+            error === null ||
+            !("status" in error) ||
+            error.status !== 422
+          )
+            throw error;
+          // A rollback may leave a newer tab talking to the older validator.
+          // Retry once with the legacy pause body; never replay a newer action.
+          result = await this.automaticTransport.control(
+            {
+              action: "pause",
+              browser_id: this.browserId,
+              generation: row.generation,
+            },
+            this.requests.signal,
+          );
+        }
         if (!this.closed && epoch === this.automaticEpoch)
           this.applyAutomatic(result.dialer);
       }
@@ -574,6 +640,46 @@ export class PhoneController {
       this.automaticPolling = false;
     }
   }
+  private async nextAutomatic(id: string, generation: number, epoch: number) {
+    const transport = this.automaticTransport;
+    const row = this.state.automatic;
+    if (!transport || !row) return null;
+    const lifecycle = this.requests;
+    const body = { id, browser_id: this.browserId, generation: row.generation };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await transport.next(body, lifecycle.signal);
+      } catch (error) {
+        if (attempt >= 2 || !transientRequest(error)) throw error;
+        this.update({
+          automaticMessage:
+            "Connexion temporairement indisponible. Nouvelle vérification avant l’appel…",
+        });
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            lifecycle.signal.removeEventListener("abort", done);
+            resolve();
+          };
+          const timer = setTimeout(done, 2_000 * (attempt + 1));
+          lifecycle.signal.addEventListener("abort", done, { once: true });
+          if (lifecycle.signal.aborted) done();
+        });
+        if (this.closed || generation !== this.generation) return null;
+        if (!this.automaticArmed || epoch !== this.automaticEpoch) {
+          // Pause/stop/booking owns the newer context. Reconcile a possibly
+          // committed reservation; never send a retry in the old generation.
+          this.pending = null;
+          this.release();
+          this.update({ phase: "checking", local: false });
+          await this.refresh();
+          return null;
+        }
+        // Reuse the exact UUID and generation: a lost response must not create
+        // a second reservation or select a different contact.
+      }
+    }
+  }
   async start(
     input = this.state.inputDevice,
     number = this.state.dialNumber,
@@ -629,14 +735,7 @@ export class PhoneController {
     try {
       const reserved =
         automatic && this.automaticTransport && this.state.automatic
-          ? await this.automaticTransport.next(
-              {
-                id,
-                browser_id: this.browserId,
-                generation: this.state.automatic.generation,
-              },
-              this.requests.signal,
-            )
+          ? await this.nextAutomatic(id, generation, automaticEpoch)
           : await this.transport.reserve(
               id,
               this.requests.signal,
@@ -644,6 +743,7 @@ export class PhoneController {
               campaignId || undefined,
             );
       if (this.closed || generation !== this.generation) return;
+      if (!reserved) return;
       if (
         !("intent" in reserved) ||
         !reserved.intent ||
@@ -717,13 +817,19 @@ export class PhoneController {
         // that error only while this same intent is still being reconciled;
         // an old device must never pause a later call.
         if (!current && this.identifier !== id) return;
-        if (automatic && (!callScoped || requiresDialerPause(error))) {
+        if (
+          automatic &&
+          ((!callScoped && !carrierResult(error)) || requiresDialerPause(error))
+        ) {
           // A late fatal error cannot replace a newer stop or drop a booking
           // hold. Disarm its eventual release without changing the hold.
           this.bookingArmed = false;
           if (this.automaticArmed && !failurePaused) {
             failurePaused = true;
-            void this.pauseAutomatic();
+            void this.pauseAutomatic(false, {
+              cause: callScoped ? "sdk_call" : "sdk_device",
+              code: failureCode(error),
+            });
           }
         }
         if (current) this.interrupted();
@@ -780,7 +886,19 @@ export class PhoneController {
       );
     } catch (error) {
       if (this.closed || generation !== this.generation) return;
-      if (automatic) void this.pauseAutomatic();
+      if (
+        automatic &&
+        this.automaticArmed &&
+        automaticEpoch === this.automaticEpoch
+      )
+        void this.pauseAutomatic(false, {
+          cause: !reservationAccepted
+            ? "next_request"
+            : attemptedConnect
+              ? "sdk_connect"
+              : "sdk_setup",
+          code: failureCode(error),
+        });
       ++this.generation;
       this.release();
       if (

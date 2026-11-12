@@ -660,6 +660,281 @@ for (const source of ["call", "device-call"] as const)
       assert.equal(f.nextCount, 2);
     });
 
+for (const code of [31480, 31486, 31603])
+  test(`composeur : résultat opérateur ${code} sans référence Call poursuit après confirmation serveur`, async (t) => {
+    let now = 0;
+    t.mock.method(performance, "now", () => now);
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    const id = f.device.connections[0];
+    f.rows.set(id, { ...f.rows.get(id)!, state: "ringing" });
+    // SDK Device._findCall only searches incoming _calls, not _activeCall.
+    f.device.error({ code });
+    await setImmediate();
+    assert.equal(f.controller.state.automaticRunning, true);
+    now = 60_000;
+    await f.controller.automaticTick();
+    assert.equal(f.nextCount, 1);
+    assert.equal(f.controller.state.automaticNextAt, null);
+    f.rows.set(id, { ...f.rows.get(id)!, state: "finished", outcome: "busy" });
+    await f.controller.refresh();
+    assert.equal(f.controller.state.automaticNextAt, 70_000);
+    now = 69_999;
+    await f.controller.automaticTick();
+    assert.equal(f.nextCount, 1);
+    now = 70_000;
+    await f.controller.automaticTick();
+    assert.equal(f.nextCount, 2);
+  });
+
+for (const status of [0, 429, 500, 502, 503, 504])
+  test(`composeur : échec temporaire next ${status}, nouvelle tentative avec le même identifiant`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    const next = f.automatic.next;
+    const requests: string[] = [];
+    f.automatic.next = async (body, signal) => {
+      requests.push(body.id);
+      if (requests.length === 1)
+        throw Object.assign(new Error("temporary"), { status });
+      return next(body, signal);
+    };
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    const pending = f.controller.automaticTick();
+    await setImmediate();
+    assert.equal(f.controller.state.automaticRunning, true);
+    assert.equal(f.device.connections.length, 0);
+    t.mock.timers.tick(2_000);
+    await pending;
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0], requests[1]);
+    assert.equal(f.device.connections.length, 1);
+    assert.equal(f.controller.state.automatic?.mode, "running");
+  });
+
+test("composeur : réponse perdue après réservation, réutilise la même réservation une seule fois", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const next = f.automatic.next;
+  const requests: string[] = [];
+  let committed: Awaited<ReturnType<typeof next>> | null = null;
+  f.automatic.next = async (body, signal) => {
+    requests.push(body.id);
+    if (!committed) {
+      committed = await next(body, signal);
+      throw Object.assign(new Error("response lost"), { status: 0 });
+    }
+    assert.equal(body.id, committed.intent!.id);
+    return committed;
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  const pending = f.controller.automaticTick();
+  await setImmediate();
+  assert.equal(f.controller.state.automaticRunning, true);
+  assert.equal(f.device.connections.length, 0);
+  t.mock.timers.tick(2_000);
+  await pending;
+  assert.deepEqual(requests, [requests[0], requests[0]]);
+  assert.equal(f.rows.size, 1);
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.device.connections.length, 1);
+});
+
+test("composeur : échec serveur persistant, trois demandes identiques puis pause sans média", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const requests: string[] = [];
+  f.automatic.next = async (body) => {
+    requests.push(body.id);
+    throw Object.assign(new Error("temporary"), { status: 500 });
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  const pending = f.controller.automaticTick();
+  await setImmediate();
+  t.mock.timers.tick(2_000);
+  await setImmediate();
+  t.mock.timers.tick(4_000);
+  await pending;
+  assert.equal(requests.length, 3);
+  assert.equal(new Set(requests).size, 1);
+  assert.equal(f.device.connections.length, 0);
+  assert.equal(f.controller.state.automatic?.mode, "paused");
+  t.mock.timers.tick(60_000);
+  await f.controller.automaticTick();
+  assert.equal(requests.length, 3);
+});
+
+for (const status of [400, 401, 403, 404, 409, 422])
+  test(`composeur : refus next ${status}, aucune répétition ni création média`, async (t) => {
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    let requests = 0;
+    f.automatic.next = async () => {
+      requests++;
+      throw Object.assign(new Error("denied"), { status });
+    };
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    assert.equal(requests, 1);
+    assert.equal(f.device.connections.length, 0);
+    assert.equal(f.controller.state.automaticRunning, false);
+  });
+
+for (const action of ["pause", "stop", "hold", "dispose"] as const)
+  test(`composeur : ${action} pendant une récupération interdit la répétition tardive`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    let requests = 0;
+    f.automatic.next = async () => {
+      requests++;
+      throw Object.assign(new Error("temporary"), { status: 500 });
+    };
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    const pending = f.controller.automaticTick();
+    await setImmediate();
+    if (action === "dispose") f.controller.dispose();
+    else if (action === "hold") await f.controller.beginBooking("campaign");
+    else await f.controller.pauseAutomatic(action === "stop");
+    t.mock.timers.tick(2_000);
+    await pending;
+    assert.equal(requests, 1);
+    assert.equal(f.device.connections.length, 0);
+    if (action !== "dispose") {
+      assert.equal(f.controller.state.automaticRunning, false);
+      assert.equal(
+        f.controller.state.automatic?.mode,
+        action === "hold"
+          ? "booking"
+          : action === "stop"
+            ? "stopped"
+            : "paused",
+      );
+    }
+  });
+
+for (const action of ["pause", "stop", "hold"] as const)
+  test(`composeur : refus tardif next ne remplace pas ${action}`, async (t) => {
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    const response = deferred<never>();
+    f.automatic.next = async () => response.promise;
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    const pending = f.controller.automaticTick();
+    await setImmediate();
+    if (action === "hold") await f.controller.beginBooking("campaign");
+    else await f.controller.pauseAutomatic(action === "stop");
+    const mode = f.controller.state.automatic?.mode;
+    response.reject(
+      Object.assign(new Error("old generation"), { status: 409 }),
+    );
+    await pending;
+    assert.equal(f.controller.state.automatic?.mode, mode);
+    assert.equal(f.device.connections.length, 0);
+  });
+
+for (const code of [31000, 31005, 31009, 53000, 53405])
+  test(`composeur : erreur globale ambiguë ${code} conserve la pause`, async (t) => {
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    f.device.error({ code });
+    await setImmediate();
+    assert.equal(f.controller.state.automaticRunning, false);
+    assert.equal(f.controller.state.automatic?.mode, "paused");
+    assert.equal(f.nextCount, 1);
+  });
+
+test("composeur : diagnostic SDK borné sans texte privé, pause manuelle sans cause inventée", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  const pauses: Record<string, unknown>[] = [];
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") pauses.push(body);
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  f.device.error(
+    Object.assign({ code: 53000 }, { message: "PRIVATE_NUMBER_OR_SECRET" }),
+  );
+  await setImmediate();
+  assert.equal(pauses[0].pause_cause, "sdk_device");
+  assert.equal(pauses[0].failure_code, 53000);
+  assert.equal(
+    JSON.stringify(pauses).includes("PRIVATE_NUMBER_OR_SECRET"),
+    false,
+  );
+  await f.controller.pauseAutomatic();
+  assert.equal("pause_cause" in pauses[1], false);
+  assert.equal("failure_code" in pauses[1], false);
+});
+
+test("composeur : retour à une ancienne API sans diagnostic, pause toujours confirmée", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  const requests: Record<string, unknown>[] = [];
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") {
+      requests.push(body);
+      if ("pause_cause" in body)
+        throw Object.assign(new Error("older schema"), { status: 422 });
+    }
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  f.device.error({ code: 53000 });
+  await setImmediate();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].pause_cause, "sdk_device");
+  assert.equal("pause_cause" in requests[1], false);
+  assert.equal(requests[0].generation, requests[1].generation);
+  assert.equal(f.controller.state.automatic?.mode, "paused");
+});
+
+test("composeur : une validation ancienne tardive ne remplace pas un nouvel arrêt", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  const response = deferred<never>();
+  let pauses = 0;
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") {
+      pauses++;
+      return response.promise;
+    }
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  f.device.error({ code: 53000 });
+  await f.controller.pauseAutomatic(true);
+  response.reject(Object.assign(new Error("older schema"), { status: 422 }));
+  await setImmediate();
+  assert.equal(pauses, 1);
+  assert.equal(f.controller.state.automatic?.mode, "stopped");
+});
+
 test("composeur : erreurs d’appel dupliquées et ancien téléphone ne perturbent pas l’appel suivant", async (t) => {
   let now = 0;
   t.mock.method(performance, "now", () => now);

@@ -1,5 +1,7 @@
 # Release readiness
 
+> 12 November later incident:7105909 is verified deployed but an affected agent still records pauses. See [the follow-up investigation](dialer-pause-followup-20261112.md). Additional fixes are isolated in QA; historical CI success does not close the new incident or establish uninterrupted live telephony.
+
 > 12 November operational observation: revision405dc5a is deployed and healthy on schema12, with calling enabled. The [automatic dialer pause repair](dialer-autopause-20261112.md) is isolated in QA and has not been merged or deployed. Its targeted results do not clear broader native-library, real-carrier or recovery gates.
 
 > Later authorization/update: the user approved main promotion and operational deployment. Main405dc5a CI/publication passed; the usual manual deployment is pending. The earlier audit snapshot and its native/carrier NO-GO limits remain historical evidence. See [deployment-preparation.md](deployment-preparation.md) for current operational status.

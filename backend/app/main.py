@@ -3,6 +3,7 @@ import logging
 import json
 import traceback
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -29,7 +30,7 @@ from app.reporting.routes import router as reporting_router
 from app.telephony.configuration import load_profile
 from app.identity.security import encryption_key, validate_origin
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, DBAPIError
 
 from app.database import make_engine
 
@@ -37,7 +38,8 @@ logger = logging.getLogger('uvicorn.error')
 
 # Long recording metadata requires the additive schema 11 migration.
 COMPATIBLE_SCHEMA_REVISIONS = frozenset({'0011_long_recordings','0012_incoming_runtime'})
-WEB_ROOT = Path(__file__).resolve().parents[1] / 'web'
+APP_ROOT = Path(__file__).resolve().parent
+WEB_ROOT = APP_ROOT.parent / 'web'
 WEB_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
            "connect-src 'self' https://eventgw.twilio.com wss://voice-js.roaming.twilio.com "
            "https://media.twiliocdn.com https://sdk.twilio.com; "
@@ -112,9 +114,19 @@ async def request_metadata(request: Request, call_next):
     except Exception as error:
         # Diagnostic locations, never exception messages, request bodies,
         # tokens, query strings or customer fields.
+        frames=traceback.extract_tb(error.__traceback__)
+        app_frames=[]
+        for frame in frames:
+            try:relative=Path(frame.filename).resolve().relative_to(APP_ROOT)
+            except ValueError:continue
+            app_frames.append({'file':relative.as_posix(),'line':frame.lineno,'function':frame.name})
         failure={'exception_type':type(error).__name__,'frames':[
             {'file':Path(frame.filename).name,'line':frame.lineno,'function':frame.name}
-            for frame in traceback.extract_tb(error.__traceback__)[-10:]]}
+            for frame in frames[-10:]],'app_frames':app_frames[-10:]}
+        if isinstance(error,DBAPIError):
+            sqlstate=getattr(error.orig,'sqlstate',None)
+            if isinstance(sqlstate,str) and re.fullmatch('[A-Z0-9]{5}',sqlstate):
+                failure['sqlstate']=sqlstate
         response=JSONResponse(status_code=500,content={'detail':'Une erreur est survenue. Réessayez ou communiquez la référence au responsable.'})
     response.headers['X-Request-ID'] = request_id
     response.headers['Cache-Control'] = 'public, max-age=31536000, immutable' if request.url.path.startswith('/assets/') and response.status_code == 200 else 'no-store'
