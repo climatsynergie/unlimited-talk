@@ -13,9 +13,9 @@ declare global {
       connections: Record<string, string>[];
       disconnected: number;
       mode: string;
-      call?: { emit: (event: string) => void };
+      call?: { emit: (event: string, error?: { code?: number }) => void };
       resolve?: () => void;
-      error?: () => void;
+      error?: (error?: { code?: number }, call?: unknown) => void;
     };
   }
 }

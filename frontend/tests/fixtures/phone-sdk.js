@@ -11,8 +11,8 @@ class FakeCall {
   on(event, handler) {
     this.handlers.set(event, handler);
   }
-  emit(event) {
-    this.handlers.get(event)?.();
+  emit(event, error) {
+    this.handlers.get(event)?.(error);
   }
   disconnect() {
     proof.disconnected += 1;

@@ -1,5 +1,7 @@
 # Findings and verified repairs
 
+12 November follow-up: [automatic dialer pause repair](dialer-autopause-20261112.md) records QA-16 (HIGH, fixed in QA) and QA-17 (MEDIUM, fixed in QA), before/after regressions, late-event precedence checks and the limits of live diagnosis. These changes have not been deployed.
+
 Scope: baseline candidate96f5055 (runtime662b450 with additive schema12). Repairs are isolated on `qa/full-audit-20261108`; no production writes, provider calls or deployments. PASS/FAIL describe executed assertions; BLOCKED describes a missing prerequisite; NOT TESTED means not executed. See [regression-results.md](regression-results.md) for final gate outcomes and commands. No hypothesis was silently converted into a confirmed defect.
 
 | ID | Severity | Confirmed defect / reproduction | Root cause and minimal repair | Evidence / regression |

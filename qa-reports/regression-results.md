@@ -1,5 +1,7 @@
 # Regression and release-validation results
 
+12 November follow-up: see [automatic dialer validation](dialer-autopause-20261112.md) for fresh commands, exit codes and evidence. Its browser tests use isolated HTTP/SDK fixtures; do not substitute them for the real HTTP/PG gates below.
+
 Statuses distinguish PASS, FAIL, BLOCKED and NOT TESTED. A source review/build is not a user-journey pass. Provider media is simulated; business APIs/PG are real in the named end-to-end gates.
 
 ## Accepted execution by boundary

@@ -493,6 +493,70 @@ test("agent : rappel prioritaire, pause sans raccrochage puis reprise explicite"
   await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
 });
 
+for (const source of ["call", "device-call"] as const)
+  test(`agent : erreur ${source} sans réponse, dix secondes puis prochain contact sans Reprendre`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
+    const f = await setup(page);
+    await start(page);
+    const row = [...f.rows.values()][0];
+    row.state = "finished";
+    row.outcome = "no-answer";
+    await page.evaluate((source) => {
+      if (source === "call")
+        window.phoneProof.call!.emit("error", { code: 31005 });
+      else window.phoneProof.error!({ code: 31005 }, window.phoneProof.call);
+    }, source);
+    const wait = page.getByRole("complementary", {
+      name: "Prochain appel",
+      exact: true,
+    });
+    await expect(wait).toBeVisible();
+    await expect(wait.getByRole("timer")).toHaveText("10 s");
+    expect(f.controls).toEqual(["start"]);
+    await page.clock.runFor(9_999);
+    expect(f.nextCount).toBe(1);
+    await page.clock.runFor(1);
+    await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
+    expect(f.controls).toEqual(["start"]);
+  });
+
+for (const source of [
+  "microphone",
+  "device-global",
+  "disconnect-media",
+] as const)
+  test(`agent : erreur ${source}, pause conservée après la fin serveur`, async ({
+    page,
+  }) => {
+    await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
+    const f = await setup(page);
+    await start(page);
+    const row = [...f.rows.values()][0];
+    row.state = "finished";
+    row.outcome = "no-answer";
+    await page.evaluate((source) => {
+      if (source === "microphone")
+        window.phoneProof.call!.emit("error", { code: 31401 });
+      else if (source === "disconnect-media") {
+        window.phoneProof.call!.emit("disconnect");
+        window.phoneProof.call!.emit("error", { code: 53405 });
+      } else window.phoneProof.error!({ code: 53000 });
+    }, source);
+    await expect(
+      page.getByRole("button", { name: "Reprendre les appels", exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => f.controls.at(-1)).toBe("pause");
+    await page.clock.runFor(60_000);
+    expect(f.nextCount).toBe(1);
+    await expect(
+      page.getByRole("complementary", { name: "Prochain appel", exact: true }),
+    ).toHaveCount(0);
+  });
+
 test("agent : après la fin serveur, aucun appel avant dix secondes puis reprise automatique", async ({
   page,
 }) => {

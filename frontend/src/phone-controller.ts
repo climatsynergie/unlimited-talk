@@ -18,15 +18,33 @@ export type Session = {
   max_duration_seconds: number;
   active: Intent | null;
 };
+export type MediaError = { code?: number };
 export type MediaCall = {
-  on: (event: string, listener: () => void) => void;
+  on: (event: string, listener: (error?: MediaError) => void) => void;
   disconnect: () => void;
 };
 export type MediaDevice = {
   connect: (id: string, input: string) => Promise<MediaCall>;
   destroy: () => void;
-  onError: (listener: () => void) => void;
+  onError: (listener: (error?: MediaError, call?: MediaCall) => void) => void;
 };
+
+// SDK 2.18.5 reports some carrier hangups as call errors (also on Device with
+// an associated Call). Reconcile these with the server rather than pausing the
+// queue. Auth, microphone, signalling and media failures still require a pause.
+function requiresDialerPause(error?: MediaError) {
+  const code = error?.code;
+  return (
+    code !== undefined &&
+    ((code >= 20100 && code < 20200) ||
+      (code >= 31100 && code < 31300) ||
+      (code >= 53000 && code < 53500) ||
+      code === 31001 ||
+      code === 31009 ||
+      code === 31401 ||
+      code === 31402)
+  );
+}
 export type Transport = {
   voicemail?: (id: string, signal: AbortSignal) => Promise<unknown>;
   session: (signal: AbortSignal) => Promise<Session>;
@@ -687,11 +705,31 @@ export class PhoneController {
         return;
       }
       this.device = device;
-      device.onError(() => {
-        if (generation === this.generation) {
-          if (automatic) void this.pauseAutomatic();
-          this.interrupted();
+      const mediaLifecycle = this.requests;
+      let failurePaused = false;
+      const mediaError = (
+        error: MediaError | undefined,
+        callScoped: boolean,
+      ) => {
+        if (this.closed || this.requests !== mediaLifecycle) return;
+        const current = generation === this.generation;
+        // The SDK can emit disconnect before its fatal media error. Accept
+        // that error only while this same intent is still being reconciled;
+        // an old device must never pause a later call.
+        if (!current && this.identifier !== id) return;
+        if (automatic && (!callScoped || requiresDialerPause(error))) {
+          // A late fatal error cannot replace a newer stop or drop a booking
+          // hold. Disarm its eventual release without changing the hold.
+          this.bookingArmed = false;
+          if (this.automaticArmed && !failurePaused) {
+            failurePaused = true;
+            void this.pauseAutomatic();
+          }
         }
+        if (current) this.interrupted();
+      };
+      device.onError((error, call) => {
+        mediaError(error, Boolean(call));
       });
       if (this.closed || generation !== this.generation) {
         device.destroy();
@@ -724,9 +762,12 @@ export class PhoneController {
       call.on("reconnecting", when("reconnecting"));
       call.on("reconnected", when("connected"));
       for (const event of ["disconnect", "cancel", "reject", "error"])
-        call.on(event, () => {
+        call.on(event, (error) => {
+          if (event === "error") {
+            mediaError(error, true);
+            return;
+          }
           if (generation === this.generation) {
-            if (automatic && event === "error") void this.pauseAutomatic();
             this.interrupted();
           }
         });

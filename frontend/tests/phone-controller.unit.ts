@@ -22,13 +22,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 class FakeCall implements MediaCall {
-  listeners = new Map<string, () => void>();
+  listeners = new Map<string, (error?: { code?: number }) => void>();
   disconnected = 0;
-  on(event: string, listener: () => void) {
+  on(event: string, listener: (error?: { code?: number }) => void) {
     this.listeners.set(event, listener);
   }
-  emit(event: string) {
-    this.listeners.get(event)?.();
+  emit(event: string, error?: { code?: number }) {
+    this.listeners.get(event)?.(error);
   }
   disconnect() {
     ++this.disconnected;
@@ -39,8 +39,8 @@ class FakeDevice implements MediaDevice {
   destroyed = 0;
   connections: string[] = [];
   inputs: string[] = [];
-  error = () => {};
-  onError(listener: () => void) {
+  error: (error?: { code?: number }, call?: MediaCall) => void = () => {};
+  onError(listener: (error?: { code?: number }, call?: MediaCall) => void) {
     this.error = listener;
   }
   async connect(id: string, input: string) {
@@ -626,6 +626,286 @@ function automaticFixture() {
     },
   };
 }
+
+for (const source of ["call", "device-call"] as const)
+  for (const outcome of ["no-answer", "busy", "failed", "completed"])
+    test(`composeur : erreur ${source}, résultat serveur ${outcome}, poursuit après dix secondes`, async (t) => {
+      let now = 0;
+      t.mock.method(performance, "now", () => now);
+      const f = automaticFixture();
+      t.after(() => f.controller.dispose());
+      await f.controller.refresh();
+      await f.controller.startAutomatic("campaign");
+      await f.controller.automaticTick();
+      const id = f.device.connections[0];
+      // The media error can arrive before the provider's terminal webhook.
+      f.rows.set(id, { ...f.rows.get(id)!, state: "ringing" });
+      if (source === "call") f.device.call.emit("error", { code: 31005 });
+      else f.device.error({ code: 31005 }, f.device.call);
+      await setImmediate();
+      assert.equal(f.controller.state.automaticRunning, true);
+      assert.equal(f.controller.state.automatic?.mode, "running");
+      now = 60_000;
+      await f.controller.automaticTick();
+      assert.equal(f.nextCount, 1, "unconfirmed media failure cannot redial");
+      assert.equal(f.controller.state.automaticNextAt, null);
+      f.rows.set(id, { ...f.rows.get(id)!, state: "finished", outcome });
+      await f.controller.refresh();
+      assert.equal(f.controller.state.automaticNextAt, 70_000);
+      now = 69_999;
+      await f.controller.automaticTick();
+      assert.equal(f.nextCount, 1);
+      now = 70_000;
+      await f.controller.automaticTick();
+      assert.equal(f.nextCount, 2);
+    });
+
+test("composeur : erreurs d’appel dupliquées et ancien téléphone ne perturbent pas l’appel suivant", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  const oldError = f.device.error;
+  const oldCall = f.device.call;
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "no-answer",
+  });
+  oldCall.emit("error", { code: 31005 });
+  oldError({ code: 31005 }, oldCall);
+  await setImmediate();
+  assert.equal(f.controller.state.automaticNextAt, 10_000);
+  now = 10_000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 2);
+  oldError({ code: 31205 });
+  assert.equal(f.controller.state.automaticRunning, true);
+  assert.equal(f.controller.state.phase, "connecting");
+  assert.equal(f.nextCount, 2);
+});
+
+test("composeur : erreur d’appel puis serveur indisponible interdit un départ sans résultat vérifié", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  const history = f.api.history;
+  f.api.history = async () => {
+    throw new Error("offline");
+  };
+  f.device.call.emit("error", { code: 31005 });
+  await setImmediate();
+  now = 60_000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 1);
+  assert.equal(f.controller.state.phase, "checking");
+  assert.equal(f.controller.state.automaticNextAt, null);
+  f.api.history = history;
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "no-answer",
+  });
+  await f.controller.refresh();
+  assert.equal(f.controller.state.automaticNextAt, 70_000);
+  now = 70_000;
+  await f.controller.automaticTick();
+  assert.equal(f.nextCount, 2);
+});
+
+for (const action of ["pause", "stop", "hold", "presence-loss"] as const)
+  test(`composeur : erreur d’appel puis ${action}, un résultat tardif ne réarme jamais`, async (t) => {
+    let now = 0;
+    t.mock.method(performance, "now", () => now);
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    const id = f.device.connections[0];
+    f.rows.set(id, { ...f.rows.get(id)!, state: "ringing" });
+    f.device.call.emit("error", { code: 31005 });
+    await setImmediate();
+    if (action === "hold") await f.controller.beginBooking("campaign");
+    else if (action === "presence-loss") {
+      f.failHeartbeat();
+      for (let i = 0; i < 3; i++) await f.controller.automaticTick();
+      f.recoverHeartbeat();
+    } else await f.controller.pauseAutomatic(action === "stop");
+    f.rows.set(id, {
+      ...f.rows.get(id)!,
+      state: "finished",
+      outcome: "no-answer",
+    });
+    await f.controller.refresh();
+    now = 60_000;
+    await f.controller.automaticTick();
+    assert.equal(f.nextCount, 1);
+    assert.equal(f.controller.state.automaticRunning, false);
+  });
+
+for (const action of ["pause", "stop", "hold"] as const)
+  test(`composeur : erreur audio tardive préserve ${action} et ne réarme pas après libération`, async (t) => {
+    let now = 0;
+    t.mock.method(performance, "now", () => now);
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    const id = f.device.connections[0];
+    f.rows.set(id, { ...f.rows.get(id)!, state: "ringing" });
+    f.device.call.emit("disconnect");
+    await setImmediate();
+    const hold =
+      action === "hold" ? await f.controller.beginBooking("campaign") : null;
+    if (action !== "hold") await f.controller.pauseAutomatic(action === "stop");
+    const mode = f.controller.state.automatic?.mode;
+    f.device.call.emit("error", { code: 53405 });
+    await setImmediate();
+    assert.equal(f.controller.state.automatic?.mode, mode);
+    f.rows.set(id, {
+      ...f.rows.get(id)!,
+      state: "finished",
+      outcome: "completed",
+    });
+    await f.controller.refresh();
+    if (hold) await f.controller.endBooking(hold);
+    now = 60_000;
+    await f.controller.automaticTick();
+    assert.equal(f.controller.state.automaticRunning, false);
+    assert.equal(f.nextCount, 1);
+  });
+
+for (const source of ["call", "device-call"] as const)
+  for (const code of [
+    20101, 20104, 20151, 31001, 31102, 31201, 31202, 31204, 31205, 31206, 31401,
+    31402, 53000, 53001, 53405,
+  ])
+    test(`composeur : erreur persistante ${code} sur ${source} conserve la pause`, async (t) => {
+      let now = 0;
+      t.mock.method(performance, "now", () => now);
+      const f = automaticFixture();
+      t.after(() => f.controller.dispose());
+      await f.controller.refresh();
+      await f.controller.startAutomatic("campaign");
+      await f.controller.automaticTick();
+      const id = f.device.connections[0];
+      f.rows.set(id, {
+        ...f.rows.get(id)!,
+        state: "finished",
+        outcome: "no-answer",
+      });
+      if (source === "call") f.device.call.emit("error", { code });
+      else f.device.error({ code }, f.device.call);
+      await setImmediate();
+      now = 60_000;
+      await f.controller.automaticTick();
+      assert.equal(f.controller.state.automaticRunning, false);
+      assert.equal(f.controller.state.automatic?.mode, "paused");
+      assert.equal(f.nextCount, 1);
+    });
+
+test("composeur : une erreur fatale émise par Call et Device ne demande qu’une seule pause", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  let pauses = 0;
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") pauses++;
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const oldError = f.device.error;
+  f.device.call.emit("disconnect");
+  f.device.call.emit("error", { code: 53405 });
+  oldError({ code: 53405 }, f.device.call);
+  await setImmediate();
+  assert.equal(pauses, 1);
+  assert.equal(f.controller.state.automaticRunning, false);
+});
+
+test("composeur : un ancien téléphone détruit ne modifie pas la session réactivée", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  let pauses = 0;
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") pauses++;
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const oldError = f.device.error;
+  f.controller.dispose();
+  oldError({ code: 53405 });
+  f.controller.activate();
+  oldError({ code: 53405 });
+  await setImmediate();
+  assert.equal(pauses, 0);
+});
+
+for (const source of ["call", "device-call"] as const)
+  test(`composeur : déconnexion puis erreur audio ${source} du même appel conserve la pause`, async (t) => {
+    let now = 0;
+    t.mock.method(performance, "now", () => now);
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    const id = f.device.connections[0];
+    const oldError = f.device.error;
+    f.rows.set(id, {
+      ...f.rows.get(id)!,
+      state: "finished",
+      outcome: "completed",
+    });
+    // SDK PeerConnection.close emits disconnect before the fatal media error.
+    f.device.call.emit("disconnect");
+    if (source === "call") f.device.call.emit("error", { code: 53405 });
+    else oldError({ code: 53405 }, f.device.call);
+    await setImmediate();
+    now = 60_000;
+    await f.controller.automaticTick();
+    assert.equal(f.controller.state.automaticRunning, false);
+    assert.equal(f.controller.state.automatic?.mode, "paused");
+    assert.equal(f.nextCount, 1);
+  });
+
+test("composeur : erreur globale du téléphone conserve la pause même avec un résultat sans réponse", async (t) => {
+  let now = 0;
+  t.mock.method(performance, "now", () => now);
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.rows.set(id, {
+    ...f.rows.get(id)!,
+    state: "finished",
+    outcome: "no-answer",
+  });
+  f.device.error();
+  await setImmediate();
+  now = 60_000;
+  await f.controller.automaticTick();
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.nextCount, 1);
+});
 
 test("composeur : dix secondes complètes après la fin serveur, jamais après le seul média", async (t) => {
   let now = 0;
