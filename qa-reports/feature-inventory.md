@@ -1,5 +1,7 @@
 # Feature inventory
 
+14 November addition: incoming follow-up and history open client coordinates with direct manual callback, in-sheet hangup/voicemail controls, unknown-caller handling and unchanged DNC enforcement. See [scope and evidence](inbound-client-callbacks-20261114.md).
+
 Audit baseline: deployed/main `662b450501a70431b0effbb087501e727111099d`; incoming release candidate `96f5055b7fff29257a0e306e0658721394cc80a7`. QA branch `qa/full-audit-20261108`. Initial discovery was read-only. Production health was observed READY on schema11/manual calling; observation is not functional acceptance.
 
 Stack: React19/TypeScript/Vite, FastAPI/Uvicorn, SQLAlchemy/Alembic/PostgreSQL18, Redis/Celery durable import workers, Twilio Voice SDK + signed TwiML callbacks, private S3-compatible imports/recordings, Nginx + root-owned Caddy egress, GitHub Actions immutable image/provenance deploy. Backend runtime pool2/no overflow, migration pool1,3-second runtime statement timeout.

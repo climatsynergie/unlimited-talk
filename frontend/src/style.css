@@ -4522,3 +4522,12 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   max-height: 36rem;
   overflow: auto;
 }
+
+.inbound-client-card {
+  margin-block: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.inbound-client-card h3 {
+  margin-top: 0;
+}

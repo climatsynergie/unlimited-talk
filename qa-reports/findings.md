@@ -1,5 +1,7 @@
 # Findings and verified repairs
 
+14 November inbound follow-up: [client sheet and direct callbacks](inbound-client-callbacks-20261114.md) records QA-22 (MEDIUM, reproduced and fixed), queue-scoped profile/restriction reads,27 browser and actual HTTP/PostgreSQL regressions.
+
 14 November follow-up: [optional construction year and invalid-number reconciliation](construction-and-invalid-numbers-20261114.md) records QA-21 (HIGH operational, reproduced and fixed in QA), optional version3 text, executed real-SDK/browser/API/PostgreSQL checks and rollback limits.
 
 12 November second follow-up: [remaining automatic pause paths](dialer-pause-followup-20261112.md) records QA-18/19/20, real-SDK baseline reproduction, the observed `/next`500, bounded same-ID recovery, and remaining diagnosis/acceptance limits. Corrections remain in QA.

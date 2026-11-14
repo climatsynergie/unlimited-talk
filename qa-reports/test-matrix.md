@@ -1,5 +1,7 @@
 # Risk-based QA matrix
 
+14 November incoming callback cases: known/unknown/hidden caller, history with/without follow-up, DNC/NI, busy/duplicate suppression, refused reservation/retry, navigation persistence and mobile/accessibility. [Executed matrix/results](inbound-client-callbacks-20261114.md).
+
 PASS: executed assertions satisfied. FAIL: executed assertions failed. BLOCKED: a prerequisite prevents valid execution. NOT TESTED: not executed. A pass applies only to the stated scope.
 
 | Area | Priority | Boundary | Status | Evidence scope |

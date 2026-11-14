@@ -26,7 +26,9 @@ def listing(identifier:UUID,request:Request,before:UUID|None=None):
             cursor=query(db,'SELECT received_at FROM staging.inbound_calls WHERE queue_id=:queue AND id=:id',queue=identifier,id=before).scalar_one_or_none()
             if cursor is None:raise HTTPException(400,'Position d’historique invalide.')
         rows=query(db,'''SELECT c.id,c.received_at,c.connected_at,c.finished_at,c.caller_number,c.called_number,c.state,c.outcome,c.followup_id,
-            c.agent_id,u.display_name AS agent_name,p.profile,p.id AS contact_id FROM staging.inbound_calls c
+            c.agent_id,u.display_name AS agent_name,p.profile,p.id AS contact_id,
+            coalesce(p.do_not_contact,false) AS do_not_contact,coalesce(p.non_interested,false) AS non_interested
+            FROM staging.inbound_calls c
             LEFT JOIN staging.identity_users u ON u.id=c.agent_id LEFT JOIN staging.contacts p ON p.phone=c.caller_number
             WHERE c.queue_id=:queue AND (CAST(:before AS uuid) IS NULL OR (c.received_at,c.id)<(CAST(:stamp AS timestamptz),CAST(:before AS uuid)))
             ORDER BY c.received_at DESC,c.id DESC LIMIT 21''',queue=identifier,before=before,stamp=cursor).mappings().all()

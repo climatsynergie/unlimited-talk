@@ -105,7 +105,7 @@ const time = (value: number) =>
   `${String(Math.floor((value % 1440) / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 const minutes = (value: string) =>
   Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
-function contact(row: Followup) {
+function contact(row: Pick<Followup, "profile" | "caller_number">) {
   return (
     row.profile?.display_name ||
     [row.profile?.first_name, row.profile?.last_name]
@@ -115,6 +115,131 @@ function contact(row: Followup) {
     "Numéro masqué"
   );
 }
+type Caller = {
+  caller_number: string | null;
+  profile?: Record<string, string> | null;
+  do_not_contact?: boolean;
+  non_interested?: boolean;
+};
+function CallerSummary({ row }: { row: Caller }) {
+  const { controller, state, busy } = usePhone();
+  useEffect(() => {
+    if (!controller.state.loaded) void controller.refresh();
+  }, [controller]);
+  const validNumber = /^\+[1-9][0-9]{8,14}$/.test(row.caller_number || "");
+  const labels: Record<string, string> = {
+    display_name: "Nom complet",
+    first_name: "Prénom",
+    last_name: "Nom",
+    email: "Courriel",
+    address: "Adresse",
+    city: "Ville",
+    province: "Province",
+    postal_code: "Code postal",
+    preferred_language: "Langue",
+  };
+  return (
+    <section aria-label="Fiche client" className="inbound-client-card">
+      <h3>Coordonnées du client</h3>
+      <dl className="contact-fields">
+        <div>
+          <dt>Téléphone</dt>
+          <dd>{row.caller_number || "Numéro masqué"}</dd>
+        </div>
+        {Object.entries(row.profile || {})
+          .filter(([key, value]) => key !== "phone" && value)
+          .map(([key, value]) => (
+            <div key={key}>
+              <dt>{labels[key] || key}</dt>
+              <dd>
+                {key === "preferred_language" && value === "en"
+                  ? "Anglais"
+                  : value}
+              </dd>
+            </div>
+          ))}
+      </dl>
+      {row.do_not_contact ? (
+        <Notice>Ne pas contacter — ce client ne peut pas être rappelé.</Notice>
+      ) : null}
+      {state.error ? <Notice error>{state.error}</Notice> : null}
+      <div className="actions contact-actions">
+        <button
+          type="button"
+          className="button success"
+          disabled={
+            !state.loaded ||
+            !state.enabled ||
+            busy ||
+            state.automaticRunning ||
+            !validNumber ||
+            row.do_not_contact
+          }
+          onClick={() => void controller.start(undefined, row.caller_number!)}
+        >
+          Appeler ce client
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => void controller.refresh()}
+        >
+          Actualiser le téléphone
+        </button>
+        {state.local && state.destination === row.caller_number ? (
+          <>
+            <button
+              type="button"
+              className="button danger"
+              onClick={() => controller.hangup()}
+            >
+              Raccrocher
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={
+                !state.intent ||
+                state.voicemailPending.includes(state.intent.id)
+              }
+              onClick={() => void controller.voicemail()}
+            >
+              Boîte vocale
+            </button>
+          </>
+        ) : null}
+        {state.automaticRunning ? (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => void controller.pauseAutomatic()}
+          >
+            Mettre l’enchaînement en pause
+          </button>
+        ) : null}
+      </div>
+      {!validNumber ? (
+        <p className="muted">
+          Un numéro international visible est nécessaire pour rappeler.
+        </p>
+      ) : null}
+      {busy ? (
+        <p className="muted">
+          Terminez l’appel en cours avant de lancer un autre appel.
+        </p>
+      ) : state.automaticRunning ? (
+        <p className="muted">
+          Mettez l’enchaînement en pause pour appeler ce client.
+        </p>
+      ) : state.loaded && !state.enabled ? (
+        <p className="muted">
+          Le téléphone est indisponible. Actualisez son état avant de réessayer.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function useRequestId() {
   const current = useRef({ value: "", id: crypto.randomUUID() });
   return (value: unknown) => {
@@ -818,11 +943,8 @@ function FollowupDetail({
         <p role="status">Chargement du suivi…</p>
       ) : (
         <>
+          <CallerSummary row={data.followup} />
           <dl className="contact-fields">
-            <div>
-              <dt>Téléphone</dt>
-              <dd>{data.followup.caller_number || "Numéro masqué"}</dd>
-            </div>
             <div>
               <dt>Responsable</dt>
               <dd>{data.followup.owner_name || "Non attribué"}</dd>
@@ -836,12 +958,6 @@ function FollowupDetail({
               <dd>{data.followup.call_count}</dd>
             </div>
           </dl>
-          {data.followup.do_not_contact || data.followup.non_interested ? (
-            <Notice>
-              Ce contact possède une restriction de contact. La réception de son
-              appel ne lève pas cette restriction.
-            </Notice>
-          ) : null}
           {data.followup.callback_at ? (
             <p>
               Rappel manuel :{" "}
@@ -1066,6 +1182,7 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
           key={selected}
           queueId={selected}
           revision={revision}
+          onFollowup={setDetail}
         />
       ) : null}
       {loading ? (
@@ -1455,14 +1572,21 @@ type ReceivedCall = {
   outcome: string | null;
   agent_name: string | null;
   recordings: IncomingRecording[];
+  profile?: Record<string, string> | null;
+  do_not_contact?: boolean;
+  non_interested?: boolean;
+  followup_id?: string | null;
 };
 function IncomingHistory({
   queueId,
   revision,
+  onFollowup,
 }: {
   queueId: string;
   revision: number;
+  onFollowup: (id: string) => void;
 }) {
+  const [caller, setCaller] = useState<ReceivedCall | null>(null);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ReceivedCall[]>([]);
   const [more, setMore] = useState(false);
@@ -1543,6 +1667,15 @@ function IncomingHistory({
                   {date(c.received_at)}
                   {c.agent_name ? ` · ${c.agent_name}` : ""}
                 </span>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() =>
+                    c.followup_id ? onFollowup(c.followup_id) : setCaller(c)
+                  }
+                >
+                  Voir la fiche client
+                </button>
                 <IncomingRecordings items={c.recordings} />
               </li>
             ))}
@@ -1557,6 +1690,17 @@ function IncomingHistory({
             </button>
           ) : null}
         </>
+      ) : null}
+      {caller ? (
+        <Modal
+          title={contact({
+            caller_number: caller.caller_number,
+            profile: caller.profile || null,
+          })}
+          onClose={() => setCaller(null)}
+        >
+          <CallerSummary row={caller} />
+        </Modal>
       ) : null}
     </section>
   );

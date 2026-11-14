@@ -1,5 +1,7 @@
 # Regression and release-validation results
 
+14 November inbound callback UI: [executed checks and retained failures](inbound-client-callbacks-20261114.md),27 browser PASS,159 controller/SDK PASS,217 backend PASS, real incoming HTTP/PG PASS.
+
 14 November: [construction year / invalid destination validation](construction-and-invalid-numbers-20261114.md) records159 controller/SDK,217 backend,23 host and48 browser PASS, actual calendar/dialer HTTP/PostgreSQL gates, exact commands/exits and retained failures. Broader CI/carrier gates require their own current evidence.
 
 Latest follow-up: [remaining automatic pause paths](dialer-pause-followup-20261112.md) distinguishes live log evidence, real-SDK regression, isolated controller/browser tests and unresolved provider/database-root-cause checks.

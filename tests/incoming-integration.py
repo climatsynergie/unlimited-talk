@@ -220,6 +220,18 @@ try:
  assert linked['items'][0]['recordings'][0]['state']=='archived'
  history=agents[1].request('GET','/api/inbound/queues/'+str(queue)+'/calls')
  assert next(item for item in history['items'] if item['id']==str(second[0]))['recordings'][0]['channels']==1
+ # History exposes canonical contact coordinates/restrictions for the callback UI.
+ caller_row=next(item for item in history['items'] if item['id']==str(second[0]))
+ assert caller_row['do_not_contact'] is False and caller_row['non_interested'] is False
+ test_contact=uuid4()
+ with engine.begin() as db:
+  query(db,"INSERT INTO staging.contacts(id,phone,profile,do_not_contact,non_interested) VALUES (:id,:phone,CAST(:profile AS jsonb),true,true)",id=test_contact,phone=second[1]['From'],profile=json.dumps({'display_name':'Client entrant QA','city':'Montréal'}))
+ updated_history=agents[1].request('GET','/api/inbound/queues/'+str(queue)+'/calls')
+ restricted=next(item for item in updated_history['items'] if item['id']==str(second[0]))
+ assert restricted['profile']['city']=='Montréal' and restricted['contact_id']==str(test_contact)
+ assert restricted['do_not_contact'] is True and restricted['non_interested'] is True
+ with engine.begin() as db:
+  query(db,'UPDATE staging.contacts SET do_not_contact=false,non_interested=false WHERE id=:id',id=test_contact)
  outsider.request('GET','/api/inbound/queues/'+str(queue)+'/calls',expected=403)
 
  decline(third,offers(third)[0]);signed('incoming-parent-status',fields={**third[1],'CallStatus':'completed'})
