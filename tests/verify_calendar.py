@@ -88,6 +88,19 @@ assert before_qualification['booker_name']=='Agent campagne'
 assert next(s for s in agent_a.request('GET',A+'/board')['stages'] if s['kind']=='appointment')['total']==0
 agent_a.request('POST','/api/calendar',{**body,'created_by':id_b},expected=422)
 agent_a.request('POST','/api/calendar',{**body,'booker_name':'Autre agent'},expected=422)
+# Model-level failures identify a safe field through the actual HTTP handler.
+# Rejected drafts/bookings must not create snapshots or advance the pipeline.
+bad_qualification={**QUALIFICATION,'answers':{**QUALIFICATION['answers'],'postal_code':'PRIVATE_INVALID_POSTAL'}}
+invalid=agent_a.request('POST','/api/calendar',{**body,'qualification':bad_qualification},expected=422)
+assert isinstance(invalid['detail'],str) and 'Code postal' in invalid['detail']
+assert 'PRIVATE_INVALID_POSTAL' not in json.dumps(invalid)
+invalid=agent_a.request('PUT',A+'/contacts/'+contact+'/qualification',dict(
+    request_id=str(uuid.uuid4()),expected_revision=None,qualification=bad_qualification),expected=422)
+assert isinstance(invalid['detail'],str) and 'Code postal' in invalid['detail']
+assert 'PRIVATE_INVALID_POSTAL' not in json.dumps(invalid)
+assert agent_a.request('GET',A+'/contacts/'+contact)['qualification'] is None
+assert next(s for s in agent_a.request('GET',A+'/board')['stages'] if s['kind']=='appointment')['total']==0
+body['qualification']={**QUALIFICATION,'answers':{**QUALIFICATION['answers'],'postal_code':'h2x\u00a01y4'}}
 booked=agent_a.request('POST','/api/calendar',body,expected=201)
 assert booked['starts_at'].startswith('2026-11-01T06:30')
 assert agent_a.request('POST','/api/calendar',body,expected=201)['id']==booked['id']
@@ -97,6 +110,7 @@ assert agent_b.request('GET',path)['can_edit'] is False
 assert agent_a.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
+assert admin.request('GET',path)['appointment']['qualification']['answers']['postal_code']=='H2X 1Y4'
 assert admin.request('GET',path)['appointment']['qualification']['answers']['construction_year']==QUALIFICATION['answers']['construction_year']
 snapshot=admin.request('GET',path)['appointment']['qualification']
 assert snapshot['schema_version']==3

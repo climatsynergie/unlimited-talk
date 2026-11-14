@@ -98,6 +98,14 @@ async def http_error(request, error):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, error):
+    # Only known booking fields have public feedback; authentication errors
+    # retain their generic redaction and never expose submitted values/context.
+    from app.booking_validation import feedback
+    route = getattr(request.scope.get('route'), 'path', '')
+    public = feedback(route, error.errors())
+    if public is not None:
+        detail, code = public
+        return JSONResponse(status_code=422, content={'detail': detail}, headers={'X-Error-Code': code})
     # Never echo submitted passwords, invitation tokens or OTPs in error bodies.
     return JSONResponse(status_code=422,content={'detail':[
         {'loc':list(item['loc']),'type':item['type'],'msg':'Valeur invalide'}

@@ -1359,6 +1359,71 @@ test("refus du microphone : aucun composeur serveur ni appel", async ({
   expect(f.nextCount).toBe(0);
 });
 
+test("qualification : erreur de code postal précise, réponses conservées et nouvelle confirmation possible", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  await fillQualification(sheet);
+  const postal = sheet.getByRole("textbox", {
+    name: qualificationSchema.fields.find(
+      (field) => field.key === "postal_code",
+    )!.label,
+    exact: true,
+  });
+  await postal.fill("H2O 1Y4");
+  let rejected = 0;
+  await page.route("**/api/calendar", async (route) => {
+    if (route.request().method() === "POST" && rejected === 0) {
+      rejected++;
+      return route.fulfill({
+        status: 422,
+        json: {
+          detail:
+            "Code postal canadien invalide. Exemple : H2X 1Y4. Vérifiez les lettres et les chiffres.",
+        },
+      });
+    }
+    return route.fallback();
+  });
+  await sheet
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  const date = sheet.getByLabel("Date et heure du rendez-vous", {
+    exact: true,
+  });
+  await date.fill("2026-11-20T10:00");
+  const confirm = sheet.getByRole("button", {
+    name: "Confirmer le rendez-vous",
+    exact: true,
+  });
+  await confirm.click();
+  await expect(sheet.getByRole("alert")).toContainText(
+    "Code postal canadien invalide",
+  );
+  await expect(postal).toHaveValue("H2O 1Y4");
+  await expect(date).toHaveValue("2026-11-20T10:00");
+  await expect(
+    sheet.getByRole("textbox", {
+      name: qualificationSchema.fields.find((field) => field.key === "city")!
+        .label,
+      exact: true,
+    }),
+  ).toHaveValue(validQualification.answers.city);
+  expect(f.appointments).toHaveLength(0);
+  await postal.fill("H2X 1Y4");
+  await confirm.click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  expect(rejected).toBe(1);
+  expect(f.appointments[0]).toMatchObject({
+    qualification: validQualification,
+  });
+});
+
 test("qualification : présences, isolation et Hydro enregistrés avec le RDV", async ({
   page,
 }) => {

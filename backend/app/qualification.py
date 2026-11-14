@@ -16,10 +16,17 @@ SCHEMA = {**SCHEMAS[3], 'previous_versions': [SCHEMAS[2], SCHEMAS[1]]}
 FIELDS = SCHEMA['fields']
 
 
+class QualificationError(ValueError):
+    """Only static field/reason identifiers; never retain submitted values."""
+    def __init__(self, field, reason, message):
+        self.field, self.reason = field, reason
+        super().__init__(message)
+
+
 def normalize(answers, *, schema_version=3, complete=False):
     fields = SCHEMAS[schema_version]['fields']
     if not isinstance(answers, dict) or set(answers) - {f['key'] for f in fields}:
-        raise ValueError('Fiche de qualification invalide.')
+        raise QualificationError(None, 'shape', 'Fiche de qualification invalide.')
     result = {}
     for field in fields:
         condition = field['condition']
@@ -27,16 +34,20 @@ def normalize(answers, *, schema_version=3, complete=False):
             continue
         value = answers.get(field['key'], '')
         if not isinstance(value, str) or len(value) > 2000 or any(ord(c) < 32 and c not in '\n\r\t' for c in value):
-            raise ValueError('Valeur invalide : ' + field['label'])
+            raise QualificationError(field['key'], 'text', 'Valeur invalide : ' + field['label'])
         value = value.strip()
         if complete and field['required'] and not value:
-            raise ValueError('Champ obligatoire : ' + field['label'])
+            raise QualificationError(field['key'], 'required', 'Champ obligatoire : ' + field['label'])
         if value and field['options'] and value not in field['options']:
-            raise ValueError('Choix invalide : ' + field['label'])
+            raise QualificationError(field['key'], 'choice', 'Choix invalide : ' + field['label'])
         if value and field['key'] == 'postal_code':
-            value = value.upper().replace(' ', '')
+            # Normalize presentation only; never guess letters/digits or weaken the
+            # Canadian format. Pasted Unicode spaces and the central dash are common.
+            value = re.sub(r'\s+', '', value.upper())
+            if len(value) == 7 and value[3] == '-':
+                value = value[:3] + value[4:]
             if not re.fullmatch(r'[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\d[ABCEGHJ-NPRSTV-Z]\d', value):
-                raise ValueError('Code postal canadien invalide.')
+                raise QualificationError('postal_code', 'postal', 'Code postal canadien invalide.')
             value = value[:3] + ' ' + value[3:]
         result[field['key']] = value
     return result
