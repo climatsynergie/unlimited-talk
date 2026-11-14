@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "answers": {
     "owner": "Oui",
     "owners": "2 propriétaires",
@@ -19,6 +19,7 @@
     "owners_present": "Oui",
     "spouses_present": "Pas de conjoint",
     "insulation_comment": "Isolation de l’entretoit améliorée en 2018",
-    "hydro_bill": "150 $ par mois"
+    "hydro_bill": "150 $ par mois",
+    "construction_year": "Vers 1970"
   }
 }

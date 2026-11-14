@@ -7,11 +7,17 @@ import type {
 
 export const qualificationSchema: QualificationSchema = JSON.parse(
   readFileSync(
-    new URL("../../../backend/app/qualification-v2.json", import.meta.url),
+    new URL("../../../backend/app/qualification-v3.json", import.meta.url),
     "utf8",
   ),
 );
 qualificationSchema.previous_versions = [
+  JSON.parse(
+    readFileSync(
+      new URL("../../../backend/app/qualification-v2.json", import.meta.url),
+      "utf8",
+    ),
+  ),
   JSON.parse(
     readFileSync(
       new URL("../../../backend/app/qualification-v1.json", import.meta.url),

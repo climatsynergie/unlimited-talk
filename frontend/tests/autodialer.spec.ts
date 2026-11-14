@@ -582,7 +582,12 @@ test("agent : Arrêter pendant la récupération empêche toute répétition tar
   ).toBe(0);
 });
 
-for (const source of ["call", "device-call", "device-outbound"] as const)
+for (const source of [
+  "call",
+  "device-call",
+  "device-outbound",
+  "device-not-found",
+] as const)
   test(`agent : erreur ${source} sans réponse, dix secondes puis prochain contact sans Reprendre`, async ({
     page,
   }) => {
@@ -592,10 +597,17 @@ for (const source of ["call", "device-call", "device-outbound"] as const)
     await start(page);
     const row = [...f.rows.values()][0];
     row.state = "finished";
-    row.outcome = source === "device-outbound" ? "busy" : "no-answer";
+    row.outcome =
+      source === "device-not-found"
+        ? "failed"
+        : source === "device-outbound"
+          ? "busy"
+          : "no-answer";
     await page.evaluate((source) => {
       if (source === "call")
         window.phoneProof.call!.emit("error", { code: 31005 });
+      else if (source === "device-not-found")
+        window.phoneProof.error!({ code: 31404 });
       else if (source === "device-outbound")
         window.phoneProof.error!({ code: 31486 });
       else window.phoneProof.error!({ code: 31005 }, window.phoneProof.call);
@@ -1420,6 +1432,97 @@ test("qualification : présences, isolation et Hydro enregistrés avec le RDV", 
   expect(f.appointments[0]).toMatchObject({
     qualification: validQualification,
   });
+});
+
+for (const year of ["Vers 1970", ""])
+  test(`qualification : année de construction texte facultatif ${year || "vide"}, conservée avec le RDV`, async ({
+    page,
+  }) => {
+    const f = await setup(page);
+    await start(page);
+    const row = [...f.rows.values()][0];
+    const sheet = page.getByRole("region", {
+      name: "Fiche du contact",
+      exact: true,
+    });
+    const input = sheet.getByRole("textbox", {
+      name: "Année de construction",
+      exact: true,
+    });
+    await expect(input).toHaveAttribute("type", "text");
+    await expect(input).toHaveJSProperty("required", false);
+    await fillQualification(sheet, {
+      ...validQualification.answers,
+      construction_year: year,
+    });
+    await sheet
+      .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+      .click();
+    await sheet
+      .getByLabel("Date et heure du rendez-vous", { exact: true })
+      .fill("2026-11-20T10:00");
+    await sheet
+      .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+      .click();
+    await expect.poll(() => f.appointments.length).toBe(1);
+    expect(f.appointments[0]).toMatchObject({
+      qualification: {
+        schema_version: 3,
+      },
+    });
+    const submitted = f.appointments[0].qualification as {
+      answers: Record<string, string>;
+    };
+    expect(submitted.answers.construction_year ?? "").toBe(year);
+    expect(
+      f.qualifications.get(row.contact_id)?.qualification.answers
+        .construction_year ?? "",
+    ).toBe(year);
+  });
+
+test("qualification : fiche v2 ouverte en v3 sans modifier l’ancienne réponse", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const row = [...f.rows.values()][0];
+  const legacy = JSON.parse(
+    readFileSync(
+      new URL("../../tests/qualification-v2-fixture.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const original = JSON.stringify(legacy);
+  f.qualifications.set(row.contact_id, {
+    revision: "7",
+    qualification: legacy,
+  });
+  await page.reload();
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const input = sheet.getByRole("textbox", {
+    name: "Année de construction",
+    exact: true,
+  });
+  await expect(input).toHaveValue("");
+  await input.fill("Fin des années 1960");
+  await sheet
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-20T10:00");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  expect(f.qualifications.get(row.contact_id)?.qualification).toMatchObject({
+    schema_version: 3,
+    answers: { ...legacy.answers, construction_year: "Fin des années 1960" },
+  });
+  expect(JSON.stringify(legacy)).toBe(original);
 });
 
 test("qualification : ancien commentaire conservé sans deviner le choix isolation", async ({

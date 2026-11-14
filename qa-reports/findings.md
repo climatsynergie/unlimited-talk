@@ -1,5 +1,7 @@
 # Findings and verified repairs
 
+14 November follow-up: [optional construction year and invalid-number reconciliation](construction-and-invalid-numbers-20261114.md) records QA-21 (HIGH operational, reproduced and fixed in QA), optional version3 text, executed real-SDK/browser/API/PostgreSQL checks and rollback limits.
+
 12 November second follow-up: [remaining automatic pause paths](dialer-pause-followup-20261112.md) records QA-18/19/20, real-SDK baseline reproduction, the observed `/next`500, bounded same-ID recovery, and remaining diagnosis/acceptance limits. Corrections remain in QA.
 
 12 November follow-up: [automatic dialer pause repair](dialer-autopause-20261112.md) records QA-16 (HIGH, fixed in QA) and QA-17 (MEDIUM, fixed in QA), before/after regressions, late-event precedence checks and the limits of live diagnosis. These changes have not been deployed.

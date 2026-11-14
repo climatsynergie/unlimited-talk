@@ -88,10 +88,17 @@ export function upgradeQualification(
   schema: QualificationSchema,
   value: QualificationValue,
 ): QualificationValue {
-  if (value.schema_version !== 1 || schema.schema_version !== 2) return value;
+  if (
+    value.schema_version >= schema.schema_version ||
+    !schema.previous_versions?.some(
+      (previous) => previous.schema_version === value.schema_version,
+    )
+  )
+    return value;
   const answers = { ...value.answers };
   const insulation = answers.insulation?.trim();
   if (
+    value.schema_version === 1 &&
     insulation &&
     !schema.fields
       .find((field) => field.key === "insulation")
@@ -329,7 +336,9 @@ export function QualificationFields({
                         placeholder={
                           field.key === "hydro_bill"
                             ? "Ex. : 150 $ / mois ou 1 800 $ / an"
-                            : undefined
+                            : field.key === "construction_year"
+                              ? "Ex. : 1970, vers 1970 ou inconnue"
+                              : undefined
                         }
                         aria-describedby={
                           field.key === "hydro_bill" ? `${id}-hint` : undefined

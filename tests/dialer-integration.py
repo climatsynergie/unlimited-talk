@@ -469,7 +469,10 @@ try:
     xml=voice(agents[0],launched_id)[1]
     assert xml.find('Dial').get('timeout')=='50' and xml.find('Dial').get('timeLimit')=='1800'
     finish(agents[0],launched_id,'no-answer')
-    assert 'intent' not in next_call(agents[0],flexible_browser,flexible_state)
+    no_answer_next=next_call(agents[0],flexible_browser,flexible_state)
+    assert 'intent' not in no_answer_next
+    assert no_answer_next['dialer']['mode']=='running'
+    assert agents[0].request('GET','/api/telephony/dialer/session')['dialer']['mode']=='running'
     explicit_callback=schedule(agents[0],flexible_campaign,flexible_contact)
     with engine.begin() as db:query(db,"UPDATE staging.callbacks SET due_at=clock_timestamp()-interval '1 minute' WHERE id=:id",id=explicit_callback)
     recalled=next_call(agents[0],flexible_browser,flexible_state)
@@ -481,7 +484,10 @@ try:
     with engine.begin() as db:query(db,"UPDATE staging.voice_completion_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE intent_id=:id",id=recalled_id)
     completion.process_once(engine,profile)
     assert agents[0].request('GET','/api/callbacks/'+str(explicit_callback))['callback']['status']=='scheduled'
-    assert 'intent' not in next_call(agents[0],flexible_browser,flexible_state)
+    failed_next=next_call(agents[0],flexible_browser,flexible_state)
+    assert 'intent' not in failed_next
+    assert failed_next['dialer']['mode']=='running'
+    assert agents[0].request('GET','/api/telephony/dialer/session')['dialer']['mode']=='running'
     agents[0].request('POST','/api/telephony/dialer/control',dict(action='stop',browser_id=str(flexible_browser),generation=flexible_state['generation']))
 
     # An assigned agent can confirm renewed interest and book immediately, but

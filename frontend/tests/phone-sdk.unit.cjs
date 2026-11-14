@@ -314,43 +314,57 @@ async function controllerFixture(t) {
   };
 }
 
-test(
-  "actual SDK unassociated busy reconciles without pausing and waits for terminal state plus ten seconds",
-  { timeout: 5_000 },
-  async (t) => {
-    const f = await controllerFixture(t);
-    const first = f.devices[0],
-      id = [...f.records.keys()][0];
-    const callSid = sid();
-    first.stream.emit("ringing", { callsid: callSid });
-    first.stream.emit("error", {
-      callsid: callSid,
-      error: { code: 31486, message: "Synthetic busy" },
-    });
-    await turn();
-    assert.equal(f.controller.state.phase, "checking");
-    assert.equal(f.controller.state.automaticRunning, true);
-    assert.equal(f.controller.state.automaticNextAt, null);
-    assert.deepEqual(f.actions, ["start"]);
-    f.advance(30_000);
-    await f.controller.automaticTick();
-    assert.equal(f.nextCount, 1, "uncertain provider state must never redial");
-    f.records.set(id, {
-      ...f.records.get(id),
-      state: "finished",
-      outcome: "busy",
-    });
-    await f.controller.refresh();
-    assert.equal(f.controller.state.automaticNextAt, 40_000);
-    f.advance(39_999);
-    await f.controller.automaticTick();
-    assert.equal(f.nextCount, 1);
-    f.advance(40_000);
-    await f.controller.automaticTick();
-    assert.equal(f.nextCount, 2);
-    assert.deepEqual(f.actions, ["start"]);
-  },
-);
+for (const [code, outcome] of [
+  [31404, "failed"],
+  [31480, "no-answer"],
+  [31486, "busy"],
+  [31603, "failed"],
+  [13223, "failed"],
+  [13224, "failed"],
+  [13226, "failed"],
+  [21211, "failed"],
+])
+  test(
+    `actual SDK unassociated result ${code} reconciles without pausing and waits for terminal state plus ten seconds`,
+    { timeout: 5_000 },
+    async (t) => {
+      const f = await controllerFixture(t);
+      const first = f.devices[0],
+        id = [...f.records.keys()][0];
+      const callSid = sid();
+      first.stream.emit("ringing", { callsid: callSid });
+      first.stream.emit("error", {
+        callsid: callSid,
+        error: { code, message: "Synthetic remote result" },
+      });
+      await turn();
+      assert.equal(f.controller.state.phase, "checking");
+      assert.equal(f.controller.state.automaticRunning, true);
+      assert.equal(f.controller.state.automaticNextAt, null);
+      assert.deepEqual(f.actions, ["start"]);
+      f.advance(30_000);
+      await f.controller.automaticTick();
+      assert.equal(
+        f.nextCount,
+        1,
+        "uncertain provider state must never redial",
+      );
+      f.records.set(id, {
+        ...f.records.get(id),
+        state: "finished",
+        outcome,
+      });
+      await f.controller.refresh();
+      assert.equal(f.controller.state.automaticNextAt, 40_000);
+      f.advance(39_999);
+      await f.controller.automaticTick();
+      assert.equal(f.nextCount, 1);
+      f.advance(40_000);
+      await f.controller.automaticTick();
+      assert.equal(f.nextCount, 2);
+      assert.deepEqual(f.actions, ["start"]);
+    },
+  );
 
 test(
   "actual SDK mapped WebSocket failure keeps automatic dialing paused after a terminal no-answer",

@@ -1,5 +1,7 @@
 # Regression and release-validation results
 
+14 November: [construction year / invalid destination validation](construction-and-invalid-numbers-20261114.md) records159 controller/SDK,217 backend,23 host and48 browser PASS, actual calendar/dialer HTTP/PostgreSQL gates, exact commands/exits and retained failures. Broader CI/carrier gates require their own current evidence.
+
 Latest follow-up: [remaining automatic pause paths](dialer-pause-followup-20261112.md) distinguishes live log evidence, real-SDK regression, isolated controller/browser tests and unresolved provider/database-root-cause checks.
 
 12 November follow-up: see [automatic dialer validation](dialer-autopause-20261112.md) for fresh commands, exit codes and evidence. Its browser tests use isolated HTTP/SDK fixtures; do not substitute them for the real HTTP/PG gates below.

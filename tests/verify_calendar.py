@@ -97,9 +97,10 @@ assert agent_b.request('GET',path)['can_edit'] is False
 assert agent_a.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
+assert admin.request('GET',path)['appointment']['qualification']['answers']['construction_year']==QUALIFICATION['answers']['construction_year']
 snapshot=admin.request('GET',path)['appointment']['qualification']
-assert snapshot['schema_version']==2
-for key in ('owners_present','spouses_present','insulation','insulation_comment','hydro_bill'):
+assert snapshot['schema_version']==3
+for key in ('owners_present','spouses_present','insulation','insulation_comment','hydro_bill','construction_year'):
     assert snapshot['answers'][key]==QUALIFICATION['answers'][key]
 saved=agent_a.request('GET',A+'/contacts/'+contact)['qualification']
 assert saved['qualification']['answers']['postal_code']=='H2X 1Y4'
@@ -171,6 +172,17 @@ assert admin.request('PATCH',legacy_path,legacy_patch)['version']==1
 assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':1,'status':'cancelled'})['version']==2
 admin.request('PATCH',legacy_path,{**legacy_patch,'version':2},expected=422)
 assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':2,'qualification':QUALIFICATION})['qualification']['answers']['owner']=='Oui'
+# Construction year is optional through the actual API, not only the browser.
+current_card=admin.request('GET',A+'/contacts/'+contact)
+without_year={**QUALIFICATION,'answers':{k:v for k,v in QUALIFICATION['answers'].items() if k!='construction_year'}}
+optional=admin.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),
+    'membership_version':current_card['contact']['version'],
+    'qualification_revision':current_card['qualification']['revision'],
+    'qualification':without_year},expected=201)
+optional_snapshot=admin.request('GET','/api/calendar/'+optional['id'])['appointment']['qualification']
+assert optional_snapshot['schema_version']==3
+assert optional_snapshot['answers']['construction_year']==''
+assert admin.request('GET',path)['appointment']['qualification']['answers']['construction_year']==QUALIFICATION['answers']['construction_year']
 # Reassignment revocation blocks creation while retaining creator ownership on existing meetings.
 admin.request('PUT',A+'/agents/'+id_a,dict(is_active=False))
 agent_a.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),'membership_version':version},expected=403)

@@ -18,7 +18,7 @@ export type Session = {
   max_duration_seconds: number;
   active: Intent | null;
 };
-export type MediaError = { code?: number };
+export type MediaError = { code?: number; originalError?: unknown };
 type PauseDiagnostic = {
   cause:
     "sdk_call" | "sdk_device" | "sdk_setup" | "sdk_connect" | "next_request";
@@ -51,11 +51,33 @@ function requiresDialerPause(error?: MediaError) {
   );
 }
 
+function destinationErrorCode(error?: MediaError): number | null {
+  if (error?.code === 31404) return 31404;
+  // Unmapped Twilio destination errors become SDK UnknownError (31000).
+  // Inspect only a bounded numeric code; never infer from free-text messages.
+  if (error?.code !== 31000) return null;
+  const original = error.originalError;
+  if (
+    typeof original !== "object" ||
+    original === null ||
+    !("code" in original)
+  )
+    return null;
+  const code = original.code;
+  return typeof code === "number" && [13223, 13224, 13226, 21211].includes(code)
+    ? code
+    : null;
+}
+
 function carrierResult(error?: MediaError) {
-  // These are explicit remote-party SIP results. In SDK 2.18.5 the Device
-  // lookup omits outgoing _activeCall, so the optional Call may be absent.
+  // SDK 2.18.5 omits outgoing _activeCall from its Device error lookup.
+  // Reconcile explicit SIP results even without the optional Call. NotFound
+  // can also mean configuration failure, so it requires a finished intent.
   // Generic connection/transport errors remain device-wide failures.
-  return [31480, 31486, 31603].includes(error?.code ?? 0);
+  return (
+    destinationErrorCode(error) !== null ||
+    [31480, 31486, 31603].includes(error?.code ?? 0)
+  );
 }
 
 function transientRequest(error: unknown) {
@@ -172,6 +194,10 @@ export class PhoneController {
   private refreshing = false;
   private refreshAgain = false;
   private identifier: string | null = null;
+  private requireFinishedIntent: {
+    id: string;
+    diagnostic: PauseDiagnostic;
+  } | null = null;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
   private pending: number | null = null;
   private requests = new AbortController();
@@ -259,6 +285,16 @@ export class PhoneController {
   private settle(row: Intent) {
     if (!terminal(row)) return false;
     const automatic = row.automatic || this.state.intent?.automatic;
+    if (this.requireFinishedIntent?.id === row.id) {
+      const diagnostic = this.requireFinishedIntent.diagnostic;
+      this.requireFinishedIntent = null;
+      if (row.state !== "finished") {
+        // Expiry/cancellation without a consumed call does not prove a bad
+        // destination. Keep a broken Voice URL from cycling through contacts.
+        this.bookingArmed = false;
+        if (this.automaticArmed) void this.pauseAutomatic(false, diagnostic);
+      }
+    }
     ++this.generation;
     this.identifier = null;
     this.pending = null;
@@ -718,6 +754,7 @@ export class PhoneController {
     const automaticEpoch = this.automaticEpoch;
     const id = crypto.randomUUID();
     this.identifier = id;
+    this.requireFinishedIntent = null;
     this.mediaAttempted = false;
     this.pending = generation;
     this.watchdog = setTimeout(() => this.hangup(), 45_000);
@@ -817,6 +854,15 @@ export class PhoneController {
         // that error only while this same intent is still being reconciled;
         // an old device must never pause a later call.
         if (!current && this.identifier !== id) return;
+        const destinationCode = destinationErrorCode(error);
+        if (automatic && destinationCode !== null)
+          this.requireFinishedIntent = {
+            id,
+            diagnostic: {
+              cause: callScoped ? "sdk_call" : "sdk_device",
+              code: destinationCode,
+            },
+          };
         if (
           automatic &&
           ((!callScoped && !carrierResult(error)) || requiresDialerPause(error))

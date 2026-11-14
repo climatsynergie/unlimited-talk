@@ -1,5 +1,7 @@
 # Release readiness
 
+> 14 November targeted follow-up: [optional construction year and invalid-number repair](construction-and-invalid-numbers-20261114.md) passes its stated local boundaries. ce47ea5 was observed live and healthy. Broader production certification remains NO-GO; historical release/deployment statements below describe earlier audit snapshots. New version3 qualification writes require a compatible reader when rolling back.
+
 > 12 November later incident:7105909 is verified deployed but an affected agent still records pauses. See [the follow-up investigation](dialer-pause-followup-20261112.md). Additional fixes are isolated in QA; historical CI success does not close the new incident or establish uninterrupted live telephony.
 
 > 12 November operational observation: revision405dc5a is deployed and healthy on schema12, with calling enabled. The [automatic dialer pause repair](dialer-autopause-20261112.md) is isolated in QA and has not been merged or deployed. Its targeted results do not clear broader native-library, real-carrier or recovery gates.

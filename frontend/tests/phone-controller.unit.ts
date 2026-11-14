@@ -5,6 +5,7 @@ import { PhoneController } from "../src/phone-controller.ts";
 import type {
   Intent,
   MediaCall,
+  MediaError,
   MediaDevice,
   Session,
   Transport,
@@ -22,12 +23,12 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 class FakeCall implements MediaCall {
-  listeners = new Map<string, (error?: { code?: number }) => void>();
+  listeners = new Map<string, (error?: MediaError) => void>();
   disconnected = 0;
-  on(event: string, listener: (error?: { code?: number }) => void) {
+  on(event: string, listener: (error?: MediaError) => void) {
     this.listeners.set(event, listener);
   }
-  emit(event: string, error?: { code?: number }) {
+  emit(event: string, error?: MediaError) {
     this.listeners.get(event)?.(error);
   }
   disconnect() {
@@ -39,8 +40,8 @@ class FakeDevice implements MediaDevice {
   destroyed = 0;
   connections: string[] = [];
   inputs: string[] = [];
-  error: (error?: { code?: number }, call?: MediaCall) => void = () => {};
-  onError(listener: (error?: { code?: number }, call?: MediaCall) => void) {
+  error: (error?: MediaError, call?: MediaCall) => void = () => {};
+  onError(listener: (error?: MediaError, call?: MediaCall) => void) {
     this.error = listener;
   }
   async connect(id: string, input: string) {
@@ -660,7 +661,7 @@ for (const source of ["call", "device-call"] as const)
       assert.equal(f.nextCount, 2);
     });
 
-for (const code of [31480, 31486, 31603])
+for (const code of [31404, 31480, 31486, 31603])
   test(`composeur : résultat opérateur ${code} sans référence Call poursuit après confirmation serveur`, async (t) => {
     let now = 0;
     t.mock.method(performance, "now", () => now);
@@ -688,6 +689,104 @@ for (const code of [31480, 31486, 31603])
     now = 70_000;
     await f.controller.automaticTick();
     assert.equal(f.nextCount, 2);
+  });
+
+for (const originalError of [
+  { code: "13224" },
+  { code: 21212 },
+  { code: 53000 },
+  { message: "invalid number" },
+])
+  test(`composeur : erreur inconnue ${JSON.stringify(originalError)} ne devient pas un rejet de numéro`, async (t) => {
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    f.device.error({ code: 31000, originalError });
+    await setImmediate();
+    assert.equal(f.controller.state.automaticRunning, false);
+    assert.equal(f.controller.state.automatic?.mode, "paused");
+    assert.equal(f.nextCount, 1);
+  });
+
+test("composeur : destination rejetée puis préparation expirée, pause diagnostiquée sans données privées", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  const control = f.automatic.control;
+  const pauses: Record<string, unknown>[] = [];
+  f.automatic.control = async (body, signal) => {
+    if (body.action === "pause") pauses.push(body);
+    return control(body, signal);
+  };
+  await f.controller.refresh();
+  await f.controller.startAutomatic("campaign");
+  await f.controller.automaticTick();
+  const id = f.device.connections[0];
+  f.device.error({
+    code: 31000,
+    originalError: { code: 13224, message: "PRIVATE_CONTACT_OR_TOKEN" },
+  });
+  await setImmediate();
+  assert.equal(f.controller.state.automaticRunning, true);
+  f.rows.set(id, { ...f.rows.get(id)!, state: "expired", outcome: null });
+  await f.controller.refresh();
+  await setImmediate();
+  assert.equal(f.controller.state.automatic?.mode, "paused");
+  assert.equal(pauses[0].failure_code, 13224);
+  assert.equal(
+    JSON.stringify(pauses).includes("PRIVATE_CONTACT_OR_TOKEN"),
+    false,
+  );
+  assert.equal(f.nextCount, 1);
+});
+
+for (const state of ["expired", "cancelled"])
+  for (const source of ["call", "device"])
+    test(`composeur : introuvable ${source} puis ${state} sans appel terminé conserve la pause`, async (t) => {
+      let now = 0;
+      t.mock.method(performance, "now", () => now);
+      const f = automaticFixture();
+      t.after(() => f.controller.dispose());
+      await f.controller.refresh();
+      await f.controller.startAutomatic("campaign");
+      await f.controller.automaticTick();
+      const id = f.device.connections[0];
+      if (source === "call") f.device.call.emit("error", { code: 31404 });
+      else f.device.error({ code: 31404 });
+      await setImmediate();
+      assert.equal(f.controller.state.automaticRunning, true);
+      f.rows.set(id, { ...f.rows.get(id)!, state, outcome: null });
+      await f.controller.refresh();
+      now = 60_000;
+      await f.controller.automaticTick();
+      assert.equal(f.controller.state.automaticRunning, false);
+      assert.equal(f.controller.state.automatic?.mode, "paused");
+      assert.equal(f.nextCount, 1);
+    });
+
+for (const action of ["stop", "hold"])
+  test(`composeur : ${action} reste prioritaire après introuvable et expiration`, async (t) => {
+    const f = automaticFixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.refresh();
+    await f.controller.startAutomatic("campaign");
+    await f.controller.automaticTick();
+    const id = f.device.connections[0];
+    f.device.error({ code: 31404 });
+    await setImmediate();
+    const hold =
+      action === "hold" ? await f.controller.beginBooking("campaign") : null;
+    if (action === "stop") await f.controller.pauseAutomatic(true);
+    f.rows.set(id, { ...f.rows.get(id)!, state: "expired", outcome: null });
+    await f.controller.refresh();
+    assert.equal(
+      f.controller.state.automatic?.mode,
+      action === "hold" ? "booking" : "stopped",
+    );
+    if (hold) await f.controller.endBooking(hold);
+    assert.equal(f.controller.state.automaticRunning, false);
+    assert.equal(f.nextCount, 1);
   });
 
 for (const status of [0, 429, 500, 502, 503, 504])

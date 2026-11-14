@@ -101,3 +101,14 @@ history, populated schema-4 migration, browser booking/reschedule/cancel/mobile
 accessibility, real predecessor rollback, backup/restore and database recovery.
 Managed staging verification still requires the actual deployment and user
 acceptance. These checks do not constitute a 20-agent load test.
+
+## Optional construction year (qualification version3)
+
+New qualification drafts and bookings include optional free text **Année de
+construction**. Empty/unknown values do not block a booking. Historical version1
+and2 questionnaires and appointment snapshots retain their fields; a contact
+draft upgrades without rewriting old appointments. Refresh tabs loaded before
+the new schema before creating a new meeting. SQL schema remains unchanged.
+A rollback after version3 saves needs an application that can read/write that
+version; the older ce47ea5 validator rejects version3 edits. See the
+[validation and compatibility report](qa-reports/construction-and-invalid-numbers-20261114.md).

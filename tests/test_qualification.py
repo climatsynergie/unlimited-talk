@@ -10,6 +10,19 @@ FIXTURE = json.loads(Path(__file__).with_name('qualification-fixture.json').read
 
 
 class QualificationTests(unittest.TestCase):
+    def test_construction_year_is_optional_free_text_in_the_new_snapshot(self):
+        value=copy.deepcopy(FIXTURE)
+        value['schema_version']=3
+        value['answers']['construction_year']='  Vers 1970 / inconnue exactement  '
+        saved=complete_snapshot(Qualification.model_validate(value))
+        self.assertEqual(saved['answers']['construction_year'],'Vers 1970 / inconnue exactement')
+        value['answers'].pop('construction_year')
+        omitted=complete_snapshot(Qualification.model_validate(value))
+        self.assertTrue(is_complete(omitted))
+        self.assertEqual(omitted['answers']['construction_year'],'')
+        value['answers']['construction_year']=1970
+        with self.assertRaises(ValidationError):Qualification.model_validate(value)
+
     def test_complete_and_partial_snapshots(self):
         result = complete_snapshot(Qualification.model_validate(FIXTURE))
         self.assertTrue(is_complete(result))
@@ -50,7 +63,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(result['answers']['postal_code'], 'H2X 1Y4')
 
     def test_invalid_or_unversioned_values_fail_closed(self):
-        for patch in [{'schema_version': True}, {'schema_version': 3}, {'schema_version': '1'}, {'unexpected': 'value'},
+        for patch in [{'schema_version': True}, {'schema_version': 4}, {'schema_version': '1'}, {'unexpected': 'value'},
                       {'answers': {'unknown': 'yes'}}, {'answers': {'owner': 'Maybe'}},
                       {'answers': {'heating_age': 12}}, {'answers': {'heating_age': 'a'*2001}},
                       {'answers': {'heating_age': 'bad\x00value'}}, {'answers': {'postal_code': '90210'}}]:
@@ -59,7 +72,7 @@ class QualificationTests(unittest.TestCase):
 
     def test_new_visit_answers_are_saved_with_their_units_and_comments(self):
         result=complete_snapshot(Qualification.model_validate(FIXTURE))
-        self.assertEqual(result['schema_version'],2)
+        self.assertEqual(result['schema_version'],3)
         for key in ('owners_present','spouses_present','insulation','insulation_comment','hydro_bill'):
             self.assertEqual(result['answers'][key],FIXTURE['answers'][key])
         for key,bad in [('owners_present','Peut-être'),('spouses_present','Absent'),('insulation','Isolation récente')]:
@@ -77,3 +90,14 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(old,original)
         with self.assertRaises(ValueError):
             Qualification.model_validate({**old,'answers':{**old['answers'],'hydro_bill':'150 $ / mois'}})
+
+    def test_v2_snapshots_keep_their_fields_without_inventing_a_construction_year(self):
+        old=json.loads(Path(__file__).with_name('qualification-v2-fixture.json').read_text())
+        original=copy.deepcopy(old)
+        saved=complete_snapshot(Qualification.model_validate(old))
+        self.assertTrue(is_complete(saved))
+        self.assertEqual(saved['schema_version'],2)
+        self.assertNotIn('construction_year',saved['answers'])
+        self.assertEqual(old,original)
+        with self.assertRaises(ValueError):
+            Qualification.model_validate({**old,'answers':{**old['answers'],'construction_year':'1970'}})

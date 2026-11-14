@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "answers": {
+    "owner": "Oui",
+    "owners": "2 propriétaires",
+    "property_type": "Maison unifamiliale",
+    "floors": "2 étages",
+    "basement": "Oui, fini",
+    "heating": "Plinthes électriques",
+    "heating_age": "12 ans",
+    "heat_pump": "Non",
+    "insulation": "Refaite",
+    "attic_access": "Oui",
+    "civic_number": "123",
+    "street": "Rue de test",
+    "city": "Montréal",
+    "postal_code": "H2X 1Y4",
+    "comments": "Confirmer les besoins avec le conseiller.",
+    "owners_present": "Oui",
+    "spouses_present": "Pas de conjoint",
+    "insulation_comment": "Isolation de l’entretoit améliorée en 2018",
+    "hydro_bill": "150 $ par mois"
+  }
+}

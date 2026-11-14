@@ -159,3 +159,14 @@ enregistrements réels, ni la capacité média de vingt agents.
 Il s’agit d’un composeur progressif : une ligne par agent. La détection de répondeur,
 la numérotation prédictive, la réception audio et la messagerie vocale restent des
 lots distincts. Les SMS sont exclus à la demande de l’utilisateur.
+
+## Numéro refusé et continuité
+
+Un résultat opérateur reconnu, y compris certains codes de destination invalide,
+n’interrompt pas à lui seul l’enchaînement. Le navigateur attend la fin confirmée
+par le serveur, puis les dix secondes prévues. Un code ambigu sur une réservation
+expirée ou annulée ne permet pas de poursuivre : une erreur de configuration ne
+doit pas faire défiler toute la liste. Les pannes de micro, de connexion ou
+d’authentification conservent la pause. Aucun code ne classe automatiquement un
+contact comme définitivement invalide. Les limites et preuves sont dans le
+[rapport du 14 novembre](qa-reports/construction-and-invalid-numbers-20261114.md).

@@ -11,12 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from app.identity.service import query
 
 SCHEMAS = {version: json.loads(Path(__file__).with_name(f'qualification-v{version}.json').read_text())
-           for version in (1, 2)}
-SCHEMA = {**SCHEMAS[2], 'previous_versions': [SCHEMAS[1]]}
+           for version in (1, 2, 3)}
+SCHEMA = {**SCHEMAS[3], 'previous_versions': [SCHEMAS[2], SCHEMAS[1]]}
 FIELDS = SCHEMA['fields']
 
 
-def normalize(answers, *, schema_version=2, complete=False):
+def normalize(answers, *, schema_version=3, complete=False):
     fields = SCHEMAS[schema_version]['fields']
     if not isinstance(answers, dict) or set(answers) - {f['key'] for f in fields}:
         raise ValueError('Fiche de qualification invalide.')
@@ -44,7 +44,7 @@ def normalize(answers, *, schema_version=2, complete=False):
 
 class Qualification(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    schema_version: int = Field(strict=True, ge=1, le=2)
+    schema_version: int = Field(strict=True, ge=1, le=3)
     answers: dict[str, StrictStr] = Field(max_length=len(FIELDS))
 
     @model_validator(mode='after')
