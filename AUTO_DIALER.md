@@ -170,3 +170,17 @@ doit pas faire défiler toute la liste. Les pannes de micro, de connexion ou
 d’authentification conservent la pause. Aucun code ne classe automatiquement un
 contact comme définitivement invalide. Les limites et preuves sont dans le
 [rapport du 14 novembre](qa-reports/construction-and-invalid-numbers-20261114.md).
+
+## Grandes files et maintenance de l’index
+
+La sélection matérialise100 lignes brutes dans l’ordre de la file avant les
+contrôles coûteux. Une page entièrement exclue ne bloque pas les contacts
+suivants. Les règles et contrôles de réservation restent inchangés. JIT est
+désactivé uniquement pour la transaction de sélection. La CI couvre106000
+contacts, les pages rejetées et une campagne entièrement inéligible.
+
+Le migrateur peut exécuter `python -m app.telephony.dialer_index ensure-index`
+pour créer en ligne l’index de file, sans modifier la révision de données ni les
+anciennes migrations. Le rôle applicatif est refusé. La procédure d’incident et
+le retrait contrôlé des réglages de secours sont décrits dans le
+[rapport opérationnel](qa-reports/dialer-server-incident-20261114.md).

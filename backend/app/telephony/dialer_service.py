@@ -118,33 +118,57 @@ PROSPECTING_LIMITS = '''
 
 
 def candidates(db,values,campaign_id=None):
-    """Keyset batches retain priority without starving rows after the first 100."""
+    """Bound costly eligibility to raw keyset pages; never strand rejected rows.
+
+    Materialize queue order before contact/history checks. The lateral LIMIT
+    keeps those checks correlated to one of at most 100 raw rows, rather than
+    filtering and sorting an entire imported campaign before returning a page.
+    Null phones preserve rejected rows solely for advancing the raw cursor.
+    Reservation/authorization still recheck policy and arbitrate concurrent calls.
+    """
     after=None
     after_id=None
     while True:
         if campaign_id is None:
-            statement='''SELECT cb.campaign_id,c.id AS contact_id,c.phone,
-                cb.due_at AS candidate_order,cb.id AS candidate_key FROM staging.callbacks cb
-                JOIN staging.contacts c ON c.id=cb.contact_id JOIN staging.campaigns ca ON ca.id=cb.campaign_id
-                JOIN staging.campaign_contacts m ON m.campaign_id=cb.campaign_id AND m.contact_id=cb.contact_id
-                '''+policy.POLICY_JOIN+''' WHERE cb.owner_id=:actor AND cb.status='scheduled' AND cb.due_at<=clock_timestamp()
+            statement='''WITH candidate_page AS MATERIALIZED (
+                SELECT cb.* FROM staging.callbacks cb
+                WHERE cb.owner_id=:actor AND cb.status='scheduled' AND cb.due_at<=clock_timestamp()
                 AND (CAST(:after AS timestamptz) IS NULL OR (cb.due_at,cb.id)>(CAST(:after AS timestamptz),CAST(:after_id AS uuid)))
-                AND '''+ELIGIBLE+''' AND (NOT EXISTS(SELECT 1 FROM staging.voice_intents prior
-                  WHERE prior.account_sid=:account AND prior.destination=c.phone AND prior.callback_id=cb.id
-                  AND prior.callback_version=cb.version AND prior.consumed_at IS NOT NULL)
-                  OR ('''+PROSPECTING_LIMITS.strip().removeprefix('AND ')+''')) ORDER BY cb.due_at,cb.id LIMIT 100'''
+                ORDER BY cb.due_at,cb.id LIMIT 100)
+                SELECT cb.campaign_id,cb.contact_id,eligible.phone,
+                    cb.due_at AS candidate_order,cb.id AS candidate_key
+                FROM candidate_page cb LEFT JOIN LATERAL (
+                    SELECT c.phone FROM staging.contacts c
+                    JOIN staging.campaigns ca ON ca.id=cb.campaign_id
+                    JOIN staging.campaign_contacts m ON m.campaign_id=cb.campaign_id AND m.contact_id=cb.contact_id
+                    '''+policy.POLICY_JOIN+''' WHERE c.id=cb.contact_id AND '''+ELIGIBLE+'''
+                    AND (NOT EXISTS(SELECT 1 FROM staging.voice_intents prior
+                      WHERE prior.account_sid=:account AND prior.destination=c.phone AND prior.callback_id=cb.id
+                      AND prior.callback_version=cb.version AND prior.consumed_at IS NOT NULL)
+                      OR ('''+PROSPECTING_LIMITS.strip().removeprefix('AND ')+'''))
+                    LIMIT 1) eligible ON true ORDER BY cb.due_at,cb.id'''
         else:
-            statement='''SELECT m.campaign_id,c.id AS contact_id,c.phone,
-                m.queue_position AS candidate_order,c.id AS candidate_key FROM staging.campaign_contacts m
-                JOIN staging.contacts c ON c.id=m.contact_id JOIN staging.campaigns ca ON ca.id=m.campaign_id
-                JOIN staging.campaign_stages s ON s.id=m.stage_id
-                '''+policy.POLICY_JOIN+''' WHERE m.campaign_id=:campaign AND s.kind IN ('new','no_answer','other','custom')
-                AND NOT EXISTS(SELECT 1 FROM staging.callbacks cb WHERE cb.contact_id=c.id AND cb.status='scheduled')
-                AND (CAST(:after AS bigint) IS NULL OR (m.queue_position,c.id)>(CAST(:after AS bigint),CAST(:after_id AS uuid)))
-                AND '''+ELIGIBLE+PROSPECTING_LIMITS+''' ORDER BY m.queue_position,c.id LIMIT 100'''
+            statement='''WITH candidate_page AS MATERIALIZED (
+                SELECT m.* FROM staging.campaign_contacts m
+                WHERE m.campaign_id=:campaign AND m.is_active
+                AND (CAST(:after AS bigint) IS NULL OR (m.queue_position,m.contact_id)>(CAST(:after AS bigint),CAST(:after_id AS uuid)))
+                ORDER BY m.queue_position,m.contact_id LIMIT 100)
+                SELECT m.campaign_id,m.contact_id,eligible.phone,
+                    m.queue_position AS candidate_order,m.contact_id AS candidate_key
+                FROM candidate_page m LEFT JOIN LATERAL (
+                    SELECT c.phone FROM staging.contacts c
+                    JOIN staging.campaigns ca ON ca.id=m.campaign_id
+                    JOIN staging.campaign_stages s ON s.id=m.stage_id
+                    '''+policy.POLICY_JOIN+''' WHERE c.id=m.contact_id
+                    AND s.kind IN ('new','no_answer','other','custom')
+                    AND NOT EXISTS(SELECT 1 FROM staging.callbacks cb WHERE cb.contact_id=c.id AND cb.status='scheduled')
+                    AND '''+ELIGIBLE+PROSPECTING_LIMITS+''' LIMIT 1) eligible ON true
+                ORDER BY m.queue_position,m.contact_id'''
         page=query(db,statement,**values,campaign=campaign_id,after=after,after_id=after_id).mappings().all()
         if not page:return
-        yield from page
+        yield from (row for row in page if row['phone'] is not None)
+        # Advance across ALL raw rows, including a fully rejected page. Moving
+        # only past yielded contacts can loop forever or starve later contacts.
         after,after_id=page[-1]['candidate_order'],page[-1]['candidate_key']
         if len(page)<100:return
 
@@ -181,6 +205,9 @@ def next_call(db,actor,profile,browser_id,generation,identifier):
     if pending:return {'idle':'settling','dialer':public(row)}
     values=dict(actor=actor['id'],admin=actor['role']=='admin',account=profile.account_sid)
     reason='empty'
+    # Per-page JIT compilation dominates this short selection query. Keep this
+    # setting local to the current transaction; other requests retain defaults.
+    query(db,'SET LOCAL jit=off')
     for candidate in chain(candidates(db,values),candidates(db,values,row['campaign_id'])):
         try:
             with db.begin_nested():

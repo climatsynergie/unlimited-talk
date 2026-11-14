@@ -1,5 +1,7 @@
 # Findings and verified repairs
 
+14 November production incident: [QA-23 large-queue timeout and recovery](dialer-server-incident-20261114.md). Direct repair explicitly authorized: concurrent index plus scoped runtime-role emergency planner defaults restored measured selection and owner-confirmed calls. Durable raw-page query, guarded reset and scale regression are prepared; emergency defaults remain active until that source is deployed. Charlotte browser-connect failure remains separate/open.
+
 14 November inbound follow-up: [client sheet and direct callbacks](inbound-client-callbacks-20261114.md) records QA-22 (MEDIUM, reproduced and fixed), queue-scoped profile/restriction reads,27 browser and actual HTTP/PostgreSQL regressions.
 
 14 November follow-up: [optional construction year and invalid-number reconciliation](construction-and-invalid-numbers-20261114.md) records QA-21 (HIGH operational, reproduced and fixed in QA), optional version3 text, executed real-SDK/browser/API/PostgreSQL checks and rollback limits.

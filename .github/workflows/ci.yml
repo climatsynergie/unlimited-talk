@@ -85,6 +85,8 @@ jobs:
         run: python3 tests/verify_incoming_upgrade.py
       - name: Start disposable local environment
         run: docker compose up -d --wait --wait-timeout 180
+      - name: Verify online dialer index, role boundary and idempotency
+        run: python3 tests/verify_dialer_queue_index.py
       - name: Verify HTTP, PostgreSQL and isolation
         run: python3 tests/verify_foundation.py
       - name: Verify identities, permissions and session revocation
@@ -107,6 +109,8 @@ jobs:
         run: python3 tests/verify_inbound.py
       - name: Verify automatic queues, callback ownership, regional callers and pause races
         run: python3 tests/verify_dialer.py
+      - name: Verify large dialer queues and rejected-page recovery
+        run: python3 tests/verify_dialer_candidate_scale.py
       - name: Verify authenticated call budgets and concurrent admission
         run: python3 tests/verify_call_budgets.py
       - name: Verify bounded public webhook ingress and authentication payloads
