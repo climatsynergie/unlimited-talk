@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { ReceptionControl } from "./IncomingPhone";
 import { RecordingPlayer } from "./CallHistory";
 import { usePhone } from "./Phone";
+import { RecallButton, RecallControls } from "./Recall";
+import type { RecallPhone } from "./Recall";
 import { api, date, message } from "./api";
 import { Field, Icon, Modal, Notice, Submit } from "./ui";
 import { local, Timezone, when } from "./Scheduling";
@@ -105,7 +107,10 @@ const time = (value: number) =>
   `${String(Math.floor((value % 1440) / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 const minutes = (value: string) =>
   Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
-function contact(row: Pick<Followup, "profile" | "caller_number">) {
+function contact(row: {
+  profile?: Record<string, string> | null;
+  caller_number: string | null;
+}) {
   return (
     row.profile?.display_name ||
     [row.profile?.first_name, row.profile?.last_name]
@@ -122,11 +127,10 @@ type Caller = {
   non_interested?: boolean;
 };
 function CallerSummary({ row }: { row: Caller }) {
-  const { controller, state, busy } = usePhone();
+  const { controller } = usePhone();
   useEffect(() => {
     if (!controller.state.loaded) void controller.refresh();
   }, [controller]);
-  const validNumber = /^\+[1-9][0-9]{8,14}$/.test(row.caller_number || "");
   const labels: Record<string, string> = {
     display_name: "Nom complet",
     first_name: "Prénom",
@@ -162,80 +166,11 @@ function CallerSummary({ row }: { row: Caller }) {
       {row.do_not_contact ? (
         <Notice>Ne pas contacter — ce client ne peut pas être rappelé.</Notice>
       ) : null}
-      {state.error ? <Notice error>{state.error}</Notice> : null}
-      <div className="actions contact-actions">
-        <button
-          type="button"
-          className="button success"
-          disabled={
-            !state.loaded ||
-            !state.enabled ||
-            busy ||
-            state.automaticRunning ||
-            !validNumber ||
-            row.do_not_contact
-          }
-          onClick={() => void controller.start(undefined, row.caller_number!)}
-        >
-          Appeler ce client
-        </button>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => void controller.refresh()}
-        >
-          Actualiser le téléphone
-        </button>
-        {state.local && state.destination === row.caller_number ? (
-          <>
-            <button
-              type="button"
-              className="button danger"
-              onClick={() => controller.hangup()}
-            >
-              Raccrocher
-            </button>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={
-                !state.intent ||
-                state.voicemailPending.includes(state.intent.id)
-              }
-              onClick={() => void controller.voicemail()}
-            >
-              Boîte vocale
-            </button>
-          </>
-        ) : null}
-        {state.automaticRunning ? (
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() => void controller.pauseAutomatic()}
-          >
-            Mettre l’enchaînement en pause
-          </button>
-        ) : null}
-      </div>
-      {!validNumber ? (
-        <p className="muted">
-          Un numéro international visible est nécessaire pour rappeler.
-        </p>
-      ) : null}
-      {busy ? (
-        <p className="muted">
-          Terminez l’appel en cours avant de lancer un autre appel.
-        </p>
-      ) : state.automaticRunning ? (
-        <p className="muted">
-          Mettez l’enchaînement en pause pour appeler ce client.
-        </p>
-      ) : state.loaded && !state.enabled ? (
-        <p className="muted">
-          Le téléphone est indisponible. Actualisez son état avant de réessayer.
-        </p>
-      ) : null}
+      <RecallControls
+        number={row.caller_number}
+        blocked={row.do_not_contact}
+        label="Appeler ce client"
+      />
     </section>
   );
 }
@@ -1059,6 +994,11 @@ function FollowupDetail({
 }
 
 export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
+  const phone = usePhone();
+  const { controller } = phone;
+  useEffect(() => {
+    if (!controller.state.loaded) void controller.refresh();
+  }, [controller]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [selected, setSelected] = useState("");
   const [board, setBoard] = useState<{
@@ -1183,6 +1123,7 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
           queueId={selected}
           revision={revision}
           onFollowup={setDetail}
+          phone={phone}
         />
       ) : null}
       {loading ? (
@@ -1382,7 +1323,10 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                           </h3>
                           <ul>
                             {column.items.map((row) => (
-                              <li key={row.id}>
+                              <li
+                                key={row.id}
+                                className="inbound-followup-item"
+                              >
                                 <button
                                   type="button"
                                   className="inbound-followup-row"
@@ -1427,10 +1371,20 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                                             row.created_at,
                                             board.queue.timezone,
                                           )
-                                        : "Ouvrir la fiche"}
-                                    <span aria-hidden="true"> →</span>
+                                        : null}
+                                    <small className="inbound-open-label">
+                                      Fiche client{" "}
+                                      <span aria-hidden="true">→</span>
+                                    </small>
                                   </span>
                                 </button>
+                                <RecallButton
+                                  phone={phone}
+                                  number={row.caller_number}
+                                  blocked={row.do_not_contact}
+                                  name={contact(row)}
+                                  onOpen={() => setDetail(row.id)}
+                                />
                               </li>
                             ))}
                           </ul>
@@ -1461,31 +1415,42 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                         </header>
                         <div className="pipeline-cards">
                           {column.items.map((row) => (
-                            <button
-                              type="button"
-                              className="pipeline-card"
-                              key={row.id}
-                              onClick={() => setDetail(row.id)}
-                            >
-                              <strong>{contact(row)}</strong>
-                              <span>
-                                {row.caller_number || "Numéro masqué"}
-                              </span>
-                              <span>
-                                {row.owner_name || "Non attribué"} ·{" "}
-                                {row.call_count} appel(s)
-                              </span>
-                              {row.callback_at ? (
+                            <div className="inbound-pipeline-item" key={row.id}>
+                              <button
+                                type="button"
+                                className="pipeline-card"
+                                onClick={() => setDetail(row.id)}
+                              >
+                                <strong>{contact(row)}</strong>
                                 <span>
-                                  Rappel :{" "}
-                                  {when(
-                                    row.callback_at,
-                                    row.callback_timezone ||
-                                      board.queue.timezone,
-                                  )}
+                                  {row.caller_number || "Numéro masqué"}
                                 </span>
-                              ) : null}
-                            </button>
+                                <span>
+                                  {row.owner_name || "Non attribué"} ·{" "}
+                                  {row.call_count} appel(s)
+                                </span>
+                                {row.callback_at ? (
+                                  <span>
+                                    Rappel :{" "}
+                                    {when(
+                                      row.callback_at,
+                                      row.callback_timezone ||
+                                        board.queue.timezone,
+                                    )}
+                                  </span>
+                                ) : null}
+                                <small className="inbound-open-label">
+                                  Fiche client →
+                                </small>
+                              </button>
+                              <RecallButton
+                                phone={phone}
+                                number={row.caller_number}
+                                blocked={row.do_not_contact}
+                                name={contact(row)}
+                                onOpen={() => setDetail(row.id)}
+                              />
+                            </div>
                           ))}
                           {!column.items.length ? (
                             <p className="muted">Aucun suivi.</p>
@@ -1581,8 +1546,10 @@ function IncomingHistory({
   queueId,
   revision,
   onFollowup,
+  phone,
 }: {
   queueId: string;
+  phone: RecallPhone;
   revision: number;
   onFollowup: (id: string) => void;
 }) {
@@ -1661,21 +1628,33 @@ function IncomingHistory({
           <ol className="inbound-history">
             {items.map((c) => (
               <li key={c.id}>
-                <strong>{c.caller_number || "Numéro masqué"}</strong>
+                <strong>{contact(c)}</strong>
+                <span>{c.caller_number || "Numéro masqué"}</span>
                 <span>
                   {c.outcome ? outcomes[c.outcome] : "En cours"} ·{" "}
                   {date(c.received_at)}
                   {c.agent_name ? ` · ${c.agent_name}` : ""}
                 </span>
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() =>
-                    c.followup_id ? onFollowup(c.followup_id) : setCaller(c)
-                  }
-                >
-                  Voir la fiche client
-                </button>
+                <div className="actions inbound-history-actions">
+                  <RecallButton
+                    phone={phone}
+                    number={c.caller_number}
+                    blocked={c.do_not_contact}
+                    name={contact(c)}
+                    onOpen={() =>
+                      c.followup_id ? onFollowup(c.followup_id) : setCaller(c)
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() =>
+                      c.followup_id ? onFollowup(c.followup_id) : setCaller(c)
+                    }
+                  >
+                    Voir la fiche client
+                  </button>
+                </div>
                 <IncomingRecordings items={c.recordings} />
               </li>
             ))}

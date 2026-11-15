@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, date, message } from "./api";
 import { Notice, Field, Icon } from "./ui";
 import { CallContactDialog } from "./Campaigns";
+import { RecallControls } from "./Recall";
 
 export type Recording = {
   sid: string;
@@ -401,6 +402,12 @@ export function CallHistory({
                       : states[call.state]) || "Appel"}
                   </span>
                 </header>
+                <section
+                  className="conversation-recall"
+                  aria-label="Rappeler ce contact"
+                >
+                  <RecallControls number={call.destination} />
+                </section>
                 <dl className="call-details">
                   <div>
                     <dt>Agent</dt>

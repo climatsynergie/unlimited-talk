@@ -3839,6 +3839,54 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   background: #faf7ff;
   border-color: #b8a1df;
 }
+.inbound-followup-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.recall-action {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  max-width: 220px;
+}
+.recall-button {
+  white-space: nowrap;
+}
+.recall-hint {
+  color: #5c5268;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.inbound-open-label {
+  display: block;
+  margin-top: 5px;
+  color: #315caa;
+  font-size: 12px;
+  font-weight: 600;
+}
+.inbound-pipeline-item {
+  padding-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.inbound-pipeline-item .pipeline-card {
+  border: 0;
+}
+.inbound-pipeline-item > .recall-action {
+  margin: 0 12px;
+}
+.inbound-history-actions {
+  align-items: start;
+}
+.conversation-recall {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
 .inbound-contact-avatar {
   display: grid;
   place-items: center;
@@ -3919,6 +3967,13 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   }
 }
 @media (max-width: 500px) {
+  .inbound-followup-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .inbound-followup-item > .recall-action {
+    justify-self: end;
+  }
   .inbound-line-card,
   .inbound-followups {
     padding: 18px;
