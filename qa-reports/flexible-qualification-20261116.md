@@ -128,3 +128,24 @@ sudo -n docker compose --project-directory /home/codexdev/unlimited-talk-qa-audi
 ## Limits
 
 No valid booking/draft was written to production by the tools. Real carrier/headset acceptance and live human entry are NOT TESTED; broad production certification is not inferred. An application rollback to the preceding release would restore its stricter editing policy while leaving the stored JSON/history intact; forward deployment restores the new policy without a data migration.
+
+## Follow-up: legacy reconfirmation gate aligned with the owner’s new policy
+
+Main CI43781860958 for3f9589c stopped at `Verify reconfirmation authorization and callback handoff regressions`; publication was skipped and nothing from that run was deployed. The legacy security suite still asserted422 for a cancelled/completed/no-show appointment without qualification. The same suite was executed locally against the new application:14methods,3subtest failures reproduce the old422-versus-new200 expectation. Its updated scenario now positively verifies successful booked status/version increment, empty supported snapshot, correct pipeline synchronization, one immutable before/after event and retained original status for all three prior statuses. All surrounding authorization, opt-out, archived/unassigned campaign, concurrency, historical-note and due-callback/English-handoff assertions remain intact. No application code changed in this follow-up. The complete real HTTP/PG suite then passed14methods. Raw local and CI failure evidence is retained.
+
+### flexible-reconfirmation-old-policy: FAIL, exit 1
+
+```sh
+env 'FOUNDATION_COMPOSE_ARGS=-p ut-qa-flexqual-20261116 -f /home/codexdev/unlimited-talk-qa-audit/compose.yaml -f /home/codexdev/unlimited-talk-qa-audit/qa-reports/evidence/flexible-qualification-20261116/compose.qa.yaml' python3 tests/verify_backend_reconfirmation.py
+```
+
+[metadata](evidence/flexible-reconfirmation-old-policy.json), [log](evidence/flexible-reconfirmation-old-policy.log).
+
+### flexible-reconfirmation-new-policy: PASS, exit 0
+
+```sh
+env 'FOUNDATION_COMPOSE_ARGS=-p ut-qa-flexqual-20261116 -f /home/codexdev/unlimited-talk-qa-audit/compose.yaml -f /home/codexdev/unlimited-talk-qa-audit/qa-reports/evidence/flexible-qualification-20261116/compose.qa.yaml' python3 tests/verify_backend_reconfirmation.py
+```
+
+[metadata](evidence/flexible-reconfirmation-new-policy.json), [log](evidence/flexible-reconfirmation-new-policy.log).
+

@@ -128,7 +128,7 @@ class BackendReconfirmationTests(unittest.TestCase):
         row=self.book();self.admin.request('PUT',self.path+'/agents/'+str(self.agent.id),dict(is_active=False))
         result=self.agent.request('PATCH','/api/calendar/'+row['id'],dict(version=row['version'],status='cancelled',**{**self.schedule,'notes':'Historical cancelled notes retained'}))
         self.assertEqual(result['notes'],'Historical cancelled notes retained')
-    def test_unqualified_legacy_reconfirmation_requires_qualification_for_all_statuses(self):
+    def test_unqualified_legacy_reconfirmation_accepts_empty_qualification_for_all_statuses(self):
         for status in ('cancelled','completed','no_show'):
             with self.subTest(status=status):
                 identifier=uuid4()
@@ -136,7 +136,20 @@ class BackendReconfirmationTests(unittest.TestCase):
                     query(db,'''INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,request_hash,starts_at,ends_at,timezone,status)
                         VALUES (:id,:campaign,:contact,:actor,'qa-legacy',clock_timestamp(),clock_timestamp()+interval '30 minutes','UTC',:status)''',
                         id=identifier,campaign=self.campaign['id'],contact=self.contact,actor=self.agent.id,status=status)
-                self.reconfirm(dict(id=str(identifier),version=0),422)
+                before=self.admin.request('GET','/api/calendar/'+str(identifier))
+                self.assertIsNone(before['appointment']['qualification'])
+                self.change_stage('other')
+                result=self.reconfirm(dict(id=str(identifier),version=0))
+                self.assertEqual(result['status'],'booked')
+                self.assertEqual(result['version'],1)
+                self.assertEqual(result['qualification']['schema_version'],3)
+                self.assertTrue(all(answer=='' for answer in result['qualification']['answers'].values()))
+                self.assertEqual(self.card()['stage_id'],self.stages['appointment']['id'])
+                recorded=self.admin.request('GET','/api/calendar/'+str(identifier))
+                self.assertEqual(recorded['appointment']['qualification'],result['qualification'])
+                self.assertEqual(len(recorded['events']),1)
+                self.assertEqual(recorded['events'][0]['details']['before']['status'],status)
+                self.assertIsNone(before['appointment']['qualification'])
     def test_due_callback_language_transfer_is_rejected_without_losing_the_promise(self):
         callback=self.callback()
         with engine.begin() as db:query(db,"UPDATE staging.callbacks SET due_at=clock_timestamp()-interval '1 minute' WHERE id=:id",id=callback['id'])
