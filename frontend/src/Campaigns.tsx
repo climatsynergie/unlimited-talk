@@ -1766,11 +1766,12 @@ function CardDetail({
                 value={qualification}
                 onChange={changeQualification}
                 disabled={busy || !campaign.is_active}
-                draftSaveAvailable={!inline}
+                draftSaveAvailable
               />
               {inline ? (
                 <p className="audio-hint">
-                  Sans RDV, la fiche est réinitialisée pour le contact suivant.
+                  Enregistrez les informations à conserver avant de passer au
+                  contact suivant.
                 </p>
               ) : null}
               {data.booker_name ? (
@@ -1781,16 +1782,14 @@ function CardDetail({
               ) : null}
               {campaign.is_active ? (
                 <div className="actions">
-                  {!inline ? (
-                    <button
-                      type="button"
-                      className="button primary"
-                      disabled={busy || !qualificationDirty}
-                      onClick={() => void saveQualification()}
-                    >
-                      Enregistrer la qualification
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={busy || !qualificationDirty}
+                    onClick={() => void saveQualification()}
+                  >
+                    Enregistrer la qualification
+                  </button>
                   {qualificationDirty ? (
                     <button
                       type="button"

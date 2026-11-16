@@ -28,31 +28,30 @@ def response(model,body,route='/api/calendar'):
  raise AssertionError('Expected rejected fixture')
 
 class BookingValidationFeedbackTests(unittest.TestCase):
- def test_invalid_postal_names_the_field_and_keeps_the_entered_value_private(self):
-  body=copy.deepcopy(BODY);body['qualification']['answers']['postal_code']='PRIVATE_INVALID_POSTAL'
+ def test_unsupported_text_names_the_field_and_keeps_the_entered_value_private(self):
+  body=copy.deepcopy(BODY);body['qualification']['answers']['postal_code']='PRIVATE_INVALID_POSTAL\x00'
   value=response(Booking,body)
   self.assertIsInstance(value['detail'],str)
   self.assertIn('Code postal',value['detail'])
   self.assertNotIn('PRIVATE_INVALID_POSTAL',json.dumps(value))
- def test_draft_qualification_has_the_same_actionable_postal_feedback(self):
-  qualification=copy.deepcopy(FIXTURE);qualification['answers']['postal_code']='PRIVATE_BAD_POSTAL'
+ def test_draft_qualification_has_the_same_safe_text_feedback(self):
+  qualification=copy.deepcopy(FIXTURE);qualification['answers']['postal_code']='PRIVATE_BAD_POSTAL\x00'
   value=response(QualificationSave,dict(request_id=BODY['id'],expected_revision=None,qualification=qualification),
    '/api/campaigns/{identifier}/contacts/{contact_id}/qualification')
   self.assertIn('Code postal',value['detail']);self.assertNotIn('PRIVATE_BAD_POSTAL',json.dumps(value))
- def test_missing_required_answer_identifies_the_question(self):
+ def test_missing_answer_is_accepted(self):
   body=copy.deepcopy(BODY);body['qualification']['answers'].pop('hydro_bill')
-  self.assertIn('Hydro',response(Booking,body)['detail'])
- def test_common_postal_presentation_preserves_the_same_code_in_draft_and_booking(self):
+  self.assertEqual(complete_snapshot(Booking.model_validate(body).qualification)['answers']['hydro_bill'],'')
+ def test_postal_presentations_are_retained_exactly_in_draft_and_booking(self):
   for value in ('h2x1y4','H2X 1Y4','H2X\u00a01Y4','H2X\u202f1Y4','H2X\t1Y4','H2X-1Y4'):
    with self.subTest(value=value):
     body=copy.deepcopy(BODY);body['qualification']['answers']['postal_code']=value
-    saved=complete_snapshot(Qualification.model_validate(body['qualification']))
-    self.assertEqual(saved['answers']['postal_code'],'H2X 1Y4')
-    self.assertEqual(Booking.model_validate(body).qualification.answers['postal_code'],'H2X 1Y4')
- def test_invalid_postal_letters_or_digits_remain_rejected(self):
+    self.assertEqual(complete_snapshot(Qualification.model_validate(body['qualification']))['answers']['postal_code'],value)
+    self.assertEqual(Booking.model_validate(body).qualification.answers['postal_code'],value)
+ def test_arbitrary_postal_text_is_accepted_without_guessing_a_correction(self):
   for value in ('90210','H2O 1Y4','H2X 1O4','H2X--1Y4','H2X/1Y4'):
    body=copy.deepcopy(BODY);body['qualification']['answers']['postal_code']=value
-   with self.assertRaises(ValidationError):Booking.model_validate(body)
+   self.assertEqual(Booking.model_validate(body).qualification.answers['postal_code'],value)
  def test_schedule_error_is_actionable_without_the_submitted_text(self):
   body=copy.deepcopy(BODY);body['local_start']='PRIVATE_DATE_VALUE'
   value=response(Booking,body);self.assertIn('Date',value['detail']);self.assertNotIn('PRIVATE_DATE_VALUE',json.dumps(value))

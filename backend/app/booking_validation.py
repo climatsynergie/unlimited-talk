@@ -29,14 +29,8 @@ def feedback(route, errors):
             if isinstance(reason, QualificationError):
                 field = reason.field
                 label = LABELS.get(field)
-                if reason.reason == 'postal' and field == 'postal_code':
-                    message = 'Code postal canadien invalide. Exemple : H2X 1Y4. Vérifiez les lettres et les chiffres.'
-                elif label and reason.reason == 'required':
-                    message = 'Champ obligatoire : ' + label
-                elif label and reason.reason == 'choice':
-                    message = 'Choisissez une réponse proposée pour : ' + label
-                elif label and reason.reason == 'text':
-                    message = 'Vérifiez le texte du champ « ' + label + ' » (2000 caractères maximum).'
+                if label and reason.reason == 'text':
+                    message = 'Le champ « ' + label + ' » contient un caractère non pris en charge.'
                 elif reason.reason == 'shape':
                     message = 'La qualification contient un champ non reconnu. Conservez votre saisie et contactez l’administrateur.'
                 if message:

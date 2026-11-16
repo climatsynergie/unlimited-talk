@@ -3851,6 +3851,20 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   min-width: 0;
   max-width: 220px;
 }
+.qualification-free-response {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+.qualification-free-response > label {
+  display: grid;
+  flex-basis: 100%;
+  gap: 6px;
+  color: #5c5268;
+  font-size: 12px;
+}
 .recall-button {
   white-space: nowrap;
 }

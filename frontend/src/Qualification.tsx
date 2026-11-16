@@ -1,5 +1,5 @@
-import { useId } from "react";
-import type { ChangeEvent, FormEvent, InvalidEvent } from "react";
+import { useId, useState } from "react";
+import type { ChangeEvent } from "react";
 import { Icon } from "./ui";
 
 export type QualificationValue = {
@@ -95,22 +95,10 @@ export function upgradeQualification(
     )
   )
     return value;
-  const answers = { ...value.answers };
-  const insulation = answers.insulation?.trim();
-  if (
-    value.schema_version === 1 &&
-    insulation &&
-    !schema.fields
-      .find((field) => field.key === "insulation")
-      ?.options?.includes(insulation)
-  ) {
-    // Keep the original words, without guessing whether work was carried out.
-    answers.insulation_comment = [answers.insulation_comment, insulation]
-      .filter(Boolean)
-      .join("\n");
-    delete answers.insulation;
-  }
-  return { schema_version: schema.schema_version, answers };
+  return {
+    schema_version: schema.schema_version,
+    answers: { ...value.answers },
+  };
 }
 
 export function initialQualification(
@@ -132,54 +120,85 @@ export function initialQualification(
 
 function answered(field: QualificationField, answers: Record<string, string>) {
   const answer = answers[field.key]?.trim();
-  return !!answer && (!field.options || field.options.includes(answer));
+  return !!answer;
 }
 
 type ControlEvent = ChangeEvent<
   HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
 >;
-type ValidityEvent = InvalidEvent<
-  HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
->;
-type InputEvent = FormEvent<
-  HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
->;
-
 export function QualificationFields({
   schema,
   value,
   onChange,
-  required = false,
   disabled = false,
   draftSaveAvailable = true,
 }: {
   schema: QualificationSchema;
   value: QualificationValue;
   onChange: (value: QualificationValue) => void;
-  required?: boolean;
   disabled?: boolean;
   draftSaveAvailable?: boolean;
 }) {
   const formId = useId();
   const formSchema = schemaForValue(schema, value);
-  const fields = formSchema.fields.filter((field) =>
-    visibleField(field, value.answers),
-  );
-  const essentials = fields.filter((field) => field.required);
-  const completed = essentials.filter((field) =>
+  const fields = formSchema.fields;
+  const essentials = fields;
+  const completed = fields.filter((field) =>
     answered(field, value.answers),
   ).length;
+  const [freeFields, setFreeFields] = useState<Set<string>>(() => new Set());
   function change(key: string, answer: string) {
-    const answers = { ...value.answers, [key]: answer };
-    for (const field of formSchema.fields)
-      if (!visibleField(field, answers)) delete answers[field.key];
-    onChange({ schema_version: formSchema.schema_version, answers });
+    onChange({
+      schema_version: formSchema.schema_version,
+      answers: { ...value.answers, [key]: answer },
+    });
   }
-  function invalid(event: ValidityEvent) {
-    event.currentTarget.setCustomValidity("Veuillez renseigner ce champ.");
-  }
-  function input(event: InputEvent) {
-    event.currentTarget.setCustomValidity("");
+  function freeResponse(field: QualificationField) {
+    const entered = value.answers[field.key] || "";
+    const free =
+      freeFields.has(field.key) ||
+      (!!entered && !field.options?.includes(entered));
+    return (
+      <div className="qualification-free-response">
+        {free ? (
+          <label>
+            Réponse libre
+            <input
+              type="text"
+              aria-label={`Réponse libre — ${field.label}`}
+              value={entered}
+              onChange={(event) => change(field.key, event.target.value)}
+            />
+          </label>
+        ) : (
+          <button
+            type="button"
+            className="text-button"
+            aria-label={`Réponse libre — ${field.label}`}
+            onClick={() => setFreeFields((old) => new Set([...old, field.key]))}
+          >
+            Réponse libre
+          </button>
+        )}
+        {entered ? (
+          <button
+            type="button"
+            className="text-button"
+            aria-label={`Effacer la réponse — ${field.label}`}
+            onClick={() => {
+              change(field.key, "");
+              setFreeFields((old) => {
+                const next = new Set(old);
+                next.delete(field.key);
+                return next;
+              });
+            }}
+          >
+            Effacer la réponse
+          </button>
+        ) : null}
+      </div>
+    );
   }
   return (
     <fieldset className="qualification-fields" disabled={disabled}>
@@ -188,9 +207,8 @@ export function QualificationFields({
       </legend>
       <div className="qualification-intro">
         <p>
-          Préparez la visite avec le client. Les champs marqués{" "}
-          <span aria-hidden="true">*</span> sont nécessaires pour confirmer un
-          rendez-vous.
+          Tous les champs sont facultatifs. Renseignez les informations
+          disponibles, dans vos propres mots.
         </p>
         <div
           className={`qualification-progress${completed === essentials.length ? " is-complete" : ""}`}
@@ -199,7 +217,7 @@ export function QualificationFields({
             <strong>
               {completed} / {essentials.length}
             </strong>{" "}
-            champs essentiels
+            champs renseignés
           </span>
           <progress
             aria-label="Avancement de la qualification"
@@ -213,7 +231,7 @@ export function QualificationFields({
       ).map((group, index) => {
         const groupFields = fields.filter((field) => field.group === group.key);
         if (!groupFields.length) return null;
-        const groupRequired = groupFields.filter((field) => field.required);
+        const groupRequired = groupFields;
         const complete =
           groupRequired.length > 0 &&
           groupRequired.every((field) => answered(field, value.answers));
@@ -237,22 +255,7 @@ export function QualificationFields({
               {groupFields.map((field) => {
                 const id = `${formId}-${field.key}`;
                 const label = field.label.replace(/^\d+\.\s*/, "");
-                const title = (
-                  <>
-                    {label}
-                    {field.required ? (
-                      <span
-                        className="qualification-required"
-                        aria-hidden="true"
-                      >
-                        {" "}
-                        *
-                      </span>
-                    ) : (
-                      <span className="qualification-optional">Facultatif</span>
-                    )}
-                  </>
-                );
+                const title = label;
                 if (field.options && field.options.length <= 3)
                   return (
                     <fieldset
@@ -275,15 +278,7 @@ export function QualificationFields({
                               name={id}
                               value={option}
                               checked={value.answers[field.key] === option}
-                              required={required && field.required}
-                              onInvalid={invalid}
-                              onChange={(event) => {
-                                event.currentTarget
-                                  .closest("fieldset")
-                                  ?.querySelectorAll("input")
-                                  .forEach((control) =>
-                                    control.setCustomValidity(""),
-                                  );
+                              onChange={() => {
                                 change(field.key, option);
                               }}
                             />
@@ -291,17 +286,15 @@ export function QualificationFields({
                           </label>
                         ))}
                       </div>
+                      {freeResponse(field)}
                     </fieldset>
                   );
                 const props = {
                   id,
                   value: value.answers[field.key] || "",
-                  required: required && field.required,
                   "aria-label": field.label,
                   onChange: (event: ControlEvent) =>
                     change(field.key, event.target.value),
-                  onInvalid: invalid,
-                  onInput: input,
                 };
                 const multiline =
                   field.key === "comments" ||
@@ -325,13 +318,11 @@ export function QualificationFields({
                     ) : multiline ? (
                       <textarea
                         {...props}
-                        maxLength={2000}
                         rows={field.key === "comments" ? 3 : 2}
                       />
                     ) : (
                       <input
                         {...props}
-                        maxLength={2000}
                         type="text"
                         placeholder={
                           field.key === "hydro_bill"
@@ -345,6 +336,7 @@ export function QualificationFields({
                         }
                       />
                     )}
+                    {field.options ? freeResponse(field) : null}
                     {field.key === "hydro_bill" ? (
                       <small id={`${id}-hint`}>
                         Précisez le montant et la période indiqués par le
@@ -361,7 +353,7 @@ export function QualificationFields({
       <p className="qualification-save-hint">
         <Icon name="shield" />
         {draftSaveAvailable
-          ? "Une fiche incomplète peut être enregistrée pendant l’appel."
+          ? "Enregistrez les informations disponibles pendant l’appel."
           : "Les réponses seront enregistrées avec le rendez-vous."}
       </p>
     </fieldset>
@@ -382,10 +374,7 @@ export function QualificationSummary({
       <summary>Qualification du rendez-vous</summary>
       <dl className="contact-profile">
         {schemaForValue(schema, value)
-          .fields.filter(
-            (field) =>
-              visibleField(field, value.answers) && !!value.answers[field.key],
-          )
+          .fields.filter((field) => !!value.answers[field.key])
           .map((field) => (
             <div key={field.key}>
               <dt>{field.label}</dt>

@@ -1022,7 +1022,7 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
       name: field("wall_pump_floors").label,
       exact: true,
     }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await sheet
     .getByRole("textbox", { name: field("city").label, exact: true })
     .fill("Laval");
@@ -1031,7 +1031,7 @@ test("qualification : sans RDV, la fiche passe directement au prochain contact",
       name: "Enregistrer la qualification",
       exact: true,
     }),
-  ).toHaveCount(0);
+  ).toBeEnabled();
   const first = [...f.rows.values()][0];
   first.state = "finished";
   first.outcome = "completed";
@@ -1182,17 +1182,20 @@ test("fiche pendant l’appel : réservation sans fenêtre bloquante et passage 
     path: "/tmp/ut-call-sheet-mobile.png",
     fullPage: true,
   });
+  await expect(
+    sheet.getByRole("button", {
+      name: "Confirmer le rendez-vous",
+      exact: true,
+    }),
+  ).toBeDisabled();
+  expect(f.appointments).toHaveLength(0); // A calendar slot still needs a date/time.
+  await fillQualification(sheet);
   await sheet
     .getByLabel("Date et heure du rendez-vous", { exact: true })
     .fill("2026-11-03T10:00");
   await sheet
     .getByLabel("Notes du rendez-vous", { exact: true })
     .fill("Détails de la demande du client.");
-  await sheet
-    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
-    .click();
-  expect(f.appointments).toHaveLength(0);
-  await fillQualification(sheet);
   await sheet
     .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
     .click();
@@ -1359,7 +1362,7 @@ test("refus du microphone : aucun composeur serveur ni appel", async ({
   expect(f.nextCount).toBe(0);
 });
 
-test("qualification : erreur de code postal précise, réponses conservées et nouvelle confirmation possible", async ({
+test("qualification : refus temporaire, texte postal conservé et nouvelle confirmation possible", async ({
   page,
 }) => {
   const f = await setup(page);
@@ -1381,10 +1384,9 @@ test("qualification : erreur de code postal précise, réponses conservées et n
     if (route.request().method() === "POST" && rejected === 0) {
       rejected++;
       return route.fulfill({
-        status: 422,
+        status: 503,
         json: {
-          detail:
-            "Code postal canadien invalide. Exemple : H2X 1Y4. Vérifiez les lettres et les chiffres.",
+          detail: "Le service est temporairement indisponible. Réessayez.",
         },
       });
     }
@@ -1403,7 +1405,7 @@ test("qualification : erreur de code postal précise, réponses conservées et n
   });
   await confirm.click();
   await expect(sheet.getByRole("alert")).toContainText(
-    "Code postal canadien invalide",
+    "temporairement indisponible",
   );
   await expect(postal).toHaveValue("H2O 1Y4");
   await expect(date).toHaveValue("2026-11-20T10:00");
@@ -1415,12 +1417,14 @@ test("qualification : erreur de code postal précise, réponses conservées et n
     }),
   ).toHaveValue(validQualification.answers.city);
   expect(f.appointments).toHaveLength(0);
-  await postal.fill("H2X 1Y4");
   await confirm.click();
   await expect.poll(() => f.appointments.length).toBe(1);
   expect(rejected).toBe(1);
   expect(f.appointments[0]).toMatchObject({
-    qualification: validQualification,
+    qualification: {
+      ...validQualification,
+      answers: { ...validQualification.answers, postal_code: "H2O 1Y4" },
+    },
   });
 });
 
@@ -1439,7 +1443,11 @@ test("qualification : présences, isolation et Hydro enregistrés avec le RDV", 
   });
   await expect(progress).toHaveAttribute(
     "value",
-    (await progress.getAttribute("max")) || "",
+    String(
+      qualificationSchema.fields.filter(
+        (field) => !!validQualification.answers[field.key]?.trim(),
+      ).length,
+    ),
   );
   await expect(
     sheet
@@ -1613,7 +1621,7 @@ test("qualification : ancien commentaire conservé sans deviner le choix isolati
   });
   await expect(
     sheet.getByRole("textbox", {
-      name: "Commentaire — isolation",
+      name: "Réponse libre — 10. Isolation de la propriété et de l’entretoit",
       exact: true,
     }),
   ).toHaveValue(legacy.answers.insulation);
@@ -1626,4 +1634,93 @@ test("qualification : ancien commentaire conservé sans deviner le choix isolati
       .getByRole("radio", { checked: true }),
   ).toHaveCount(0);
   expect(f.qualifications.get(first.contact_id)?.qualification).toEqual(legacy);
+});
+
+test("qualification libre : rendez-vous accepté sans aucune réponse", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const city = qualificationSchema.fields.find(
+    (field) => field.key === "city",
+  )!;
+  await sheet.getByRole("textbox", { name: city.label, exact: true }).fill("");
+  await expect(sheet.locator(".qualification-fields [required]")).toHaveCount(
+    0,
+  );
+  await expect(sheet.locator(".qualification-fields [pattern]")).toHaveCount(0);
+  await expect(sheet.locator(".qualification-required")).toHaveCount(0);
+  await sheet
+    .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+    .click();
+  await expect(sheet.locator(".qualification-fields [required]")).toHaveCount(
+    0,
+  );
+  await sheet
+    .getByLabel("Date et heure du rendez-vous", { exact: true })
+    .fill("2026-11-20T10:00");
+  await sheet
+    .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+    .click();
+  await expect.poll(() => f.appointments.length).toBe(1);
+  const saved = f.appointments[0].qualification as {
+    answers: Record<string, string>;
+  };
+  expect(Object.values(saved.answers).every((value) => value === "")).toBe(
+    true,
+  );
+});
+
+test("qualification libre : sauvegarde partielle pendant l’appel, mots exacts et texte long", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await start(page);
+  const first = [...f.rows.values()][0];
+  const sheet = page.getByRole("region", {
+    name: "Fiche du contact",
+    exact: true,
+  });
+  const field = (key: string) =>
+    qualificationSchema.fields.find((field) => field.key === key)!;
+  const postal = "  j2 ? à confirmer  ";
+  const text = "  Client :\n" + "Texte libre é ".repeat(300) + "\n  ";
+  await sheet
+    .getByRole("textbox", { name: field("postal_code").label, exact: true })
+    .fill(postal);
+  await sheet
+    .getByRole("textbox", { name: field("comments").label, exact: true })
+    .fill(text);
+  const free = `Réponse libre — ${field("owners_present").label}`;
+  await sheet.getByRole("button", { name: free, exact: true }).click();
+  await sheet
+    .getByRole("textbox", { name: free, exact: true })
+    .fill("À confirmer avec la cliente");
+  await sheet
+    .getByRole("button", { name: "Enregistrer la qualification", exact: true })
+    .click();
+  await expect
+    .poll(
+      () =>
+        f.qualifications.get(first.contact_id)?.qualification.answers
+          .postal_code,
+    )
+    .toBe(postal);
+  expect(
+    f.qualifications.get(first.contact_id)?.qualification.answers.comments,
+  ).toBe(text);
+  expect(
+    f.qualifications.get(first.contact_id)?.qualification.answers
+      .owners_present,
+  ).toBe("À confirmer avec la cliente");
+  expect(f.appointments).toHaveLength(0);
+  const audit = await new AxeBuilder({ page })
+    .include(".contact-qualification")
+    .withTags(["wcag2a", "wcag2aa"])
+    .analyze();
+  expect(audit.violations).toEqual([]);
 });

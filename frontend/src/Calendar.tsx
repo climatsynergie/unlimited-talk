@@ -208,7 +208,6 @@ export function AppointmentForm({
             <QualificationFields
               schema={qualificationSchema}
               value={qualificationValue}
-              required
               draftSaveAvailable={false}
               onChange={(value) => {
                 if (onQualificationChange) onQualificationChange(value);

@@ -11,6 +11,11 @@ export const qualificationSchema: QualificationSchema = JSON.parse(
     "utf8",
   ),
 );
+qualificationSchema.fields = qualificationSchema.fields.map((field) => ({
+  ...field,
+  required: false,
+  condition: null,
+}));
 qualificationSchema.previous_versions = [
   JSON.parse(
     readFileSync(

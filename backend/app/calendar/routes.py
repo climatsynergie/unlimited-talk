@@ -38,14 +38,13 @@ class Booking(Schedule):
     campaign_id:uuid.UUID
     contact_id:uuid.UUID
     membership_version:int=Field(ge=0)
-    qualification:Qualification
+    qualification:Qualification=Field(default_factory=lambda: Qualification(schema_version=SCHEMA['schema_version'],answers={}))
     qualification_revision:str|None=Field(default=None,pattern=r'^[1-9][0-9]{0,18}$')
 
-    @field_validator('qualification')
+    @field_validator('qualification',mode='before')
     @classmethod
-    def required_qualification(cls,value):
-        complete_snapshot(value)
-        return value
+    def optional_qualification(cls,value):
+        return {'schema_version':SCHEMA['schema_version'],'answers':{}} if value is None else value
 
 
 class Update(Schedule):
@@ -123,8 +122,6 @@ def create(body:Booking,request:Request):
             if previous['created_by']!=user['id'] or previous['request_hash']!=digest:
                 raise HTTPException(409,'Cet identifiant de rendez-vous a déjà été utilisé autrement.')
             return dict(payload(db,body.id),qualification=appointment_snapshot(db,body.id))
-        if body.qualification.schema_version!=SCHEMA['schema_version']:
-            raise HTTPException(422,'Rechargez la fiche du contact pour compléter le questionnaire actuel avant de confirmer le rendez-vous.')
         contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=body.contact_id).mappings().first()
         if contact is None:raise HTTPException(404,'Contact introuvable.')
         if contact['do_not_contact'] or contact['non_interested']:
@@ -188,7 +185,7 @@ def update(identifier:uuid.UUID,body:Update,request:Request):
         elif previous_qualification is not None:
             after['qualification']=previous_qualification
         if reconfirming and 'qualification' not in after:
-            raise HTTPException(422,'Complétez la qualification avant de confirmer à nouveau ce rendez-vous.')
+            after['qualification']=complete_snapshot(Qualification(schema_version=SCHEMA['schema_version'],answers={}))
         if reconfirming:
             stage=query(db,"SELECT id FROM staging.campaign_stages WHERE campaign_id=:id AND kind='appointment' AND is_active",id=row['campaign_id']).scalar_one()
             service.move(db,user,row['campaign_id'],row['contact_id'],stage,card['version'],uuid.uuid4())

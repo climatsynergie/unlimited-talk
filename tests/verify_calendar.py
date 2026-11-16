@@ -78,10 +78,10 @@ agent_b.request('POST','/api/calendar',body,expected=403)
 agent_a.request('POST','/api/calendar',body,expected=422) # DST overlap needs explicit offset
 body['utc_offset_minutes']=-300
 missing={k:v for k,v in body.items() if k!='qualification'}
-agent_a.request('POST','/api/calendar',missing,expected=422)
-agent_a.request('POST','/api/calendar',{**body,'qualification':dict(schema_version=1,answers={'owner':'Oui'})},expected=422)
+agent_a.request('POST','/api/calendar',{**missing,'qualification':{'schema_version':99,'answers':{}}},expected=422)
+agent_a.request('POST','/api/calendar',{**body,'qualification':dict(schema_version=3,answers={'unknown':'Oui'})},expected=422)
 legacy_qualification=json.loads((root/'tests/qualification-v1-fixture.json').read_text())
-agent_a.request('POST','/api/calendar',{**body,'qualification':legacy_qualification},expected=422)
+agent_a.request('POST','/api/calendar',{**body,'qualification':{**legacy_qualification,'answers':{'owner':True}}},expected=422)
 before_qualification=agent_a.request('GET',A+'/contacts/'+contact)
 assert before_qualification['qualification'] is None
 assert before_qualification['booker_name']=='Agent campagne'
@@ -90,7 +90,7 @@ agent_a.request('POST','/api/calendar',{**body,'created_by':id_b},expected=422)
 agent_a.request('POST','/api/calendar',{**body,'booker_name':'Autre agent'},expected=422)
 # Model-level failures identify a safe field through the actual HTTP handler.
 # Rejected drafts/bookings must not create snapshots or advance the pipeline.
-bad_qualification={**QUALIFICATION,'answers':{**QUALIFICATION['answers'],'postal_code':'PRIVATE_INVALID_POSTAL'}}
+bad_qualification={**QUALIFICATION,'answers':{**QUALIFICATION['answers'],'postal_code':'PRIVATE_INVALID_POSTAL\x00'}}
 invalid=agent_a.request('POST','/api/calendar',{**body,'qualification':bad_qualification},expected=422)
 assert isinstance(invalid['detail'],str) and 'Code postal' in invalid['detail']
 assert 'PRIVATE_INVALID_POSTAL' not in json.dumps(invalid)
@@ -110,14 +110,14 @@ assert agent_b.request('GET',path)['can_edit'] is False
 assert agent_a.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['can_edit'] is True
 assert admin.request('GET',path)['appointment']['qualification']['answers']['owner']=='Oui'
-assert admin.request('GET',path)['appointment']['qualification']['answers']['postal_code']=='H2X 1Y4'
+assert admin.request('GET',path)['appointment']['qualification']['answers']['postal_code']==body['qualification']['answers']['postal_code']
 assert admin.request('GET',path)['appointment']['qualification']['answers']['construction_year']==QUALIFICATION['answers']['construction_year']
 snapshot=admin.request('GET',path)['appointment']['qualification']
 assert snapshot['schema_version']==3
 for key in ('owners_present','spouses_present','insulation','insulation_comment','hydro_bill','construction_year'):
     assert snapshot['answers'][key]==QUALIFICATION['answers'][key]
 saved=agent_a.request('GET',A+'/contacts/'+contact)['qualification']
-assert saved['qualification']['answers']['postal_code']=='H2X 1Y4'
+assert saved['qualification']['answers']['postal_code']==body['qualification']['answers']['postal_code']
 draft=dict(request_id=str(uuid.uuid4()),expected_revision=saved['revision'],qualification=dict(schema_version=1,answers={'owner':'Non','city':'Laval'}))
 draft_path=A+'/contacts/'+contact+'/qualification'
 agent_b.request('PUT',draft_path,draft,expected=403)
@@ -184,8 +184,8 @@ assert admin.request('GET',legacy_path)['appointment']['qualification'] is None
 legacy_patch=dict(local_start='2026-11-03T10:00',timezone='America/Toronto',utc_offset_minutes=-300,duration_minutes=30,notes='Ancien RDV conservé',status='booked',version=0)
 assert admin.request('PATCH',legacy_path,legacy_patch)['version']==1
 assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':1,'status':'cancelled'})['version']==2
-admin.request('PATCH',legacy_path,{**legacy_patch,'version':2},expected=422)
-assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':2,'qualification':QUALIFICATION})['qualification']['answers']['owner']=='Oui'
+assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':2})['qualification']['answers']['postal_code']==''
+assert admin.request('PATCH',legacy_path,{**legacy_patch,'version':3,'qualification':QUALIFICATION})['qualification']['answers']['owner']=='Oui'
 # Construction year is optional through the actual API, not only the browser.
 current_card=admin.request('GET',A+'/contacts/'+contact)
 without_year={**QUALIFICATION,'answers':{k:v for k,v in QUALIFICATION['answers'].items() if k!='construction_year'}}
@@ -197,6 +197,29 @@ optional_snapshot=admin.request('GET','/api/calendar/'+optional['id'])['appointm
 assert optional_snapshot['schema_version']==3
 assert optional_snapshot['answers']['construction_year']==''
 assert admin.request('GET',path)['appointment']['qualification']['answers']['construction_year']==QUALIFICATION['answers']['construction_year']
+# Optional qualification: actual HTTP/PG round trips retain arbitrary entered text.
+first_snapshot=admin.request('GET',path)['appointment']['qualification']
+free_answers={'postal_code':'  90210 ? Québec  ','owners_present':'à confirmer',
+    'heat_pump':'Non','heat_pump_age':' inconnu ','comments':'  '+('Texte libre é\n'*400)+'  '}
+for qualification in (None, {'schema_version':3,'answers':{}}, {'schema_version':3,'answers':free_answers}, legacy_qualification):
+    card=admin.request('GET',A+'/contacts/'+contact)
+    values={**body,'id':str(uuid.uuid4()),'membership_version':card['contact']['version'],
+        'qualification_revision':card['qualification']['revision'] if card['qualification'] else None}
+    if qualification is None:values.pop('qualification',None)
+    else:values['qualification']=qualification
+    created=admin.request('POST','/api/calendar',values,expected=201)
+    saved_snapshot=admin.request('GET','/api/calendar/'+created['id'])['appointment']['qualification']
+    assert saved_snapshot['schema_version']==(qualification['schema_version'] if qualification else 3)
+    for key,value in (qualification['answers'] if qualification else {}).items():
+        assert saved_snapshot['answers'][key]==value
+    assert admin.request('GET',path)['appointment']['qualification']==first_snapshot
+card=admin.request('GET',A+'/contacts/'+contact)
+loose=admin.request('PUT',draft_path,dict(request_id=str(uuid.uuid4()),expected_revision=card['qualification']['revision'],
+    qualification={'schema_version':3,'answers':free_answers}))
+assert admin.request('GET',A+'/contacts/'+contact)['qualification']==loose
+for key,value in free_answers.items():assert loose['qualification']['answers'][key]==value
+assert admin.request('GET',path)['appointment']['qualification']==first_snapshot
+
 # Reassignment revocation blocks creation while retaining creator ownership on existing meetings.
 admin.request('PUT',A+'/agents/'+id_a,dict(is_active=False))
 agent_a.request('POST','/api/calendar',{**body,'id':str(uuid.uuid4()),'membership_version':version},expected=403)
