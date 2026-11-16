@@ -149,3 +149,23 @@ env 'FOUNDATION_COMPOSE_ARGS=-p ut-qa-flexqual-20261116 -f /home/codexdev/unlimi
 
 [metadata](evidence/flexible-reconfirmation-new-policy.json), [log](evidence/flexible-reconfirmation-new-policy.log).
 
+
+## Follow-up: browser reconfirmation regression aligned with optional policy
+
+Main CI43782834707 for2ea00fc stopped at the HTTPS browser gate; no image was published or deployed. Its three browser scenarios still expected an empty legacy qualification to block saving. Local execution reproduced all three obsolete expectations (exit1). The replacement matrix verifies empty **and** filled qualification for each cancelled/completed/no-show reconfirmation, with exactly one PATCH, the correct supported schema/answers, zero required qualification inputs and no unexpected requests. The legacy fixture deliberately retains `required: true` metadata, proving the current interface applies the requested optional policy even to older snapshots. No application behavior changed in this follow-up. All six browser scenarios passed.
+
+### flexible-calendar-browser-old-policy: FAIL, exit1
+
+```sh
+env UI_TEST_URL=http://127.0.0.1:15174 QA_EVIDENCE_MODE=flex-calendar-old npm --prefix frontend run test:browser -- calendar-reconfirmation.spec.ts
+```
+
+[metadata](evidence/flexible-calendar-browser-old-policy.json), [log](evidence/flexible-calendar-browser-old-policy.log).
+
+### flexible-calendar-browser-new-policy: PASS, exit0, six tests
+
+```sh
+env UI_TEST_URL=http://127.0.0.1:15174 QA_EVIDENCE_MODE=flex-calendar-new npm --prefix frontend run test:browser -- calendar-reconfirmation.spec.ts
+```
+
+[metadata](evidence/flexible-calendar-browser-new-policy.json), [log](evidence/flexible-calendar-browser-new-policy.log).

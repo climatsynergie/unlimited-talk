@@ -104,48 +104,56 @@ async function fixture(page: Page, status: string) {
   return proof;
 }
 for (const status of ["completed", "no_show", "cancelled"]) {
-  test(`reconfirmation ${status} : qualification obligatoire avant sauvegarde`, async ({
-    page,
-  }) => {
-    const proof = await fixture(page, status);
-    await page.goto("/calendrier");
-    await page
-      .getByLabel("Aller à la date", { exact: true })
-      .fill("2026-11-09");
-    await page
-      .getByRole("combobox", { name: "Statut", exact: true })
-      .selectOption("all");
-    await page.getByRole("button", { name: "Agenda", exact: true }).click();
-    await page
-      .locator(".appointment-card")
-      .filter({ hasText: "Client QA" })
-      .click();
-    const dialog = page.getByRole("dialog");
-    await dialog
-      .getByRole("button", {
-        name: "Modifier ou annuler le rendez-vous",
+  for (const filled of [false, true]) {
+    test(`reconfirmation ${status} : qualification ${filled ? "renseignée" : "vide"} acceptée`, async ({
+      page,
+    }) => {
+      const proof = await fixture(page, status);
+      await page.goto("/calendrier");
+      await page
+        .getByLabel("Aller à la date", { exact: true })
+        .fill("2026-11-09");
+      await page
+        .getByRole("combobox", { name: "Statut", exact: true })
+        .selectOption("all");
+      await page.getByRole("button", { name: "Agenda", exact: true }).click();
+      await page
+        .locator(".appointment-card")
+        .filter({ hasText: "Client QA" })
+        .click();
+      const dialog = page.getByRole("dialog");
+      await dialog
+        .getByRole("button", {
+          name: "Modifier ou annuler le rendez-vous",
+          exact: true,
+        })
+        .click();
+      await dialog
+        .getByRole("combobox", { name: "Statut", exact: true })
+        .selectOption("booked");
+      await expect(
+        dialog.getByRole("radio", { name: "Oui", exact: true }),
+      ).toBeVisible();
+      const save = dialog.getByRole("button", {
+        name: "Enregistrer les modifications",
         exact: true,
-      })
-      .click();
-    await dialog
-      .getByRole("combobox", { name: "Statut", exact: true })
-      .selectOption("booked");
-    await expect(
-      dialog.getByRole("radio", { name: "Oui", exact: true }),
-    ).toBeVisible();
-    const save = dialog.getByRole("button", {
-      name: "Enregistrer les modifications",
-      exact: true,
+      });
+      await expect(
+        dialog.locator(".qualification-fields [required]"),
+      ).toHaveCount(0);
+      if (filled) {
+        await dialog.getByRole("radio", { name: "Oui", exact: true }).check();
+      }
+      await save.click();
+      await expect.poll(() => proof.writes.length).toBe(1);
+      expect(proof.writes[0]).toMatchObject({
+        status: "booked",
+        qualification: {
+          schema_version: 1,
+          answers: filled ? { owner: "Oui" } : {},
+        },
+      });
+      expect(proof.unexpected).toEqual([]);
     });
-    await save.click();
-    expect(proof.writes).toEqual([]);
-    await dialog.getByRole("radio", { name: "Oui", exact: true }).check();
-    await save.click();
-    await expect.poll(() => proof.writes.length).toBe(1);
-    expect(proof.writes[0]).toMatchObject({
-      status: "booked",
-      qualification: { schema_version: 1, answers: { owner: "Oui" } },
-    });
-    expect(proof.unexpected).toEqual([]);
-  });
+  }
 }
