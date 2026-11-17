@@ -203,6 +203,7 @@ for (const [phase, label, status, color] of [
     expect(proof.writes[0]).toMatchObject({ phase, status });
     await expect(dialog).toHaveClass(new RegExp(`phase-${phase}`));
     await expect(dialog.locator(".appointment-phase-badge")).toHaveText(label);
+    await expect(dialog.getByText(label, { exact: true })).toBeVisible();
     await expect(dialog.locator(".modal-heading")).toHaveCSS(
       "background-color",
       color,

@@ -466,10 +466,6 @@ export function AppointmentDetail({
               </dd>
             </div>
             <div>
-              <dt>Statut</dt>
-              <dd>{appointmentPhases[phaseOf(a)].label}</dd>
-            </div>
-            <div>
               <dt>Notes</dt>
               <dd className="appointment-notes">{a.notes || "Aucune note."}</dd>
             </div>

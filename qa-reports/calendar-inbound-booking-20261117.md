@@ -126,3 +126,32 @@ ssh -i /home/codexdev/.ssh/unlimited-talk-staging -o IdentitiesOnly=yes -o Batch
 
 [metadata](evidence/calendar-inbound-provider-readonly.json), [log](evidence/calendar-inbound-provider-readonly.log).
 
+## Full-suite follow-up: one unambiguous phase badge
+
+QA CI44162188998 for dce6ee6 detected the existing full browser/API calendar cancellation test failing at identity.spec.ts:740. Publication was skipped. The new badge repeated the status already rendered in the metadata grid. A new focused regression reproduces the exact strict selector failure (Annulé resolves to two elements; exit1). The metadata duplicate was removed; the single colored badge remains. The existing identity workflow assertion was retained unchanged, and all five phase tests now assert a unique visible label in addition to phase persistence and computed header color. The focused11-case suite then passed.
+
+### calendar-phase-duplicate-before — FAIL, exit 1
+
+```sh
+env UI_TEST_URL=http://127.0.0.1:15174 QA_EVIDENCE_MODE=calendar-phase-duplicate-before npm --prefix frontend run test:browser -- calendar-reconfirmation.spec.ts --grep 'phase Annulé'
+```
+
+[metadata](evidence/calendar-phase-duplicate-before.json), [log](evidence/calendar-phase-duplicate-before.log).
+
+### calendar-phase-single-badge-browser — PASS, exit 0
+
+```sh
+env UI_TEST_URL=http://127.0.0.1:15174 QA_EVIDENCE_MODE=calendar-phase-single-badge npm --prefix frontend run test:browser -- calendar-reconfirmation.spec.ts
+```
+
+[metadata](evidence/calendar-phase-single-badge-browser.json), [log](evidence/calendar-phase-single-badge-browser.log).
+
+### calendar-inbound-old-api-rollback — PASS, exit 0
+
+```sh
+env 'FOUNDATION_COMPOSE_ARGS=-p ut-qa-calendar-inbound-20261117 -f /home/codexdev/unlimited-talk-qa-audit/compose.yaml -f /home/codexdev/unlimited-talk-qa-audit/qa-reports/evidence/flexible-qualification-20261116/compose.qa.yaml' python3 qa-reports/evidence/calendar-inbound-rollback/run.py
+```
+
+[metadata](evidence/calendar-inbound-old-api-rollback.json), [log](evidence/calendar-inbound-old-api-rollback.log).
+
+The rollback probe launches the exact preceding0e18ba6 API source in a second isolated container and reads every new phase through that old API over actual HTTP. It also edits through the old API, then verifies the expected operational fallback and unchanged historical phase snapshots through the new API. Schema0012 is unchanged. All synthetic project volumes were removed afterward; no managed database was used.
