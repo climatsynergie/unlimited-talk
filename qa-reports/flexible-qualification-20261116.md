@@ -169,3 +169,65 @@ env UI_TEST_URL=http://127.0.0.1:15174 QA_EVIDENCE_MODE=flex-calendar-new npm --
 ```
 
 [metadata](evidence/flexible-calendar-browser-new-policy.json), [log](evidence/flexible-calendar-browser-new-policy.log).
+
+## Final release verification — 16 November2026,01:33UTC
+
+**DEPLOYED / PASS within this change’s scope.** Live source `0e18ba6c5fe7e7b1db433922df518ed5cfb58618`, immutable image `ghcr.io/climatsynergie/unlimited-talk-api@sha256:e1803fd25bae1a3bd95fa83cff2f1909c01fbabf22e9202228150051beca462c`. Main CI[43784893313](https://github.com/climatsynergie/unlimited-talk/actions/runs/43784893313) and QA CI[43784893424](https://github.com/climatsynergie/unlimited-talk/actions/runs/43784893424) both completed successfully. Main published the exact tested image and its attestation. Existing unit/API/calendar/telephony/security/browser/schema/rollback/recovery gates were retained. No preceding release was substituted for this candidate’s validation.
+
+Local focused evidence:235 backend unit tests,71 affected phone/incoming/dialer/history browser tests plus6 legacy reconfirmation browser cases,14 real HTTP/PostgreSQL reconfirmation methods and the dedicated calendar HTTP/PostgreSQL assertions; commands/exits are recorded above. Full CI additionally passed the HTTPS browser, actual browser→API→PostgreSQL agent/incoming workflows, schema/rollback/restore/outage and incoming-runtime suites. A single combined test count is not invented for script-style suites.
+
+Root deployment used the unchanged reviewed deployer with its installed-code hash check, exact current main/successful CI/image/source/schema/provenance gates, exclusive deployment lock, idle-call checks and calling-preservation/rollback context. Only public artifact/API authentication transport was adapted for this owner-authorized root invocation. Previous release553c0bb remains the normal rollback target; no active-call protection was bypassed. Calling resumed successfully. No valid live appointment/qualification was submitted by QA tools.
+
+Post-deploy probes confirmed all seven services running, six configured healthchecks healthy, no OOM, exact image/source, schema0012, manual mode and calling enabled. The installed model accepts empty qualification, arbitrary postal/free-choice text and long comments without alteration. Read-only optimized queue probes completed in24.24ms and13.89ms with the expected index/defaults. Public checks verified delivered new bundle/routes, technical invalid-NUL rejection with redacted feedback, unauthenticated calendar denial and hidden operations endpoints. Those invalid probes do **not** write real records or reinstate postal formatting rules.
+
+One premature `flexible-qualification-ci-approved` gate check exited1 while main publication was still in progress. It did not deploy anything and is retained as FAIL/incomplete gate evidence. The later `flexible-qualification-ci-final` gate exited0 only after both runs and publication completed successfully.
+
+### flexible-qualification-ci-approved: FAIL, exit 1
+
+```sh
+python3 qa-reports/evidence/flexible-qualification-release/check_ci.py --require-complete
+```
+
+[metadata](evidence/flexible-qualification-ci-approved.json), [log](evidence/flexible-qualification-ci-approved.log).
+
+### flexible-qualification-ci-final: PASS, exit 0
+
+```sh
+python3 qa-reports/evidence/flexible-qualification-release/check_ci.py --require-complete
+```
+
+[metadata](evidence/flexible-qualification-ci-final.json), [log](evidence/flexible-qualification-ci-final.log).
+
+### flexible-qualification-image-provenance: PASS, exit 0
+
+```sh
+ssh -i /home/codexdev/.ssh/unlimited-talk-staging -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 root@143.198.41.24 python3 /root/prepare-release-0e18ba6.py
+```
+
+[metadata](evidence/flexible-qualification-image-provenance.json), [log](evidence/flexible-qualification-image-provenance.log).
+
+### flexible-qualification-deployment: PASS, exit 0
+
+```sh
+ssh -i /home/codexdev/.ssh/unlimited-talk-staging -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 root@143.198.41.24 python3 /root/deploy-release-0e18ba6.py
+```
+
+[metadata](evidence/flexible-qualification-deployment.json), [log](evidence/flexible-qualification-deployment.log).
+
+### flexible-qualification-runtime-final: PASS, exit 0
+
+```sh
+ssh -i /home/codexdev/.ssh/unlimited-talk-staging -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 root@143.198.41.24 python3 /root/verify-runtime-release-0e18ba6.py
+```
+
+[metadata](evidence/flexible-qualification-runtime-final.json), [log](evidence/flexible-qualification-runtime-final.log).
+
+### flexible-qualification-public-final: PASS, exit 0
+
+```sh
+python3 qa-reports/evidence/flexible-qualification-release/verify_public.py
+```
+
+[metadata](evidence/flexible-qualification-public-final.json), [log](evidence/flexible-qualification-public-final.log).
+
+Real17-agent headset/PSTN/media acceptance remains **NOT TESTED**, separate from the successful optional-form release and20-agent synthetic admission experiment. See [capacity assessment](seventeen-agent-readiness-20261116.md). No unconditional whole-application production certification is inferred.
