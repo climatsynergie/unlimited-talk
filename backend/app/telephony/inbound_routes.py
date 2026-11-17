@@ -44,6 +44,45 @@ class Note(Body):
         return value.strip()
 
 
+class BookingContext(Body):
+    campaign_id: UUID
+    request_id: UUID
+
+
+@router.get('/calls/{identifier}/booking-options')
+def call_booking_options(identifier: UUID, request: Request, search: str = Query('',max_length=120), offset: int = Query(0,ge=0,le=100000)):
+    from app.telephony.inbound_booking import available
+    with request.app.state.engine.begin() as db:
+        return available(db,identity.authenticate(db,request),identifier,search,offset,call=True)
+
+
+@router.post('/calls/{identifier}/booking-context')
+def call_booking_context(identifier: UUID, body: BookingContext, request: Request):
+    from app.telephony.inbound_booking import prepare_call
+    try:
+        with request.app.state.engine.begin() as db:
+            return prepare_call(db,identity.authenticate(db,request),identifier,body.campaign_id,body.request_id)
+    except IntegrityError:
+        raise HTTPException(409, 'La fiche a changé. Actualisez-la avant de réessayer.') from None
+
+
+@router.get('/followups/{identifier}/booking-options')
+def booking_options(identifier: UUID, request: Request, search: str = Query('',max_length=120), offset: int = Query(0,ge=0,le=100000)):
+    from app.telephony.inbound_booking import available
+    with request.app.state.engine.begin() as db:
+        return available(db,identity.authenticate(db,request),identifier,search,offset)
+
+
+@router.post('/followups/{identifier}/booking-context')
+def booking_context(identifier: UUID, body: BookingContext, request: Request):
+    from app.telephony.inbound_booking import prepare
+    try:
+        with request.app.state.engine.begin() as db:
+            return prepare(db,identity.authenticate(db,request),identifier,body.campaign_id,body.request_id)
+    except IntegrityError:
+        raise HTTPException(409, 'La fiche a changé. Actualisez-la avant de réessayer.') from None
+
+
 @router.get('/agents')
 def agents(request: Request, offset: int = Query(0, ge=0, le=100000), search: str = Query('',max_length=120)):
     with request.app.state.engine.begin() as db:

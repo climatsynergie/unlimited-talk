@@ -1,5 +1,6 @@
 import { test, expect } from "./qa-observer";
 import type { Page, Route } from "@playwright/test";
+import { qualificationSchema } from "./fixtures/qualification";
 import { disabledDialer } from "./fixtures/dialer-disabled";
 const queueId = "00000000-0000-0000-0000-000000000050";
 const offerId = "00000000-0000-0000-0000-000000000051";
@@ -297,4 +298,60 @@ test("changement de mot de passe : ancienne réception détruite même lorsque l
     .toBeGreaterThan(before.destroyed);
   expect((await proof(page)).created).toBe(before.created);
   expect(fixture.unexpected).toEqual([]);
+});
+
+test("appel entrant actif : ouvrir et fermer la qualification conserve le média", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await page.route("**/api/inbound/calls/*/booking-options?*", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: queueId,
+            name: "Canada",
+            timezone: "America/Toronto",
+            already_enrolled: true,
+          },
+        ],
+        has_more: false,
+      },
+    }),
+  );
+  await page.route("**/api/inbound/calls/*/booking-context", (route) =>
+    route.fulfill({
+      json: {
+        campaign_id: queueId,
+        contact_id: offerId,
+        membership_version: 0,
+        timezone: "America/Toronto",
+        qualification_schema: qualificationSchema,
+        qualification: null,
+        booker_name: "Agent QA",
+      },
+    }),
+  );
+  const bar = await connect(page, f);
+  const before = await proof(page);
+  await bar
+    .getByRole("button", {
+      name: "Fiche client / Prendre rendez-vous",
+      exact: true,
+    })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByRole("group", { name: "Qualification du client", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Prendre rendez-vous", exact: true }),
+  ).toBeEnabled();
+  await dialog
+    .getByRole("button", { name: "Fermer la fenêtre", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await expect(bar).toContainText("En conversation");
+  expect(await proof(page)).toEqual(before);
+  expect(f.unexpected).toEqual([]);
 });

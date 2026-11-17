@@ -16,7 +16,9 @@ import "@fullcalendar/react/themes/monarch/theme.css";
 import "@fullcalendar/react/themes/monarch/palettes/purple.css";
 import { api, message } from "./api";
 import { AppointmentDetail } from "./Calendar";
-import type { Appointment, Status } from "./Calendar";
+import type { Appointment } from "./Calendar";
+import { appointmentPhases as states, phaseOf } from "./appointment-phases";
+import type { Phase } from "./appointment-phases";
 import { day, when, Timezone } from "./Scheduling";
 import { Notice } from "./ui";
 
@@ -48,12 +50,6 @@ const viewNames: Record<string, string> = {
   day: "timeGridDay",
   agenda: "listWeek",
 };
-const states: Record<Status, { label: string; color: string; text: string }> = {
-  booked: { label: "RDV booké", color: "#ede9fe", text: "#4c1d95" },
-  completed: { label: "Terminé", color: "#dcfce7", text: "#14532d" },
-  cancelled: { label: "Annulé", color: "#f1f5f9", text: "#475569" },
-  no_show: { label: "Absent", color: "#ffe4e6", text: "#9f1239" },
-};
 function name(a: Appointment) {
   return (
     a.profile.display_name ||
@@ -71,7 +67,7 @@ function eventContent(info: EventDisplayInfo) {
       <strong>{info.event.title}</strong>
       <small>{info.event.extendedProps.creator_name}</small>
       <span className="calendar-event-status">
-        {states[info.event.extendedProps.status as Status]?.label}
+        {states[info.event.extendedProps.status as Phase]?.label}
       </span>
     </div>
   );
@@ -155,7 +151,7 @@ export default function VisualCalendar({ userId }: { userId: string }) {
         if (creator === "mine") query.set("creator", userId);
         else if (creator !== "all") query.set("creator", creator);
         if (status === "upcoming") query.set("exclude_cancelled", "true");
-        else if (status !== "all") query.set("status", status);
+        else if (status !== "all") query.set("phase", status);
         const result = await api<{ items: Appointment[]; has_more: boolean }>(
           `/calendar?${query}`,
           { signal: abort.signal },
@@ -208,10 +204,10 @@ export default function VisualCalendar({ userId }: { userId: string }) {
           title: name(a),
           start: a.starts_at,
           end: a.ends_at,
-          color: states[a.status].color,
-          contrastColor: states[a.status].text,
+          color: states[phaseOf(a)].color,
+          contrastColor: states[phaseOf(a)].text,
           extendedProps: {
-            status: a.status,
+            status: phaseOf(a),
             creator_name: a.creator_name,
             appointment: a,
           },
@@ -231,7 +227,7 @@ export default function VisualCalendar({ userId }: { userId: string }) {
       const appointment = info.event.extendedProps.appointment as Appointment;
       info.el.setAttribute(
         "aria-label",
-        `${name(appointment)}, ${when(appointment.starts_at, zone)}, ${appointment.creator_name}, ${states[appointment.status].label}`,
+        `${name(appointment)}, ${when(appointment.starts_at, zone)}, ${appointment.creator_name}, ${states[phaseOf(appointment)].label}`,
       );
       info.el.setAttribute(
         "title",
@@ -348,8 +344,8 @@ export default function VisualCalendar({ userId }: { userId: string }) {
             ))}
           </div>
           <p className="calendar-booking-help">
-            Pour créer un rendez-vous, ouvrez la fiche d’un contact dans sa
-            campagne.
+            Pour créer un rendez-vous, ouvrez une fiche client dans une campagne
+            ou dans les appels entrants.
           </p>
         </aside>
         <div className="calendar-main">

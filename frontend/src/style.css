@@ -4600,3 +4600,115 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
 .inbound-client-card h3 {
   margin-top: 0;
 }
+
+/* Business phases share readable colors across the calendar and its dialog. */
+.phase-booked {
+  --phase-bg: #ede9fe;
+  --phase-text: #4c1d95;
+}
+.phase-confirmed {
+  --phase-bg: #dcfce7;
+  --phase-text: #14532d;
+}
+.phase-sold {
+  --phase-bg: #dbeafe;
+  --phase-text: #1e3a8a;
+}
+.phase-cancelled {
+  --phase-bg: #fee2e2;
+  --phase-text: #991b1b;
+}
+.phase-invalid {
+  --phase-bg: #ffe4e6;
+  --phase-text: #9f1239;
+}
+.phase-non_compliant {
+  --phase-bg: #fecaca;
+  --phase-text: #7f1d1d;
+}
+.phase-completed {
+  --phase-bg: #e2e8f0;
+  --phase-text: #334155;
+}
+.phase-no_show {
+  --phase-bg: #fef3c7;
+  --phase-text: #92400e;
+}
+.appointment-dialog {
+  border-top: 6px solid var(--phase-text);
+}
+.appointment-dialog > .modal-heading {
+  background: var(--phase-bg);
+  color: var(--phase-text);
+  border-radius: 10px;
+  padding: 0.8rem;
+  gap: 1rem;
+}
+.appointment-phase-badge {
+  display: inline-flex;
+  background: var(--phase-bg);
+  color: var(--phase-text);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.appointment-form select {
+  border-left: 4px solid var(--phase-text);
+}
+.calendar-dot.status-confirmed {
+  background: #15803d;
+}
+.calendar-dot.status-sold {
+  background: #1d4ed8;
+}
+.calendar-dot.status-cancelled {
+  background: #b91c1c;
+}
+.calendar-dot.status-invalid {
+  background: #be123c;
+}
+.calendar-dot.status-non_compliant {
+  background: #991b1b;
+}
+.calendar-dot.status-completed {
+  background: #475569;
+}
+.calendar-canvas .calendar-appointment.status-confirmed {
+  border-inline-start-color: #15803d;
+}
+.calendar-canvas .calendar-appointment.status-sold {
+  border-inline-start-color: #1d4ed8;
+}
+.calendar-canvas .calendar-appointment.status-cancelled {
+  border-inline-start-color: #b91c1c;
+  opacity: 1;
+}
+.calendar-canvas .calendar-appointment.status-invalid {
+  border-inline-start-color: #be123c;
+}
+.calendar-canvas .calendar-appointment.status-non_compliant {
+  border-inline-start-color: #991b1b;
+}
+.inbound-booking {
+  margin-block: 1.25rem;
+  padding: 1rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #f8faff;
+}
+.inbound-booking > h3 {
+  margin-top: 0;
+  color: #1e3a8a;
+}
+.inbound-booking .actions {
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.inbound-followup-action {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}

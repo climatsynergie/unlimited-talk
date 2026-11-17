@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useIncomingPhone } from "./Phone";
-import { Notice } from "./ui";
+import { InboundBooking } from "./InboundBooking";
+import { Modal, Notice } from "./ui";
 const labels = {
   idle: "Prêt à recevoir",
   registering: "Connexion du téléphone…",
@@ -73,54 +74,101 @@ export function ReceptionControl() {
 }
 export function IncomingPhoneBar() {
   const { controller, state } = useIncomingPhone();
-  if (!state.offer && !state.local) return null;
+  const [qualification, setQualification] = useState<{
+    id: string;
+    number: string;
+  } | null>(null);
+  const [qualificationBusy, setQualificationBusy] = useState(false);
+  if (!state.offer && !state.local && !qualification) return null;
   return (
-    <aside
-      className="phone-bar incoming-phone-bar"
-      aria-label="Appel entrant en cours"
-    >
-      <div>
-        <span className="eyebrow">
-          APPEL ENTRANT · {state.offer?.queue_name}
-        </span>
-        <strong>
-          {state.offer?.caller_number ||
-            (state.offer ? "Numéro masqué" : "Identification de l’appelant…")}
-        </strong>
-        <p role="status">{labels[state.phase]}</p>
-        {state.offer ? (
-          <small>Ligne : {state.offer.called_number}</small>
-        ) : null}
-      </div>
-      <div className="actions">
-        {state.phase === "ringing" ? (
-          <>
-            <button
-              className="button primary"
-              onClick={() => void controller.accept()}
-            >
-              Répondre
-            </button>
+    <>
+      {state.offer || state.local ? (
+        <aside
+          className="phone-bar incoming-phone-bar"
+          aria-label="Appel entrant en cours"
+        >
+          <div>
+            <span className="eyebrow">
+              APPEL ENTRANT · {state.offer?.queue_name}
+            </span>
+            <strong>
+              {state.offer?.caller_number ||
+                (state.offer
+                  ? "Numéro masqué"
+                  : "Identification de l’appelant…")}
+            </strong>
+            <p role="status">{labels[state.phase]}</p>
+            {state.offer ? (
+              <small>Ligne : {state.offer.called_number}</small>
+            ) : null}
+          </div>
+          <div className="actions">
+            {state.local && state.offer?.caller_number ? (
+              <button
+                className="button success"
+                onClick={() =>
+                  setQualification({
+                    id: state.offer!.call_id,
+                    number: state.offer!.caller_number!,
+                  })
+                }
+              >
+                Fiche client / Prendre rendez-vous
+              </button>
+            ) : null}
+            {state.phase === "ringing" ? (
+              <>
+                <button
+                  className="button primary"
+                  onClick={() => void controller.accept()}
+                >
+                  Répondre
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() => controller.reject()}
+                >
+                  Refuser
+                </button>
+              </>
+            ) : state.local ? (
+              <button
+                className="button danger"
+                onClick={() => controller.hangup()}
+              >
+                Raccrocher
+              </button>
+            ) : null}
             <button
               className="button secondary"
-              onClick={() => controller.reject()}
+              onClick={() => void controller.tick()}
             >
-              Refuser
+              Vérifier l’appel
             </button>
-          </>
-        ) : state.local ? (
-          <button className="button danger" onClick={() => controller.hangup()}>
-            Raccrocher
-          </button>
-        ) : null}
-        <button
-          className="button secondary"
-          onClick={() => void controller.tick()}
+          </div>
+          {state.error ? <p role="alert">{state.error}</p> : null}
+        </aside>
+      ) : null}
+      {qualification ? (
+        <Modal
+          title={`Qualification — ${qualification.number}`}
+          onClose={() => setQualification(null)}
+          busy={qualificationBusy}
         >
-          Vérifier l’appel
-        </button>
-      </div>
-      {state.error ? <p role="alert">{state.error}</p> : null}
-    </aside>
+          <InboundBooking
+            key={qualification.id}
+            id={qualification.id}
+            source="calls"
+            initiallyOpen
+            allowed
+            onBusy={setQualificationBusy}
+            onBooked={() => {
+              setQualificationBusy(false);
+              setQualification(null);
+            }}
+          />
+        </Modal>
+      ) : null}
+    </>
   );
 }

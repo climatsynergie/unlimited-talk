@@ -2,6 +2,7 @@ import { test, expect } from "./qa-observer";
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
+import { qualificationSchema } from "./fixtures/qualification";
 import { disabledDialer } from "./fixtures/dialer-disabled";
 
 const uuid = (n: number) =>
@@ -208,6 +209,7 @@ async function setup(
   );
   await page.goto("/appels-entrants");
   return {
+    followup,
     unexpected,
     reservations,
     rows,
@@ -219,8 +221,7 @@ async function setup(
 async function openFollowup(page: Page) {
   await page
     .getByRole("region", { name: "Suivis des appels entrants", exact: true })
-    .getByRole("button")
-    .filter({ hasText: "Nina Gros" })
+    .locator(".inbound-followup-row")
     .click();
   return page.getByRole("dialog");
 }
@@ -608,5 +609,213 @@ test("liste entrante : actions visibles et accessibles sur mobile", async ({
     path: "../qa-reports/evidence/direct-recall-incoming-mobile.png",
     fullPage: true,
   });
+  expect(f.unexpected).toEqual([]);
+});
+
+for (const unknown of [false, true]) {
+  test(`qualification et RDV dans un suivi entrant ${unknown ? "inconnu" : "connu"}`, async ({
+    page,
+  }) => {
+    const f = await setup(page, { unknown });
+    const writes: Record<string, unknown>[] = [];
+    const drafts: Record<string, any>[] = [];
+    const campaign = {
+      id: uuid(70),
+      name: "Campagne Canada",
+      timezone: "America/Toronto",
+      already_enrolled: !unknown,
+    };
+    const context = {
+      campaign_id: campaign.id,
+      contact_id: uuid(71),
+      membership_version: 0,
+      timezone: campaign.timezone,
+      source_followup_id: f.followup.id,
+      source_followup_version: 1,
+      qualification_schema: qualificationSchema,
+      qualification: null,
+      booker_name: "Agent réception",
+    };
+    await page.route("**/api/inbound/followups/*/booking-options?*", (route) =>
+      route.fulfill({ json: { items: [campaign], has_more: false } }),
+    );
+    await page.route("**/api/inbound/followups/*/booking-context", (route) =>
+      route.fulfill({ json: context }),
+    );
+    await page.route(
+      `**/api/campaigns/${campaign.id}/contacts/${context.contact_id}/qualification`,
+      (route) => {
+        const body = route.request().postDataJSON();
+        drafts.push(body);
+        return route.fulfill({
+          json: { revision: "123", qualification: body.qualification },
+        });
+      },
+    );
+    await page.route("**/api/calendar/resolve?*", (route) =>
+      route.fulfill({
+        json: {
+          options: [
+            { utc_offset_minutes: -300, starts_at: "2030-11-20T15:00:00Z" },
+          ],
+        },
+      }),
+    );
+    await page.route("**/api/calendar", (route) => {
+      writes.push(route.request().postDataJSON());
+      f.followup.stage = "handled";
+      return route.fulfill({ status: 201, json: { id: uuid(72) } });
+    });
+    // Existing fixture's dialer transport can hold/release without live media.
+    let generation = 0;
+    await page.route("**/api/telephony/dialer/control", (route) => {
+      const body = route.request().postDataJSON();
+      generation++;
+      return route.fulfill({
+        json: {
+          dialer: {
+            mode: body.action === "hold" ? "booking" : "paused",
+            generation,
+            campaign_id: campaign.id,
+            browser_id: body.browser_id,
+            hold_token: body.hold_token || null,
+            owned_session: true,
+          },
+        },
+      });
+    });
+    await page.route("**/api/telephony/dialer/heartbeat", (route) => {
+      const body = route.request().postDataJSON();
+      expect(body.generation).toBe(generation);
+      return route.fulfill({
+        json: {
+          dialer: {
+            mode: "booking",
+            generation,
+            campaign_id: campaign.id,
+            browser_id: body.browser_id,
+            owned_session: true,
+          },
+        },
+      });
+    });
+    const dialog = await openFollowup(page);
+    await dialog
+      .getByRole("button", {
+        name: "Qualifier / Prendre rendez-vous",
+        exact: true,
+      })
+      .click();
+    await expect(
+      dialog.getByRole("group", {
+        name: "Qualification du client",
+        exact: true,
+      }),
+    ).toBeVisible();
+    const postal = dialog.getByLabel("Code postal", { exact: true });
+    await postal.fill("  à confirmer  ");
+    await dialog
+      .getByRole("button", {
+        name: "Enregistrer la qualification",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => drafts.length).toBe(1);
+    expect(drafts[0].qualification.answers.postal_code).toBe("  à confirmer  ");
+    await dialog
+      .getByRole("button", { name: "Prendre rendez-vous", exact: true })
+      .click();
+    await dialog
+      .getByLabel("Date et heure du rendez-vous", { exact: true })
+      .fill("2030-11-20T10:00");
+    await dialog
+      .getByRole("button", { name: "Confirmer le rendez-vous", exact: true })
+      .click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({
+      source_followup_id: f.followup.id,
+      source_followup_version: 1,
+      campaign_id: campaign.id,
+      contact_id: context.contact_id,
+      qualification_revision: "123",
+      qualification: { answers: { postal_code: "  à confirmer  " } },
+    });
+    expect(Object.keys(writes[0]).sort()).toEqual(
+      [
+        "campaign_id",
+        "contact_id",
+        "duration_minutes",
+        "id",
+        "local_start",
+        "membership_version",
+        "notes",
+        "qualification",
+        "qualification_revision",
+        "source_followup_id",
+        "source_followup_version",
+        "timezone",
+        "utc_offset_minutes",
+      ].sort(),
+    );
+    await expect(
+      dialog.getByText("Traité", { exact: true }).first(),
+    ).toBeVisible();
+    expect(f.unexpected).toEqual([]);
+  });
+}
+
+test("appel reçu sans suivi : ouvrir la qualification depuis l’historique", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await page.route("**/api/inbound/calls/*/booking-options?*", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: uuid(70),
+            name: "Canada",
+            timezone: "America/Toronto",
+            already_enrolled: true,
+          },
+        ],
+        has_more: false,
+      },
+    }),
+  );
+  await page.route("**/api/inbound/calls/*/booking-context", (route) =>
+    route.fulfill({
+      json: {
+        campaign_id: uuid(70),
+        contact_id: uuid(71),
+        membership_version: 0,
+        timezone: "America/Toronto",
+        qualification_schema: qualificationSchema,
+        qualification: null,
+        booker_name: "Agent réception",
+      },
+    }),
+  );
+  await page
+    .getByRole("button", { name: /Historique des appels reçus/ })
+    .click();
+  await page
+    .locator(".incoming-history")
+    .getByRole("button", { name: "Voir la fiche client", exact: true })
+    .nth(1)
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", {
+      name: "Qualifier / Prendre rendez-vous",
+      exact: true,
+    })
+    .click();
+  await expect(
+    dialog.getByRole("group", { name: "Qualification du client", exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Prendre rendez-vous", exact: true }),
+  ).toBeEnabled();
   expect(f.unexpected).toEqual([]);
 });

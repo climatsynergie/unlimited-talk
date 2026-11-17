@@ -189,16 +189,19 @@ export function Modal({
   children,
   onClose,
   busy = false,
+  className,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   busy?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
   return (
     <dialog
+      className={className}
       ref={(node) => {
         ref.current = node;
         if (node && !node.open) node.showModal();

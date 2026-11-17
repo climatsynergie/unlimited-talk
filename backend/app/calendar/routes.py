@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, NaiveDatetime, AwareDatetime, field_validator
+from pydantic import BaseModel, ConfigDict, Field, NaiveDatetime, AwareDatetime, field_validator, model_validator
 from app.identity.routes import same_origin
 from app.identity.service import query, authenticate, audit
 from app.campaigns import service
@@ -12,6 +12,7 @@ from app.scheduling_time import resolve
 from app.scheduling_routes import local_time as resolve_local_time
 from app.callbacks.service import cancel_for_contact
 from app.qualification import Qualification, SCHEMA, complete_snapshot, contact_snapshot, save_contact_snapshot, appointment_snapshot
+from app.calendar.phases import Phase, PHASE_SQL, next_phase
 
 router=APIRouter(prefix='/api/calendar',tags=['Calendar'],dependencies=[Depends(same_origin)])
 Status=Literal['booked','completed','cancelled','no_show']
@@ -40,6 +41,14 @@ class Booking(Schedule):
     membership_version:int=Field(ge=0)
     qualification:Qualification=Field(default_factory=lambda: Qualification(schema_version=SCHEMA['schema_version'],answers={}))
     qualification_revision:str|None=Field(default=None,pattern=r'^[1-9][0-9]{0,18}$')
+    source_followup_id:uuid.UUID|None=None
+    source_followup_version:int|None=Field(default=None,ge=0)
+
+    @model_validator(mode='after')
+    def inbound_source(self):
+        if (self.source_followup_id is None)!=(self.source_followup_version is None):
+            raise ValueError('Le suivi entrant et sa version sont nécessaires ensemble.')
+        return self
 
     @field_validator('qualification',mode='before')
     @classmethod
@@ -50,7 +59,13 @@ class Booking(Schedule):
 class Update(Schedule):
     version:int=Field(ge=0)
     status:Status
+    phase:Phase|None=None
     qualification:Qualification|None=None
+
+    @model_validator(mode='after')
+    def matching_phase(self):
+        next_phase(self.status,self.phase)
+        return self
 
     @field_validator('qualification')
     @classmethod
@@ -59,9 +74,11 @@ class Update(Schedule):
         return value
 
 
-SELECT='''SELECT a.*,c.phone,c.profile,ca.name AS campaign_name,u.display_name AS creator_name
+SELECT='''SELECT a.*,'''+PHASE_SQL+''' AS phase,c.phone,c.profile,ca.name AS campaign_name,u.display_name AS creator_name
     FROM staging.appointments a JOIN staging.contacts c ON c.id=a.contact_id
-    JOIN staging.campaigns ca ON ca.id=a.campaign_id JOIN staging.identity_users u ON u.id=a.created_by'''
+    JOIN staging.campaigns ca ON ca.id=a.campaign_id JOIN staging.identity_users u ON u.id=a.created_by
+    LEFT JOIN LATERAL (SELECT e.details FROM staging.appointment_events e WHERE e.appointment_id=a.id
+        AND e.action IN ('appointment.created','appointment.updated') ORDER BY e.id DESC LIMIT 1) latest ON true'''
 
 
 def payload(db,identifier):
@@ -80,7 +97,7 @@ def local_time(request:Request,local_start:NaiveDatetime,timezone:str=Query(max_
 
 
 @router.get('')
-def listing(request:Request,start:AwareDatetime,end:AwareDatetime,creator:uuid.UUID|None=None,status:Status|None=None,exclude_cancelled:bool=False,
+def listing(request:Request,start:AwareDatetime,end:AwareDatetime,creator:uuid.UUID|None=None,status:Status|None=None,phase:Phase|None=None,exclude_cancelled:bool=False,
             offset:int=Query(0,ge=0,le=100000)):
     if end<=start or end-start>timedelta(days=93):
         raise HTTPException(422,'Choisissez une période de 93 jours maximum.')
@@ -89,8 +106,9 @@ def listing(request:Request,start:AwareDatetime,end:AwareDatetime,creator:uuid.U
         rows=query(db,SELECT+''' WHERE a.starts_at>=:start - interval '24 hours' AND a.starts_at<:end AND a.ends_at>:start
             AND (CAST(:creator AS uuid) IS NULL OR a.created_by=:creator)
             AND (CAST(:status AS text) IS NULL OR a.status=:status)
+            AND (CAST(:phase AS text) IS NULL OR ('''+PHASE_SQL+''')=:phase)
             AND (NOT :exclude_cancelled OR a.status!='cancelled')
-            ORDER BY a.starts_at,a.id LIMIT 101 OFFSET :offset''',start=start,end=end,creator=creator,status=status,exclude_cancelled=exclude_cancelled,offset=offset).mappings().all()
+            ORDER BY a.starts_at,a.id LIMIT 101 OFFSET :offset''',start=start,end=end,creator=creator,status=status,phase=phase,exclude_cancelled=exclude_cancelled,offset=offset).mappings().all()
         return {'name':'Unlimited Talks','items':[dict(r) for r in rows[:100]],'has_more':len(rows)>100,'viewer_id':str(user['id'])}
 
 
@@ -111,9 +129,14 @@ def detail(identifier:uuid.UUID,request:Request,before:int|None=Query(None,ge=1,
 
 @router.post('',status_code=201)
 def create(body:Booking,request:Request):
-    digest=service.fingerprint(body.model_dump(mode='json'))
+    # Keep the preceding client's idempotency hash unchanged for normal books.
+    digest=service.fingerprint(body.model_dump(mode='json',exclude={'source_followup_id','source_followup_version'} if body.source_followup_id is None else set()))
     with request.app.state.engine.begin() as db:
         user=authenticate(db,request)
+        followup=None
+        if body.source_followup_id is not None:
+            from app.telephony import inbound_service, inbound_booking
+            followup=inbound_service.followup(db,user,body.source_followup_id)
         service.access(db,user,body.campaign_id)
         starts=resolve(body.local_start,body.timezone,body.utc_offset_minutes)
         query(db,'SELECT pg_advisory_xact_lock(:key)',key=int.from_bytes(body.id.bytes[:8],'big',signed=True))
@@ -124,6 +147,13 @@ def create(body:Booking,request:Request):
             return dict(payload(db,body.id),qualification=appointment_snapshot(db,body.id))
         contact=query(db,'SELECT * FROM staging.contacts WHERE id=:id FOR UPDATE',id=body.contact_id).mappings().first()
         if contact is None:raise HTTPException(404,'Contact introuvable.')
+        if followup is not None:
+            followup=inbound_service.followup(db,user,body.source_followup_id,lock=True)
+            inbound_booking.eligible_followup(followup,user)
+            if followup['version']!=body.source_followup_version:
+                raise HTTPException(409,'Le suivi entrant a changé. Actualisez sa fiche avant de confirmer le rendez-vous.')
+        if followup is not None and contact['phone']!=followup['caller_number']:
+            raise HTTPException(409,'Le contact ne correspond pas à cet appel entrant.')
         if contact['do_not_contact'] or contact['non_interested']:
             raise HTTPException(409,'Un administrateur doit réactiver ce contact avant de prendre rendez-vous.')
         card=service.contact_access(db,body.campaign_id,body.contact_id)
@@ -141,6 +171,8 @@ def create(body:Booking,request:Request):
             VALUES (:id,:campaign,:contact,:actor,:hash,:start,:end,:zone,:notes)''',id=body.id,campaign=body.campaign_id,contact=body.contact_id,
             actor=user['id'],hash=digest,start=starts,end=starts+timedelta(minutes=body.duration_minutes),zone=body.timezone,notes=body.notes)
         cancel_for_contact(db,user,body.contact_id,'appointment.booked')
+        if followup is not None:
+            inbound_booking.finish(db,user,followup,body.id)
         result=payload(db,body.id)
         record(db,user,body.id,'appointment.created',{'after':dict(starts_at=result['starts_at'],ends_at=result['ends_at'],timezone=result['timezone'],notes=result['notes'],status=result['status'],qualification=qualification)})
         result['qualification']=qualification
@@ -174,12 +206,14 @@ def update(identifier:uuid.UUID,body:Update,request:Request):
         ends=starts+timedelta(minutes=body.duration_minutes)
         fields=('starts_at','ends_at','timezone','notes','status')
         before={k:row[k] for k in fields}
+        before['phase']=payload(db,identifier)['phase']
         previous_qualification=appointment_snapshot(db,identifier)
         if (body.qualification is not None and previous_qualification is not None
                 and body.qualification.schema_version<previous_qualification['schema_version']):
             raise HTTPException(422,'Conservez le questionnaire actuel de ce rendez-vous.')
         if previous_qualification is not None:before['qualification']=previous_qualification
         after=dict(starts_at=starts,ends_at=ends,timezone=body.timezone,notes=body.notes,status=body.status)
+        after['phase']=next_phase(body.status,body.phase,before['phase'])
         if body.qualification is not None:
             after['qualification']=complete_snapshot(body.qualification)
         elif previous_qualification is not None:

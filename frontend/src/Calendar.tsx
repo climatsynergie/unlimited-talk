@@ -6,7 +6,9 @@ import { Modal, Notice, Submit } from "./ui";
 import { QualificationFields, QualificationSummary } from "./Qualification";
 import type { QualificationSchema, QualificationValue } from "./Qualification";
 
-export type Status = "booked" | "completed" | "cancelled" | "no_show";
+import { appointmentPhases, phaseOf } from "./appointment-phases";
+import type { Phase, Status } from "./appointment-phases";
+export type { Status } from "./appointment-phases";
 export type Appointment = {
   id: string;
   campaign_id: string;
@@ -17,6 +19,7 @@ export type Appointment = {
   timezone: string;
   notes: string;
   status: Status;
+  phase?: Phase;
   version: number;
   phone: string;
   profile: Record<string, string>;
@@ -44,12 +47,8 @@ export type BookingContact = {
   contact_id: string;
   membership_version: number;
   timezone: string;
-};
-const statuses: Record<Status, string> = {
-  booked: "RDV booké",
-  completed: "Terminé",
-  cancelled: "Annulé",
-  no_show: "Absent",
+  source_followup_id?: string;
+  source_followup_version?: number;
 };
 export function AppointmentForm({
   contact,
@@ -72,7 +71,9 @@ export function AppointmentForm({
   onQualificationChange?: (value: QualificationValue) => void;
   bookerName?: string;
 }) {
-  const [zone, setZone] = useState(appointment?.timezone || "America/Toronto");
+  const [zone, setZone] = useState(
+    appointment?.timezone || contact?.timezone || "America/Toronto",
+  );
   const [start, setStart] = useState(
     appointment ? local(appointment.starts_at, appointment.timezone) : "",
   );
@@ -83,7 +84,10 @@ export function AppointmentForm({
       : 30,
   );
   const [notes, setNotes] = useState(appointment?.notes || "");
-  const [status, setStatus] = useState<Status>(appointment?.status || "booked");
+  const [phase, setPhase] = useState<Phase>(
+    appointment ? phaseOf(appointment) : "booked",
+  );
+  const status = appointmentPhases[phase].status;
   const [ownQualification, setOwnQualification] = useState<QualificationValue>(
     appointment?.qualification || {
       schema_version: qualificationSchema?.schema_version || 1,
@@ -171,7 +175,7 @@ export function AppointmentForm({
       await api(appointment ? `/calendar/${appointment.id}` : "/calendar", {
         method: appointment ? "PATCH" : "POST",
         body: appointment
-          ? { ...schedule, status, version: appointment.version }
+          ? { ...schedule, status, phase, version: appointment.version }
           : {
               ...contact,
               ...schedule,
@@ -187,7 +191,10 @@ export function AppointmentForm({
     }
   }
   return (
-    <form className="campaign-form appointment-form" onSubmit={save}>
+    <form
+      className={`campaign-form appointment-form phase-${phase}`}
+      onSubmit={save}
+    >
       {error ? <Notice error>{error}</Notice> : null}
       <fieldset disabled={busy}>
         {appointment && !appointment.qualification && qualificationSchema ? (
@@ -217,8 +224,7 @@ export function AppointmentForm({
             />
           ) : (
             <Notice error>
-              Rechargez la fiche du contact pour charger le questionnaire
-              obligatoire.
+              Rechargez la fiche du contact pour charger le questionnaire.
             </Notice>
           )
         ) : null}
@@ -299,12 +305,12 @@ export function AppointmentForm({
           <label>
             Statut
             <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as Status)}
+              value={phase}
+              onChange={(e) => setPhase(e.target.value as Phase)}
             >
-              {Object.entries(statuses).map(([k, v]) => (
+              {Object.entries(appointmentPhases).map(([k, v]) => (
                 <option key={k} value={k}>
-                  {v}
+                  {v.label}
                 </option>
               ))}
             </select>
@@ -392,12 +398,18 @@ export function AppointmentDetail({
       title="Rendez-vous — Unlimited Talks"
       onClose={onClose}
       busy={editing || busy}
+      className={
+        a ? `appointment-dialog phase-${phaseOf(a)}` : "appointment-dialog"
+      }
     >
       {error ? <Notice error>{error}</Notice> : null}
       {!a ? (
         <p role="status">Chargement du rendez-vous…</p>
       ) : (
         <>
+          <p className="appointment-phase-badge">
+            {appointmentPhases[phaseOf(a)].label}
+          </p>
           <dl className="contact-profile">
             <div>
               <dt>Contact</dt>
@@ -455,7 +467,7 @@ export function AppointmentDetail({
             </div>
             <div>
               <dt>Statut</dt>
-              <dd>{statuses[a.status]}</dd>
+              <dd>{appointmentPhases[phaseOf(a)].label}</dd>
             </div>
             <div>
               <dt>Notes</dt>
@@ -510,7 +522,12 @@ export function AppointmentDetail({
                       e.details.before.timezone!,
                     )}{" "}
                     · {e.details.before.timezone} ·{" "}
-                    {statuses[e.details.before.status!]} ·{" "}
+                    {
+                      appointmentPhases[
+                        phaseOf(e.details.before as Appointment)
+                      ].label
+                    }{" "}
+                    ·{" "}
                     {(Date.parse(e.details.before.ends_at!) -
                       Date.parse(e.details.before.starts_at!)) /
                       60000}{" "}
@@ -528,7 +545,11 @@ export function AppointmentDetail({
                       e.details.after.timezone!,
                     )}{" "}
                     · {e.details.after.timezone} ·{" "}
-                    {statuses[e.details.after.status!]} ·{" "}
+                    {
+                      appointmentPhases[phaseOf(e.details.after as Appointment)]
+                        .label
+                    }{" "}
+                    ·{" "}
                     {(Date.parse(e.details.after.ends_at!) -
                       Date.parse(e.details.after.starts_at!)) /
                       60000}{" "}

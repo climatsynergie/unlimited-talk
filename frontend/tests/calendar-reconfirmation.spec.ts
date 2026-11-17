@@ -16,6 +16,7 @@ async function fixture(page: Page, status: string) {
     timezone: "America/Toronto",
     notes: "",
     status,
+    phase: undefined as string | undefined,
     version: 0,
     phone: "+14165550101",
     profile: { display_name: "Client QA" },
@@ -88,6 +89,7 @@ async function fixture(page: Page, status: string) {
       const body = route.request().postDataJSON();
       proof.writes.push(body);
       appointment.status = body.status;
+      appointment.phase = body.phase;
       appointment.qualification = body.qualification;
       return route.fulfill({ json: { appointment } });
     }
@@ -156,4 +158,55 @@ for (const status of ["completed", "no_show", "cancelled"]) {
       expect(proof.unexpected).toEqual([]);
     });
   }
+}
+
+for (const [phase, label, status, color] of [
+  ["confirmed", "Confirmé", "booked", "rgb(220, 252, 231)"],
+  ["sold", "Vendu", "completed", "rgb(219, 234, 254)"],
+  ["cancelled", "Annulé", "cancelled", "rgb(254, 226, 226)"],
+  ["invalid", "Non Valide", "cancelled", "rgb(255, 228, 230)"],
+  ["non_compliant", "Non Conforme", "cancelled", "rgb(254, 202, 202)"],
+]) {
+  test(`phase ${label} : enregistrement et couleur de la fenêtre`, async ({
+    page,
+  }) => {
+    const proof = await fixture(page, "booked");
+    await page.goto("/calendrier");
+    await page
+      .getByLabel("Aller à la date", { exact: true })
+      .fill("2026-11-09");
+    await page
+      .getByRole("combobox", { name: "Statut", exact: true })
+      .selectOption("all");
+    await page.getByRole("button", { name: "Agenda", exact: true }).click();
+    await page
+      .locator(".appointment-card")
+      .filter({ hasText: "Client QA" })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await dialog
+      .getByRole("button", {
+        name: "Modifier ou annuler le rendez-vous",
+        exact: true,
+      })
+      .click();
+    await dialog
+      .getByRole("combobox", { name: "Statut", exact: true })
+      .selectOption(phase);
+    await dialog
+      .getByRole("button", {
+        name: "Enregistrer les modifications",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => proof.writes.length).toBe(1);
+    expect(proof.writes[0]).toMatchObject({ phase, status });
+    await expect(dialog).toHaveClass(new RegExp(`phase-${phase}`));
+    await expect(dialog.locator(".appointment-phase-badge")).toHaveText(label);
+    await expect(dialog.locator(".modal-heading")).toHaveCSS(
+      "background-color",
+      color,
+    );
+    expect(proof.unexpected).toEqual([]);
+  });
 }

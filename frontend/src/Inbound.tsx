@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { InboundBooking } from "./InboundBooking";
 import { ReceptionControl } from "./IncomingPhone";
 import { RecordingPlayer } from "./CallHistory";
 import { usePhone } from "./Phone";
@@ -56,6 +57,7 @@ type History = {
   created_at: string;
   details: {
     content?: string;
+    reason?: string;
     outcome?: string;
     after?: { stage: Stage; callback_at?: string; timezone?: string };
   };
@@ -786,6 +788,7 @@ function FollowupDetail({
   const [error, setError] = useState("");
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
+  const [qualificationBusy, setQualificationBusy] = useState(false);
   const requestId = useRequestId();
   const [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -863,13 +866,13 @@ function FollowupDetail({
     <Modal
       title={data ? contact(data.followup) : "Suivi d’appel entrant"}
       onClose={onClose}
-      busy={busy}
+      busy={busy || qualificationBusy}
     >
       {error ? <Notice error>{error}</Notice> : null}
       <button
         type="button"
         className="button secondary"
-        disabled={busy}
+        disabled={busy || qualificationBusy}
         onClick={() => setRevision((r) => r + 1)}
       >
         Actualiser la fiche
@@ -879,6 +882,23 @@ function FollowupDetail({
       ) : (
         <>
           <CallerSummary row={data.followup} />
+          <InboundBooking
+            key={id}
+            id={id}
+            allowed={
+              !!data.followup.caller_number &&
+              !data.followup.do_not_contact &&
+              !data.followup.non_interested &&
+              data.followup.stage !== "handled" &&
+              (admin ||
+                !data.followup.owner_id ||
+                data.followup.owner_id === userId)
+            }
+            onBusy={setQualificationBusy}
+            onBooked={() => {
+              void refresh();
+            }}
+          />
           <dl className="contact-fields">
             <div>
               <dt>Responsable</dt>
@@ -902,15 +922,20 @@ function FollowupDetail({
               )}
             </p>
           ) : null}
-          <FollowupAction
-            key={data.followup.version}
-            row={data.followup}
-            queue={queue}
-            admin={admin}
-            userId={userId}
-            onSaved={refresh}
-            onBusy={setBusy}
-          />
+          <fieldset
+            className="inbound-followup-action"
+            disabled={qualificationBusy}
+          >
+            <FollowupAction
+              key={data.followup.version}
+              row={data.followup}
+              queue={queue}
+              admin={admin}
+              userId={userId}
+              onSaved={refresh}
+              onBusy={setBusy}
+            />
+          </fieldset>
           <h3>Appels reçus</h3>
           <ol className="inbound-history">
             {calls.map((c) => (
@@ -953,11 +978,15 @@ function FollowupDetail({
             {data.events.map((e) => (
               <li key={e.id}>
                 <strong>
-                  {e.action === "note.added"
-                    ? "Note ajoutée"
-                    : e.action === "call.received"
-                      ? "Appel reçu"
-                      : "Suivi modifié"}
+                  {e.details.reason === "appointment.booked"
+                    ? "Rendez-vous pris"
+                    : e.details.reason === "qualification.opened"
+                      ? "Fiche de qualification ouverte"
+                      : e.action === "note.added"
+                        ? "Note ajoutée"
+                        : e.action === "call.received"
+                          ? "Appel reçu"
+                          : "Suivi modifié"}
                 </strong>
                 {e.details.content ? (
                   <p>{e.details.content}</p>
@@ -1554,6 +1583,7 @@ function IncomingHistory({
   onFollowup: (id: string) => void;
 }) {
   const [caller, setCaller] = useState<ReceivedCall | null>(null);
+  const [callerBusy, setCallerBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ReceivedCall[]>([]);
   const [more, setMore] = useState(false);
@@ -1677,8 +1707,25 @@ function IncomingHistory({
             profile: caller.profile || null,
           })}
           onClose={() => setCaller(null)}
+          busy={callerBusy}
         >
           <CallerSummary row={caller} />
+          <InboundBooking
+            key={caller.id}
+            source="calls"
+            id={caller.id}
+            allowed={
+              !!caller.caller_number &&
+              !caller.do_not_contact &&
+              !caller.non_interested
+            }
+            onBusy={setCallerBusy}
+            onBooked={() => {
+              setCallerBusy(false);
+              setCaller(null);
+              setRefresh((v) => v + 1);
+            }}
+          />
         </Modal>
       ) : null}
     </section>

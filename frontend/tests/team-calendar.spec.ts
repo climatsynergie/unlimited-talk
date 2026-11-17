@@ -148,6 +148,8 @@ async function fixture(page: Page, dense = false) {
             a.created_by === url.searchParams.get("creator")) &&
           (!url.searchParams.has("status") ||
             a.status === url.searchParams.get("status")) &&
+          (!url.searchParams.has("phase") ||
+            a.status === url.searchParams.get("phase")) &&
           (url.searchParams.get("exclude_cancelled") !== "true" ||
             a.status !== "cancelled"),
       );
