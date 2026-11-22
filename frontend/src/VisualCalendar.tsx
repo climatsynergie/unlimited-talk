@@ -5,6 +5,7 @@ import type {
   EventDisplayInfo,
   EventInput,
   EventClickInfo,
+  ListDayHeaderInnerInfo,
 } from "@fullcalendar/react";
 import dayGrid from "@fullcalendar/react/daygrid";
 import timeGrid from "@fullcalendar/react/timegrid";
@@ -21,7 +22,7 @@ import { appointmentPhases as states, phaseOf } from "./appointment-phases";
 import type { Phase } from "./appointment-phases";
 import { day, when, Timezone } from "./Scheduling";
 import { Notice } from "./ui";
-import { AgendaDownloads } from "./AgendaDownloads";
+import { AgendaDownloadButton, useAgendaDownload } from "./AgendaDownloads";
 
 const plugins = [monarch, dayGrid, timeGrid, list];
 const clockFormat = {
@@ -57,16 +58,6 @@ function name(a: Appointment) {
     [a.profile.first_name, a.profile.last_name].filter(Boolean).join(" ") ||
     a.phone
   );
-}
-function agendaDays(start: string, end: string, zone: string) {
-  const cursor = new Date(day(start, zone) + "T12:00:00Z");
-  const last = day(end, zone);
-  const days: string[] = [];
-  while (cursor.toISOString().slice(0, 10) < last && days.length < 31) {
-    days.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return days;
 }
 function eventClass(info: EventDisplayInfo) {
   return `appointment-card calendar-appointment status-${info.event.extendedProps.status}`;
@@ -106,6 +97,30 @@ export default function VisualCalendar({ userId }: { userId: string }) {
   const [error, setError] = useState("");
   const [knownAgents, setKnownAgents] = useState<[string, string][]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const downloadDisabled = loading || !!error || view !== "agenda";
+  const agendaDownload = useAgendaDownload({
+    zone,
+    creator: creator === "mine" ? userId : creator === "all" ? "" : creator,
+    status,
+    period: `${view}|${range?.start}|${range?.end}`,
+    disabled: downloadDisabled,
+  });
+  const agendaHeader = (info: ListDayHeaderInnerInfo) => {
+    // FullCalendar can also render an alternate date label for the same day.
+    // Keep exactly one download control in the primary heading.
+    if (info.level !== 0) return null;
+    return (
+      <div className="agenda-day-heading">
+        <span>{info.text}</span>
+        <AgendaDownloadButton
+          day={day(info.date.toISOString(), zone)}
+          exporting={agendaDownload.exporting}
+          disabled={downloadDisabled}
+          onDownload={agendaDownload.download}
+        />
+      </div>
+    );
+  };
   const firstDate = useRef(date);
   const canvas = useRef<HTMLDivElement>(null);
   const loadedWindow = useRef("");
@@ -424,17 +439,13 @@ export default function VisualCalendar({ userId }: { userId: string }) {
               : `${events.length} rendez-vous dans cette période${more ? " · chargement partiel" : ""}`}
           </div>
           {error ? <Notice error>{error}</Notice> : null}
-          {view === "agenda" && range ? (
-            <AgendaDownloads
-              days={agendaDays(range.start, range.end, zone)}
-              zone={zone}
-              creator={
-                creator === "mine" ? userId : creator === "all" ? "" : creator
-              }
-              status={status}
-              period={`${range.start}|${range.end}`}
-              disabled={loading || !!error}
-            />
+          {view === "agenda" && agendaDownload.error ? (
+            <Notice error>{agendaDownload.error}</Notice>
+          ) : null}
+          {view === "agenda" && agendaDownload.exporting ? (
+            <p role="status" className="agenda-download-status">
+              Préparation des fiches de rendez-vous…
+            </p>
           ) : null}
           {more ? (
             <Notice>
@@ -470,6 +481,13 @@ export default function VisualCalendar({ userId }: { userId: string }) {
               slotHeaderFormat={clockFormat}
               slotHeaderClass="calendar-slot-label"
               dayHeaderClass="calendar-day-label"
+              listDayClass="agenda-calendar-day"
+              listDayHeaderClass="agenda-day-header"
+              listDayHeaderInnerClass="agenda-day-header-inner"
+              listDayBodyClass="agenda-day-events"
+              listDayFormat={{ weekday: "long", day: "numeric", month: "long" }}
+              listDayAltFormat={false}
+              listDayHeaderContent={agendaHeader}
               scrollTime="08:00:00"
               slotMinHeight={28}
               dayMaxEvents={3}

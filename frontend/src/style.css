@@ -2342,43 +2342,58 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   color: #6b6079;
   font-size: 11px;
 }
-.agenda-downloads {
-  margin: 0 20px 16px;
-  padding: 16px;
-  border: 1px solid #cce7dc;
-  border-radius: 12px;
-  background: #f3faf7;
-}
-.agenda-downloads h2 {
-  margin: 0 0 6px;
-  font-size: 15px;
-}
-.agenda-downloads p {
-  margin: 0 0 12px;
-  color: #52645b;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.agenda-download-days {
+.view-agenda .agenda-calendar-day {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
 }
-.agenda-download-day {
+.view-agenda .agenda-day-header {
+  display: block;
+  width: 100%;
+  max-width: none;
+  padding: 10px 12px;
+  background: #f4f7fb;
+  border-bottom: 1px solid #e5eaf2;
+  z-index: 2;
+}
+.view-agenda .agenda-day-header-inner {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+.view-agenda .agenda-day-header-inner:empty {
+  display: none;
+}
+.agenda-day-heading {
   display: flex;
-  flex: 1 1 270px;
-  gap: 12px;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border: 1px solid #d7e8df;
-  border-radius: 8px;
-  background: white;
-  font-size: 12px;
-}
-.agenda-download-day > span {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 13px;
   font-weight: 600;
+  color: #312846;
+}
+.agenda-day-heading > span {
+  min-width: 0;
+}
+.view-agenda .agenda-day-events {
+  gap: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+.agenda-day-download {
+  flex-shrink: 0;
+}
+.agenda-download-status {
+  margin: 0 20px 10px;
+  font-size: 12px;
+  color: #625a70;
 }
 .calendar-canvas {
   min-width: 0;

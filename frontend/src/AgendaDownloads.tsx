@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, message } from "./api";
-import { Notice } from "./ui";
 
-export function AgendaDownloads({
-  days,
+export function useAgendaDownload({
   zone,
   creator,
   status,
   period,
   disabled,
 }: {
-  days: string[];
   zone: string;
   creator: string;
   status: string;
@@ -77,45 +74,38 @@ export function AgendaDownloads({
         setExporting(null);
     }
   }
-  if (!days.length) return null;
+  return { download, exporting, error };
+}
+
+export function AgendaDownloadButton({
+  day,
+  exporting,
+  disabled,
+  onDownload,
+}: {
+  day: string;
+  exporting: string | null;
+  disabled: boolean;
+  onDownload: (day: string) => Promise<void>;
+}) {
+  const label = new Intl.DateTimeFormat("fr-CA", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(day + "T12:00:00Z"));
   return (
-    <section
-      className="agenda-downloads"
-      aria-label="Téléchargements des rendez-vous"
+    <button
+      type="button"
+      className="button secondary small agenda-day-download"
+      disabled={disabled || !!exporting}
+      onClick={(event) => {
+        event.stopPropagation();
+        void onDownload(day);
+      }}
+      aria-label={`Télécharger les rendez-vous du ${label} en TXT`}
     >
-      <h2>Fiches de la journée</h2>
-      <p>
-        Un fichier TXT avec les coordonnées et la qualification de chaque
-        rendez-vous. Les filtres et le fuseau du calendrier s’appliquent.
-      </p>
-      {error ? <Notice error>{error}</Notice> : null}
-      <div className="agenda-download-days">
-        {days.map((day) => {
-          const label = new Intl.DateTimeFormat("fr-CA", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            timeZone: "UTC",
-          }).format(new Date(day + "T12:00:00Z"));
-          return (
-            <div className="agenda-download-day" key={day}>
-              <span>{label}</span>
-              <button
-                type="button"
-                className="button secondary small"
-                disabled={disabled || !!exporting}
-                onClick={() => void download(day)}
-                aria-label={`Télécharger les rendez-vous du ${label} en TXT`}
-              >
-                {exporting === day ? "Préparation…" : "Télécharger TXT"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      {exporting ? (
-        <p role="status">Préparation des fiches de rendez-vous…</p>
-      ) : null}
-    </section>
+      {exporting === day ? "Préparation…" : "Télécharger TXT"}
+    </button>
   );
 }

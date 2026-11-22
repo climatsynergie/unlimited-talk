@@ -920,9 +920,10 @@ test("conversations et agenda : filtre et TXT avec le vrai serveur et PostgreSQL
   await page
     .getByRole("combobox", { name: "Agent", exact: true })
     .selectOption("mine");
-  const section = page.getByRole("region", {
-    name: "Téléchargements des rendez-vous",
-  });
+  const section = page.locator('.agenda-day-header[data-date="2026-11-19"]');
+  await expect(
+    page.getByRole("heading", { name: "Fiches de la journée", exact: true }),
+  ).toHaveCount(0);
   const button = section.getByRole("button", { name: /du jeudi 19 novembre/ });
   await expect(button).toBeEnabled();
   const pending = page.waitForEvent("download");
@@ -945,7 +946,7 @@ test("conversations et agenda : filtre et TXT avec le vrai serveur et PostgreSQL
   ])
     expect(content).toContain(text);
   expect(content.match(/Booker par :/g)).toHaveLength(1);
-  await screenshot(page, "agenda-txt-desktop.png");
+  await screenshot(page, "agenda-txt-inline-desktop.png");
   await accessible(page);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
@@ -953,5 +954,5 @@ test("conversations et agenda : filtre et TXT avec le vrai serveur et PostgreSQL
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await screenshot(page, "agenda-txt-mobile.png");
+  await screenshot(page, "agenda-txt-inline-mobile.png");
 });

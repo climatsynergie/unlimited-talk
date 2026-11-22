@@ -111,3 +111,49 @@ NOT TESTED here: real PSTN/audio acceptance, real-agent concurrency/load,
 Safari/Firefox, and a new native-library vulnerability audit. No real call was
 initiated. These features do not certify the entire application production-ready,
 repair the separate large-enrollment timeout, or guarantee voicemail detection.
+
+## Final release verification — completed 22 November 2026
+
+Delivered source: `683e0c829f63d507f16388d3702b4af46c32a3f9`.
+Immutable image:
+`ghcr.io/climatsynergie/unlimited-talk-api@sha256:60fae19578650916c228a7cb0f244827c14b035a59562888b92e9185fddc8886`.
+Previous live release: `0674194aa629a02f2faf3591945a4524f18632e7`.
+
+Both exact-source Foundation CI executions passed:
+
+- [main run 45047401581](https://github.com/climatsynergie/unlimited-talk/actions/runs/45047401581): test job successful, 56 successful steps, publication job successful with 5 successful steps including image provenance.
+- [QA run 45047401494](https://github.com/climatsynergie/unlimited-talk/actions/runs/45047401494): test job successful, 54 successful steps; publication correctly skipped for the QA branch.
+
+Full CI includes the new API and real browser journey, existing call and incoming
+browser/API/PostgreSQL journeys, migrations, rollback, backup/restore, database
+outage/recovery and incoming runtime tests. Successful step metadata is retained
+under `evidence/conversation-agenda-release-20261122/`; counts above are workflow
+steps, not invented unit-test totals.
+
+The following evidence records all have PASS / actual exit 0. The exact command
+and its timing/hash are stored in the paired JSON/log under `evidence/`:
+
+| Evidence prefix | Executed command after recorder prefix | Verified result |
+|---|---|---|
+| `conversation-agenda-ci-release-gate` | `python3 qa-reports/evidence/conversation-agenda-release-20261122/check_ci.py --require-complete` | Both complete CI runs, main publication and current main source |
+| `conversation-agenda-prepare-provenance` | Recorded strict SSH command, `python3 /root/prepare-release-683e0c8.py` | Cryptographic attestation verification, exact repository/workflow/main source and immutable image |
+| `conversation-agenda-cutover-readiness` | Recorded strict SSH command, `python3 /root/conversation-agenda-preflight-20261122.py` | Ready previous release, calling enabled, zero outgoing/incoming calls in the snapshot |
+| `conversation-agenda-guarded-deploy` | Recorded strict SSH command, `python3 /root/deploy-release-683e0c8.py` | Unchanged root deployer and call/provenance/schema/rollback gates; ready release and calling enabled; 181.377 seconds including checks/startup |
+| `conversation-agenda-runtime-verified` | Recorded strict SSH command, `python3 /root/verify-runtime-release-683e0c8.py` | Exact new source/image; unchanged schema 12; seven running services, all six configured checks healthy, no OOM; installed recording filter, authenticated TXT route and French UTF-8 renderer |
+| `conversation-agenda-public-verified` | `python3 qa-reports/evidence/conversation-agenda-release-20261122/verify_public.py` | New private endpoints reject unauthenticated requests with 401/no-store; SPA routes and newly delivered filter/download bundles verified over HTTPS |
+| `conversation-agenda-lab-cleanup` | Recorded Compose command, `down --volumes --remove-orphans` for only `ut-qa-conversation-agenda-20261122` | Disposed this task's local synthetic database/containers; unrelated local environments and production data untouched |
+
+Live deployment completed at 2026-11-22 17:28:14 UTC. Independent verification at
+17:28:58 UTC reported ready API, manual communications, calling enabled and exact
+new revision. No real call was initiated, no private live TXT was downloaded, no
+contact or existing appointment was edited, and no schema change was needed.
+The protected root deployer was unchanged (SHA256
+`3f12ea6d195c9843b81b5125146d2cf225831b08da574dc5e2dd887fd947e107`);
+the public transport adapter only used public artifact retrieval and the same
+cryptographic verification policy. No admission or rollback guard was bypassed.
+
+Feature release result: deployed and verified. Residual limitations above remain;
+this is not a blanket production-readiness certification. Users should refresh
+the application, choose a recording-duration filter and click Rechercher, or open
+Calendrier → Agenda and select the day's Télécharger TXT button. Export uses the
+calendar's selected filters; duration does not automatically classify voicemail.

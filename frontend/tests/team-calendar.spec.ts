@@ -405,19 +405,37 @@ test("calendrier : charge toutes les pages et respecte la semaine du changement 
 
 test("agenda : téléchargement TXT par journée, filtres conservés et reprise après erreur", async ({
   page,
-}) => {
+}, testInfo) => {
   const proof = await fixture(page);
   await page.goto("/calendrier");
   await page.getByLabel("Aller à la date", { exact: true }).fill("2026-11-02");
   await page.getByRole("button", { name: "Agenda", exact: true }).click();
-  const section = page.getByRole("region", {
-    name: "Téléchargements des rendez-vous",
-  });
-  await expect(section.getByRole("button")).toHaveCount(7);
+  const section = page.locator(".calendar-canvas.view-agenda");
+  await expect(
+    page.getByRole("heading", { name: "Fiches de la journée", exact: true }),
+  ).toHaveCount(0);
+  await expect(section.locator(".agenda-day-header")).toHaveCount(4);
+  await expect(section.locator(".agenda-day-download")).toHaveCount(4);
+  for (const header of await section.locator(".agenda-day-header").all())
+    await expect(header.getByRole("button")).toHaveCount(1);
   const button = section.getByRole("button", {
     name: /Télécharger les rendez-vous du lundi 2 novembre/,
   });
   await expect(button).toBeEnabled();
+  const dateBox = await section
+    .locator(
+      '.agenda-day-header[data-date="2026-11-02"] .agenda-day-heading > span',
+    )
+    .boundingBox();
+  const buttonBox = await button.boundingBox();
+  expect(dateBox).not.toBeNull();
+  expect(buttonBox).not.toBeNull();
+  expect(
+    Math.abs(
+      dateBox!.y + dateBox!.height / 2 - (buttonBox!.y + buttonBox!.height / 2),
+    ),
+  ).toBeLessThan(4);
+  expect(buttonBox!.x).toBeGreaterThan(dateBox!.x + dateBox!.width);
   const pending = page.waitForEvent("download");
   await button.click();
   const download = await pending;
@@ -441,7 +459,9 @@ test("agenda : téléchargement TXT par journée, filtres conservés et reprise 
   await expect(button).toBeEnabled();
   proof.failExport = true;
   await button.click();
-  await expect(section).toContainText("Export indisponible, réessayez.");
+  await expect(page.getByRole("alert")).toContainText(
+    "Export indisponible, réessayez.",
+  );
   expect(proof.exports.at(-1)?.get("creator")).toBe(uuid(10));
   expect(proof.exports.at(-1)?.get("phase")).toBe("booked");
   expect(proof.exports.at(-1)?.has("exclude_cancelled")).toBe(false);
@@ -449,12 +469,31 @@ test("agenda : téléchargement TXT par journée, filtres conservés et reprise 
   const retry = page.waitForEvent("download");
   await button.click();
   await retry;
-  await expect(section).not.toContainText("Export indisponible");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("agenda-inline-desktop.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("combobox", { name: "Fuseau horaire", exact: true })
+    .selectOption("America/Vancouver");
+  await expect(button).toBeEnabled();
+  const zoned = page.waitForEvent("download");
+  await button.click();
+  await zoned;
+  expect(proof.exports.at(-1)?.get("day")).toBe("2026-11-02");
+  expect(proof.exports.at(-1)?.get("timezone")).toBe("America/Vancouver");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("agenda-inline-mobile.png"),
+    fullPage: true,
+  });
   await accessible(page);
+  await page.getByRole("button", { name: "Semaine", exact: true }).click();
+  await expect(page.locator(".agenda-day-download")).toHaveCount(0);
 });
