@@ -22,7 +22,8 @@ playback_slots=BoundedSemaphore(24)
 def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UUID|None=None,
           q:str=Query(default='',max_length=120),outcome:Literal['','completed','no-answer','busy','failed','canceled']='',
           recordings_only:bool=False,actor_id:UUID|None=None,destination:str=Query(default='',max_length=16),
-          from_at:AwareDatetime|None=None,until_at:AwareDatetime|None=None):
+          from_at:AwareDatetime|None=None,until_at:AwareDatetime|None=None,
+          recording_min_seconds:int|None=Query(default=None,ge=0,le=86400)):
     if (before_created_at is None)!=(before_id is None):
         raise HTTPException(400,'Curseur d’historique incomplet.')
     if from_at and until_at and until_at<=from_at:raise HTTPException(400,'La date de fin doit suivre la date de début.')
@@ -43,6 +44,8 @@ def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UU
               AND (:destination='' OR i.destination=:destination)
               AND (:outcome='' OR i.outcome=:outcome)
               AND (NOT :recordings OR EXISTS(SELECT 1 FROM staging.voice_recordings r WHERE r.intent_id=i.id))
+              AND (CAST(:minimum AS int) IS NULL OR EXISTS(SELECT 1 FROM staging.voice_recordings r
+                   WHERE r.intent_id=i.id AND r.duration>CAST(:minimum AS int)))
               AND (CAST(:from_at AS timestamptz) IS NULL OR i.created_at>=CAST(:from_at AS timestamptz))
               AND (CAST(:until_at AS timestamptz) IS NULL OR i.created_at<CAST(:until_at AS timestamptz))
               AND (i.destination ILIKE :search OR u.display_name ILIKE :search OR ca.name ILIKE :search OR c.profile->>'display_name' ILIKE :search
@@ -51,14 +54,15 @@ def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UU
               (:initial OR (i.created_at,i.id)<(CAST(:before_at AS timestamptz),CAST(:before_id AS uuid)))
             ORDER BY i.created_at DESC,i.id DESC LIMIT 21''',admin=user['role']=='admin',actor=user['id'],
             initial=before_id is None,before_at=before_created_at,before_id=before_id,
-            agent=actor_id,destination=destination,outcome=outcome,recordings=recordings_only,from_at=from_at,until_at=until_at,search=search).mappings().all()
+            agent=actor_id,destination=destination,outcome=outcome,recordings=recordings_only,minimum=recording_min_seconds,from_at=from_at,until_at=until_at,search=search).mappings().all()
         items=[dict(row) for row in rows[:20]]
         recordings=[]
         if items:
             recordings=query(db,'''SELECT r.sid,r.intent_id,r.state,r.duration,r.channels,j.archived_at,j.content_bytes,j.last_error_code,j.lease_until
                 FROM staging.voice_recordings r LEFT JOIN staging.voice_archive_jobs j ON j.recording_sid=r.sid
-                WHERE r.intent_id=ANY(CAST(:ids AS uuid[])) ORDER BY r.created_at,r.sid''',
-                ids=[str(item['id']) for item in items]).mappings().all()
+                WHERE r.intent_id=ANY(CAST(:ids AS uuid[]))
+                AND (CAST(:minimum AS int) IS NULL OR r.duration>CAST(:minimum AS int)) ORDER BY r.created_at,r.sid''',
+                ids=[str(item['id']) for item in items],minimum=recording_min_seconds).mappings().all()
         for item in items:
             item['recordings']=[{'sid':r['sid'],'state':r['state'],'duration':r['duration'],
                 'channels':r['channels'],'archived_at':r['archived_at'],

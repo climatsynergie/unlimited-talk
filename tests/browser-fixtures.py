@@ -46,6 +46,31 @@ with engine.begin() as db:
         identifier=record_missed(db,queue_id=uuid.UUID(payload['queue_id']),account_sid='AC'+'a'*32,call_sid='CA'+uuid.uuid4().hex,
             caller_number=payload.get('phone'),called_number=queue,outcome='missed',received_at=now-timedelta(seconds=30),ended_at=now)
         result={'id':str(identifier)}
+    elif payload['op']=='conversation_agenda':
+        assert os.environ.get('COMMUNICATIONS_MODE')=='disabled'
+        assert query(db,"SELECT value FROM staging.environment_metadata WHERE key='data_policy'").scalar_one()=='synthetic_only'
+        actor=uuid.UUID(payload['actor'])
+        assert query(db,"SELECT 1 FROM staging.identity_users WHERE id=:id AND email LIKE 'browser-admin-%@example.invalid'",id=actor).first()
+        from app.campaigns.service import DEFAULT_STAGES,enroll
+        campaign=uuid.uuid4()
+        query(db,"INSERT INTO staging.campaigns(id,name,timezone,created_by) VALUES (:id,:name,'America/Toronto',:actor)",id=campaign,name='QA export '+campaign.hex,actor=actor)
+        for pos,(name,kind,color) in enumerate(DEFAULT_STAGES):
+            query(db,'INSERT INTO staging.campaign_stages(id,campaign_id,name,kind,color,position) VALUES (:id,:campaign,:name,:kind,:color,:pos)',id=uuid.uuid4(),campaign=campaign,name=name,kind=kind,color=color,pos=pos)
+        contacts=[]
+        for duration in [15,21,31]:
+            contact=uuid.uuid4();intent=uuid.uuid4();parent='CA'+uuid.uuid4().hex
+            phone='+1907'+str(1000000+uuid.uuid4().int%8000000)
+            query(db,"INSERT INTO staging.contacts(id,phone,profile) VALUES (:id,:phone,CAST(:profile AS jsonb))",id=contact,phone=phone,profile=json.dumps({'display_name':f'Démo {duration} secondes','address':'10 Rue fictive'}))
+            enroll(db,{'id':actor},campaign,[contact],None,uuid.uuid4())
+            query(db,"""INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,account_sid,application_sid,caller_number,destination,state,parent_call_sid,created_at,expires_at,consumed_at,finished_at,outcome,contact_id,campaign_id)
+                VALUES (:id,:actor,repeat('a',64),repeat('b',64),'AC'||repeat('a',32),'AP'||repeat('b',32),'+14165550100',:phone,'finished',:parent,now(),now()+interval '2 minutes',now(),now(),'completed',:contact,:campaign)""",id=intent,actor=actor,phone=phone,parent=parent,contact=contact,campaign=campaign)
+            query(db,"INSERT INTO staging.voice_recordings(sid,intent_id,call_sid,duration,channels) VALUES (:sid,:intent,:parent,:duration,2)",sid='RE'+uuid.uuid4().hex,intent=intent,parent=parent,duration=duration)
+            contacts.append(contact)
+        appt=uuid.uuid4()
+        query(db,"""INSERT INTO staging.appointments(id,campaign_id,contact_id,created_by,request_hash,starts_at,ends_at,timezone,notes)
+            VALUES (:id,:campaign,:contact,:actor,:hash,'2026-11-20T00:00:00Z','2026-11-20T00:30:00Z','America/Toronto','Notes réelles de démonstration QA')""",id=appt,campaign=campaign,contact=contacts[-1],actor=actor,hash=appt.hex)
+        query(db,"INSERT INTO staging.appointment_events(appointment_id,actor_id,action,details) VALUES (:id,:actor,'appointment.created',CAST(:details AS jsonb))",id=appt,actor=actor,details=json.dumps({'after':{'status':'booked','qualification':{'schema_version':3,'answers':{'construction_year':'2019','hydro_bill':'330 $ par mois','city':'Québec','comments':'Démonstration TXT sauvegardée'}}}}))
+        result={'appointment':str(appt),'day':'2026-11-19'}
     elif payload['op']=='login_factor':
         encrypted=query(db,"SELECT mfa_secret FROM staging.identity_users WHERE id=:id AND email LIKE 'browser-admin-%@example.invalid'",id=payload['id']).scalar_one()
         result={'code':pyotp.TOTP(cipher.decrypt(encrypted.encode()).decode()).now()}

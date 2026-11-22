@@ -743,6 +743,7 @@ const ACTIONS: Record<string, string> = {
   "campaign.contact_reconsidered": "Changement d’avis du client confirmé",
   "campaign.created": "Campagne créée",
   "campaign.contacts_enrolled": "Contacts ajoutés à une campagne",
+  "calendar.day_exported": "Export TXT des rendez-vous",
   "contacts.source_uploaded": "Fichier CSV déposé",
   "contacts.import_confirmed": "Import CSV confirmé",
   "contacts.import_completed": "Import CSV terminé",

@@ -881,3 +881,77 @@ test("rappel programmé, sauvegarde interrompue, reprogrammation et historique",
   ).toBe(true);
   await screenshot(page, "rappels-mobile.png");
 });
+
+test("conversations et agenda : filtre et TXT avec le vrai serveur et PostgreSQL", async ({
+  page,
+}) => {
+  const seed = fixture<Seed & { id: string }>({ op: "seed" });
+  const data = fixture<{ day: string }>({
+    op: "conversation_agenda",
+    actor: seed.id,
+  });
+  await login(page, seed.email, seed.password, seed.codes[0]);
+  await expect(page).not.toHaveURL(/connexion/);
+  await page.goto("/conversations");
+  await page
+    .getByRole("combobox", { name: "Agent", exact: true })
+    .selectOption(seed.id);
+  await page
+    .getByRole("combobox", { name: "Durée de l’enregistrement", exact: true })
+    .selectOption("20");
+  await page.getByRole("button", { name: "Rechercher les appels" }).click();
+  await expect(page.locator(".call-inbox-row")).toHaveCount(2);
+  await page
+    .getByRole("combobox", { name: "Durée de l’enregistrement", exact: true })
+    .selectOption("30");
+  await page.getByRole("button", { name: "Rechercher les appels" }).click();
+  await expect(page.locator(".call-inbox-row")).toHaveCount(1);
+  await expect(page.locator(".call-inbox-row")).toContainText(
+    "Démo 31 secondes",
+  );
+  await expect(
+    page.getByText("Enregistrement : sauvegarde privée en cours.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.goto("/calendrier");
+  await page.getByLabel("Aller à la date", { exact: true }).fill(data.day);
+  await page.getByRole("button", { name: "Agenda", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Agent", exact: true })
+    .selectOption("mine");
+  const section = page.getByRole("region", {
+    name: "Téléchargements des rendez-vous",
+  });
+  const button = section.getByRole("button", { name: /du jeudi 19 novembre/ });
+  await expect(button).toBeEnabled();
+  const pending = page.waitForEvent("download");
+  await button.click();
+  const download = await pending;
+  const stream = await download.createReadStream();
+  const parts: Buffer[] = [];
+  for await (const chunk of stream!) parts.push(Buffer.from(chunk));
+  const content = Buffer.concat(parts).toString("utf8");
+  expect(download.suggestedFilename()).toBe(
+    "unlimited-talk-rendez-vous-2026-11-19.txt",
+  );
+  for (const text of [
+    "jeudi 19 novembre 2026 à 19 h 00",
+    "Démo 31 secondes",
+    "Année de construction : 2019",
+    "330 $ par mois",
+    "Démonstration TXT sauvegardée",
+    "Booker par : Admin navigateur",
+  ])
+    expect(content).toContain(text);
+  expect(content.match(/Booker par :/g)).toHaveLength(1);
+  await screenshot(page, "agenda-txt-desktop.png");
+  await accessible(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await screenshot(page, "agenda-txt-mobile.png");
+});

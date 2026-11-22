@@ -2342,6 +2342,44 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   color: #6b6079;
   font-size: 11px;
 }
+.agenda-downloads {
+  margin: 0 20px 16px;
+  padding: 16px;
+  border: 1px solid #cce7dc;
+  border-radius: 12px;
+  background: #f3faf7;
+}
+.agenda-downloads h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.agenda-downloads p {
+  margin: 0 0 12px;
+  color: #52645b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.agenda-download-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.agenda-download-day {
+  display: flex;
+  flex: 1 1 270px;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #d7e8df;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+}
+.agenda-download-day > span {
+  font-weight: 600;
+}
 .calendar-canvas {
   min-width: 0;
   max-width: 100%;

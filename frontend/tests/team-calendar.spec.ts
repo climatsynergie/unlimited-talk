@@ -59,6 +59,8 @@ async function fixture(page: Page, dense = false) {
       }[];
     }[],
     queries: [] as URLSearchParams[],
+    exports: [] as URLSearchParams[],
+    failExport: false,
     fail: false,
   };
   await page.route("**/api/**", async (route) => {
@@ -160,6 +162,19 @@ async function fixture(page: Page, dense = false) {
         viewer_id: uuid(2),
         name: "Unlimited Talks",
       };
+    } else if (path === "/api/calendar/export.txt") {
+      proof.exports.push(url.searchParams);
+      if (proof.failExport) {
+        proof.failExport = false;
+        return route.fulfill({
+          status: 503,
+          json: { detail: "Export indisponible, réessayez." },
+        });
+      }
+      return route.fulfill({
+        contentType: "text/plain; charset=utf-8",
+        body: "\ufeffRendez-vous : lundi 2 novembre 2026 à 09 h 00\nNom : Émilie QA\nBooker par : Agent 01\n",
+      });
     } else if (path.startsWith("/api/calendar/"))
       body = {
         appointment: appointments.find((a) => path.endsWith(a.id)),
@@ -386,4 +401,60 @@ test("calendrier : charge toutes les pages et respecte la semaine du changement 
       );
     })
     .toBe(169);
+});
+
+test("agenda : téléchargement TXT par journée, filtres conservés et reprise après erreur", async ({
+  page,
+}) => {
+  const proof = await fixture(page);
+  await page.goto("/calendrier");
+  await page.getByLabel("Aller à la date", { exact: true }).fill("2026-11-02");
+  await page.getByRole("button", { name: "Agenda", exact: true }).click();
+  const section = page.getByRole("region", {
+    name: "Téléchargements des rendez-vous",
+  });
+  await expect(section.getByRole("button")).toHaveCount(7);
+  const button = section.getByRole("button", {
+    name: /Télécharger les rendez-vous du lundi 2 novembre/,
+  });
+  await expect(button).toBeEnabled();
+  const pending = page.waitForEvent("download");
+  await button.click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe(
+    "unlimited-talk-rendez-vous-2026-11-02.txt",
+  );
+  const stream = await download.createReadStream();
+  const parts: Buffer[] = [];
+  for await (const chunk of stream!) parts.push(Buffer.from(chunk));
+  expect(Buffer.concat(parts).toString("utf8")).toContain(
+    "Booker par : Agent 01",
+  );
+  expect(proof.exports.at(-1)?.get("timezone")).toBe("America/Toronto");
+  expect(proof.exports.at(-1)?.get("exclude_cancelled")).toBe("true");
+  await page
+    .getByRole("combobox", { name: "Agent", exact: true })
+    .selectOption(uuid(10));
+  await page
+    .getByRole("combobox", { name: "Statut", exact: true })
+    .selectOption("booked");
+  await expect(button).toBeEnabled();
+  proof.failExport = true;
+  await button.click();
+  await expect(section).toContainText("Export indisponible, réessayez.");
+  expect(proof.exports.at(-1)?.get("creator")).toBe(uuid(10));
+  expect(proof.exports.at(-1)?.get("phase")).toBe("booked");
+  expect(proof.exports.at(-1)?.has("exclude_cancelled")).toBe(false);
+  await expect(button).toBeEnabled();
+  const retry = page.waitForEvent("download");
+  await button.click();
+  await retry;
+  await expect(section).not.toContainText("Export indisponible");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await accessible(page);
 });

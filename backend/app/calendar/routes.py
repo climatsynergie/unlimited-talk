@@ -1,9 +1,11 @@
 """Shared calendar: authenticated visibility, creator/admin edits, atomic booking."""
 import json
 import uuid
-from datetime import timedelta
+from datetime import date as CalendarDay, timedelta
+from threading import BoundedSemaphore
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, NaiveDatetime, AwareDatetime, field_validator, model_validator
 from app.identity.routes import same_origin
 from app.identity.service import query, authenticate, audit
@@ -13,9 +15,11 @@ from app.scheduling_routes import local_time as resolve_local_time
 from app.callbacks.service import cancel_for_contact
 from app.qualification import Qualification, SCHEMA, complete_snapshot, contact_snapshot, save_contact_snapshot, appointment_snapshot
 from app.calendar.phases import Phase, PHASE_SQL, next_phase
+from app.calendar import text_export
 
 router=APIRouter(prefix='/api/calendar',tags=['Calendar'],dependencies=[Depends(same_origin)])
 Status=Literal['booked','completed','cancelled','no_show']
+export_slots=BoundedSemaphore(1)
 
 
 class Schedule(BaseModel):
@@ -110,6 +114,49 @@ def listing(request:Request,start:AwareDatetime,end:AwareDatetime,creator:uuid.U
             AND (NOT :exclude_cancelled OR a.status!='cancelled')
             ORDER BY a.starts_at,a.id LIMIT 101 OFFSET :offset''',start=start,end=end,creator=creator,status=status,phase=phase,exclude_cancelled=exclude_cancelled,offset=offset).mappings().all()
         return {'name':'Unlimited Talks','items':[dict(r) for r in rows[:100]],'has_more':len(rows)>100,'viewer_id':str(user['id'])}
+
+
+@router.get('/export.txt')
+def export_day(request:Request,day:CalendarDay,timezone:str=Query(default='America/Toronto',max_length=80),
+               creator:uuid.UUID|None=None,phase:Phase|None=None,exclude_cancelled:bool=False):
+    start,end=text_export.day_bounds(day,timezone)
+    if not export_slots.acquire(blocking=False):
+        raise HTTPException(429,'Un fichier est déjà en préparation. Réessayez dans un instant.')
+    try:
+        with request.app.state.engine.begin() as db:
+            # One statement checks its own snapshot's byte/row budget before
+            # returning JSON. No unbounded fetch or list-page truncation.
+            authenticate(db,request)  # Same shared visibility as calendar/detail.
+            selected='''SELECT matching.*,q.qualification FROM ('''+SELECT+''' WHERE a.starts_at>=:start AND a.starts_at<:end
+                AND (CAST(:creator AS uuid) IS NULL OR a.created_by=:creator)
+                AND (CAST(:phase AS text) IS NULL OR ('''+PHASE_SQL+''')=:phase)
+                AND (NOT :exclude_cancelled OR a.status!='cancelled')
+                ORDER BY a.starts_at,a.id LIMIT :limit) matching
+                LEFT JOIN LATERAL (SELECT e.details->'after'->'qualification' AS qualification
+                  FROM staging.appointment_events e WHERE e.appointment_id=matching.id
+                  AND e.action IN ('appointment.created','appointment.updated')
+                  AND e.details->'after'->'qualification' IS NOT NULL ORDER BY e.id DESC LIMIT 1) q ON true'''
+            values=dict(start=start,end=end,creator=creator,phase=phase,exclude_cancelled=exclude_cancelled,limit=text_export.MAX_APPOINTMENTS+1)
+            budget=query(db,'''WITH export_data AS MATERIALIZED ('''+selected+'''),
+                budget AS (SELECT count(*) AS count,coalesce(sum(octet_length(row_to_json(data)::text)),0) AS bytes FROM export_data data)
+                SELECT count,bytes,CASE WHEN count<=:max_rows AND bytes<=:max_bytes THEN
+                  (SELECT jsonb_agg(to_jsonb(d) ORDER BY d.starts_at,d.id) FROM export_data d)
+                  ELSE NULL END AS appointments FROM budget''',
+                **values,max_rows=text_export.MAX_APPOINTMENTS,max_bytes=text_export.MAX_BYTES).mappings().one()
+            if budget['count']>text_export.MAX_APPOINTMENTS or budget['bytes']>text_export.MAX_BYTES:
+                raise HTTPException(422,'Trop de données pour un fichier. Filtrez les rendez-vous par agent.')
+            if not budget['count']:
+                raise HTTPException(404,'Aucun rendez-vous pour cette journée et ces filtres.')
+            rows=budget['appointments']
+        content=text_export.render(day,timezone,rows)
+        with request.app.state.engine.begin() as db:
+            user=authenticate(db,request)  # Recheck revocation before disclosing.
+            audit(db,user['id'],'calendar.day_exported')
+        return Response(content,media_type='text/plain; charset=utf-8',headers={
+            'Content-Disposition':f'attachment; filename="unlimited-talk-rendez-vous-{day.isoformat()}.txt"',
+            'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+    finally:
+        export_slots.release()
 
 
 @router.get('/{identifier}')

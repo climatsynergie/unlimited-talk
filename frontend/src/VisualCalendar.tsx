@@ -21,6 +21,7 @@ import { appointmentPhases as states, phaseOf } from "./appointment-phases";
 import type { Phase } from "./appointment-phases";
 import { day, when, Timezone } from "./Scheduling";
 import { Notice } from "./ui";
+import { AgendaDownloads } from "./AgendaDownloads";
 
 const plugins = [monarch, dayGrid, timeGrid, list];
 const clockFormat = {
@@ -56,6 +57,16 @@ function name(a: Appointment) {
     [a.profile.first_name, a.profile.last_name].filter(Boolean).join(" ") ||
     a.phone
   );
+}
+function agendaDays(start: string, end: string, zone: string) {
+  const cursor = new Date(day(start, zone) + "T12:00:00Z");
+  const last = day(end, zone);
+  const days: string[] = [];
+  while (cursor.toISOString().slice(0, 10) < last && days.length < 31) {
+    days.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
 }
 function eventClass(info: EventDisplayInfo) {
   return `appointment-card calendar-appointment status-${info.event.extendedProps.status}`;
@@ -413,6 +424,18 @@ export default function VisualCalendar({ userId }: { userId: string }) {
               : `${events.length} rendez-vous dans cette période${more ? " · chargement partiel" : ""}`}
           </div>
           {error ? <Notice error>{error}</Notice> : null}
+          {view === "agenda" && range ? (
+            <AgendaDownloads
+              days={agendaDays(range.start, range.end, zone)}
+              zone={zone}
+              creator={
+                creator === "mine" ? userId : creator === "all" ? "" : creator
+              }
+              status={status}
+              period={`${range.start}|${range.end}`}
+              disabled={loading || !!error}
+            />
+          ) : null}
           {more ? (
             <Notice>
               D’autres rendez-vous sont disponibles.{" "}

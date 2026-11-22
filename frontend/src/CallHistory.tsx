@@ -110,6 +110,7 @@ type Filters = {
   actor: string;
   recordings: boolean;
   destination: string;
+  recordingMinimum: string;
 };
 const emptyFilters: Filters = {
   q: "",
@@ -118,6 +119,7 @@ const emptyFilters: Filters = {
   actor: "",
   recordings: false,
   destination: "",
+  recordingMinimum: "",
 };
 
 export function CallHistory({
@@ -174,6 +176,8 @@ export function CallHistory({
       if (filters.outcome) query.set("outcome", filters.outcome);
       if (filters.actor) query.set("actor_id", filters.actor);
       if (filters.recordings) query.set("recordings_only", "true");
+      if (filters.recordingMinimum)
+        query.set("recording_min_seconds", filters.recordingMinimum);
       if (filters.destination) query.set("destination", filters.destination);
       if (filters.day) {
         const from = new Date(filters.day + "T00:00:00");
@@ -295,6 +299,20 @@ export function CallHistory({
             </select>
           </label>
         ) : null}
+        <label>
+          Durée de l’enregistrement
+          <select
+            value={draft.recordingMinimum}
+            onChange={(event) =>
+              setDraft({ ...draft, recordingMinimum: event.target.value })
+            }
+          >
+            <option value="">Toutes les durées</option>
+            <option value="20">Plus de 20 s</option>
+            <option value="30">Plus de 30 s</option>
+            <option value="60">Plus de 1 min</option>
+          </select>
+        </label>
         <label className="call-recording-filter">
           <input
             type="checkbox"

@@ -269,3 +269,49 @@ test("plus de 200 appels : pages bornées, recherche et accès à la conversatio
     ),
   ).toBe(true);
 });
+
+test("filtre de durée : seuil envoyé au serveur, pagination remise à zéro et réinitialisation", async ({
+  page,
+}) => {
+  const queries: URLSearchParams[] = [];
+  await page.route("**/api/telephony/calls*", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    queries.push(query);
+    return route.fulfill({ json: { items: [], next_cursor: null } });
+  });
+  await page.goto("/conversations");
+  await expect(
+    page.getByRole("button", { name: "Rechercher les appels" }),
+  ).toBeEnabled();
+  for (const value of ["20", "30", "60"]) {
+    await page
+      .getByRole("combobox", { name: "Durée de l’enregistrement", exact: true })
+      .selectOption(value);
+    await page.getByRole("button", { name: "Rechercher les appels" }).click();
+    await expect
+      .poll(() => queries.at(-1)?.get("recording_min_seconds"))
+      .toBe(value);
+    expect(queries.at(-1)?.has("before_id")).toBe(false);
+    await expect(
+      page.getByRole("button", { name: "Rechercher les appels" }),
+    ).toBeEnabled();
+  }
+  await page
+    .getByRole("button", { name: "Réinitialiser", exact: true })
+    .click();
+  await expect
+    .poll(() => queries.at(-1)?.has("recording_min_seconds"))
+    .toBe(false);
+  await expect(
+    page.getByRole("combobox", {
+      name: "Durée de l’enregistrement",
+      exact: true,
+    }),
+  ).toHaveValue("");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
