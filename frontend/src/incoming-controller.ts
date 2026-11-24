@@ -41,7 +41,7 @@ export type IncomingCallbacks = {
   registered: () => void;
   unregistered: () => void;
   tokenWillExpire: () => void;
-  error: () => void;
+  error: (error?: { code?: number }) => void;
 };
 export type IncomingTransport = {
   session: (signal: AbortSignal) => Promise<IncomingSession>;
@@ -74,6 +74,7 @@ export type IncomingState = {
   enabled: boolean;
   wanted: boolean;
   registered: boolean;
+  recovering: boolean;
   phase:
     | "idle"
     | "registering"
@@ -94,6 +95,7 @@ export class IncomingController {
     enabled: false,
     wanted: false,
     registered: false,
+    recovering: false,
     phase: "idle",
     queues: [],
     registrationId: null,
@@ -114,6 +116,9 @@ export class IncomingController {
   private renewDue = false;
   private lastHeartbeat = 0;
   private failures = 0;
+  private retryAt = 0;
+  private tokenDueAt = Infinity;
+  private availabilityRevision = 0;
   readonly browserId: string;
   private transport: IncomingTransport;
   private factory: (
@@ -191,6 +196,8 @@ export class IncomingController {
   }
   async start() {
     if (this.closed || this.starting) return;
+    ++this.availabilityRevision;
+    this.retryAt = 0;
     this.update({ wanted: true, error: "" });
     if (this.device) {
       try {
@@ -219,6 +226,9 @@ export class IncomingController {
         this.requests.signal,
       );
       if (this.closed || generation !== this.generation) return;
+      // Refresh ahead of the SDK's last-second expiry warning, including after
+      // a sleeping/background tab resumes. The server issues five-minute JWTs.
+      this.tokenDueAt = performance.now() + 240_000;
       this.update({ registrationId: registration.id });
       const device = await this.factory(registration.token, {
         incoming: (call) => {
@@ -246,13 +256,13 @@ export class IncomingController {
           if (!this.closed && generation === this.generation)
             this.renewDue = true;
         },
-        error: () => {
-          if (!this.closed && generation === this.generation)
-            this.update({
-              wanted: false,
-              error:
-                "La réception est en pause après une erreur du téléphone. Vérifiez le casque puis reprenez-la.",
-            });
+        error: (error) => {
+          if (!this.closed && generation === this.generation) {
+            this.update({ registered: false });
+            this.renewDue = true;
+            this.lastHeartbeat = 0;
+            this.failed(error);
+          }
         },
       });
       if (this.closed || generation !== this.generation) {
@@ -266,19 +276,18 @@ export class IncomingController {
       this.update({
         phase: this.state.offer ? "checking" : "idle",
         registered: true,
+        recovering: false,
       });
       await this.beat();
     } catch (error) {
       if (!this.closed && generation === this.generation) {
-        if (this.call && this.state.offer) {
+        if (this.device) {
           // Registration can already have admitted an incoming call before
           // the final setup heartbeat returns. Keep its media on control-plane
           // failure, just as later heartbeat failures preserve ongoing calls.
-          this.update({
-            wanted: false,
-            error:
-              "La réception est en pause. L’appel actuel est conservé pendant la vérification du réseau.",
-          });
+          this.failed(error);
+          if (!this.call)
+            this.update({ phase: this.state.offer ? "checking" : "idle" });
           this.lastHeartbeat = 0;
           return;
         }
@@ -299,7 +308,6 @@ export class IncomingController {
               ? error.message
               : "Autorisez le microphone et reprenez la réception.",
         });
-        this.device?.destroy();
         this.device = null;
         if (this.state.registrationId)
           void this.transport.leave(this.state.registrationId).catch(() => {});
@@ -310,10 +318,18 @@ export class IncomingController {
     }
   }
   async pause() {
-    this.update({ wanted: false, error: "" });
+    const revision = ++this.availabilityRevision;
+    this.retryAt = 0;
+    this.update({ wanted: false, recovering: false, error: "" });
     await this.beat()
       .then(() => {
-        if (!this.state.offer && !this.call) this.closeIdleReceiver();
+        if (
+          revision === this.availabilityRevision &&
+          !this.state.wanted &&
+          !this.state.offer &&
+          !this.call
+        )
+          this.closeIdleReceiver();
       })
       .catch(() => {
         if (!this.closed)
@@ -326,19 +342,36 @@ export class IncomingController {
     const id = this.state.registrationId;
     if (!id || this.closed) return;
     const lifecycle = this.requests;
+    const generation = this.generation;
     const expectedOffer = this.state.offer?.id;
+    const wanted = this.state.wanted;
+    const revision = this.availabilityRevision;
     const result = await this.transport.heartbeat(
       id,
-      this.state.wanted,
-      this.state.registered && !(this.state.phase === "checking" && !this.call),
+      wanted,
+      this.state.registered &&
+        !this.state.recovering &&
+        !(this.state.phase === "checking" && !this.call),
       lifecycle.signal,
     );
-    if (this.closed || lifecycle !== this.requests) return;
-    this.lastHeartbeat = performance.now();
+    if (
+      this.closed ||
+      lifecycle !== this.requests ||
+      generation !== this.generation
+    )
+      return;
+    this.lastHeartbeat =
+      revision === this.availabilityRevision ? performance.now() : 0;
     if (id !== this.state.registrationId) return;
-    if (!result.available && this.state.wanted)
+    if (
+      !result.available &&
+      wanted &&
+      this.state.wanted &&
+      revision === this.availabilityRevision
+    )
       this.update({
         wanted: false,
+        recovering: false,
         error:
           "La réception est en pause. Vérifiez votre attribution puis reprenez-la.",
       });
@@ -359,39 +392,79 @@ export class IncomingController {
       this.call ||
       this.renewing ||
       !this.device ||
+      !this.state.wanted ||
       !this.state.registrationId
     )
       return;
     this.renewing = true;
     const generation = this.generation;
+    const revision = this.availabilityRevision;
     try {
       const refreshed = await this.transport.token(
         this.state.registrationId,
         this.requests.signal,
       );
-      if (this.closed || generation !== this.generation || this.call) return;
+      if (
+        this.closed ||
+        generation !== this.generation ||
+        this.call ||
+        !this.state.wanted ||
+        revision !== this.availabilityRevision
+      )
+        return;
       this.device.updateToken(refreshed.token);
       if (!this.state.registered) await this.device.register();
       if (!this.closed && generation === this.generation) {
         this.renewDue = false;
-        this.failures = 0;
+        this.tokenDueAt = performance.now() + 240_000;
       }
     } finally {
       if (generation === this.generation) this.renewing = false;
     }
   }
+  wake() {
+    if (this.closed || !this.state.wanted) return;
+    this.retryAt = 0;
+    this.lastHeartbeat = 0;
+    void this.tick();
+  }
   async tick() {
     if (
       this.closed ||
+      this.starting ||
       this.polling ||
+      performance.now() < this.retryAt ||
       (!this.state.registrationId && !this.state.offer)
     )
       return;
     this.polling = true;
     const lifecycle = this.requests;
+    const generation = this.generation;
     try {
+      // Renew before waiting on HTTP presence. A slow heartbeat must not use
+      // the entire remaining lifetime of a token. Avoid token updates in audio.
+      if (
+        this.state.wanted &&
+        !this.call &&
+        !this.options.outgoingMedia() &&
+        (this.renewDue ||
+          !this.state.registered ||
+          performance.now() >= this.tokenDueAt)
+      )
+        await this.renew();
+      if (
+        this.closed ||
+        lifecycle !== this.requests ||
+        generation !== this.generation
+      )
+        return;
       if (performance.now() - this.lastHeartbeat >= 10000) await this.beat();
-      if (this.closed || lifecycle !== this.requests) return;
+      if (
+        this.closed ||
+        lifecycle !== this.requests ||
+        generation !== this.generation
+      )
+        return;
       const offer = this.state.offer;
       if (offer) {
         if (offer.owned_session === false) await this.prepare();
@@ -400,6 +473,7 @@ export class IncomingController {
           if (
             !this.closed &&
             lifecycle === this.requests &&
+            generation === this.generation &&
             this.state.offer?.id === offer.id
           ) {
             if (fresh.state === "finished") this.clearOffer();
@@ -407,36 +481,71 @@ export class IncomingController {
           }
         }
       }
-      if (
-        this.state.wanted &&
-        !this.call &&
-        (this.renewDue || !this.state.registered)
-      )
-        await this.renew();
       this.failures = 0;
-    } catch (error) {
-      if (this.closed || lifecycle !== this.requests) return;
-      this.failures++;
-      const status =
-        error && typeof error === "object" && "status" in error
-          ? error.status
-          : null;
-      if (this.failures >= 3 || [401, 403, 404, 409].includes(Number(status))) {
-        if ([401, 403].includes(Number(status)) && this.call) this.hangup();
-        if (Number(status) === 404 && !this.call && !this.state.offer) {
-          this.device?.destroy();
-          this.device = null;
-          this.update({ registrationId: null, registered: false });
-        }
-        this.update({
-          wanted: false,
-          error:
-            "La réception est en pause après une perte de connexion. Vérifiez l’appel puis reprenez-la.",
-        });
+      this.retryAt = 0;
+      if (this.state.wanted && this.state.registered && this.state.recovering) {
+        this.update({ recovering: false, error: "" });
+        this.lastHeartbeat = 0;
+        await this.beat();
       }
+    } catch (error) {
+      if (
+        this.closed ||
+        lifecycle !== this.requests ||
+        generation !== this.generation
+      )
+        return;
+      this.failed(error);
     } finally {
-      if (lifecycle === this.requests) this.polling = false;
+      if (lifecycle === this.requests && generation === this.generation)
+        this.polling = false;
     }
+  }
+  private failed(error: unknown) {
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? Number(error.status)
+        : 0;
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? Number(error.code)
+        : 0;
+    // Expired JWTs (20104/31205), transport failures and server outages retry.
+    // Revoked application access, invalid configuration and denied microphone
+    // permissions require intervention; never turn a manual pause back on.
+    const blocked =
+      [401, 403, 404, 409].includes(status) ||
+      [
+        20101, 20151, 31201, 31202, 31203, 31204, 31206, 31207, 31209, 31210,
+        31212, 31401, 31402,
+      ].includes(code);
+    if (blocked) {
+      ++this.availabilityRevision;
+      if ([401, 403].includes(status) && this.call) this.hangup();
+      if (status === 404 && !this.call && !this.state.offer) {
+        this.device?.destroy();
+        this.device = null;
+        this.update({ registrationId: null, registered: false });
+      }
+      this.update({
+        wanted: false,
+        recovering: false,
+        error: code
+          ? `Réception interrompue (code ${code}). Vérifiez les autorisations du téléphone puis reprenez-la.`
+          : "La réception est en pause. Vérifiez votre connexion au compte et votre attribution puis reprenez-la.",
+      });
+      return;
+    }
+    if (!this.state.wanted) return;
+    this.failures++;
+    this.retryAt =
+      performance.now() +
+      Math.min(30_000, 2000 * 2 ** Math.min(this.failures - 1, 4));
+    this.update({
+      recovering: true,
+      error:
+        "Connexion à la réception interrompue. Reconnexion automatique en cours…",
+    });
   }
   private async received(call: IncomingMediaCall, generation: number) {
     if (this.call === call) return;
@@ -503,16 +612,27 @@ export class IncomingController {
         )
           this.update({ phase: "connected" });
       });
-    } catch {
+    } catch (error) {
       call.reject();
       if (!this.closed && generation === this.generation) {
         this.call = null;
         this.update({
-          wanted: false,
           phase: "idle",
           local: false,
-          error: "Cet appel n’a pas pu être vérifié. Reprenez la réception.",
         });
+        // A caller may have hung up while metadata was loading. A failed
+        // offer lookup does not revoke the receiver's own registration.
+        if (
+          error &&
+          typeof error === "object" &&
+          "status" in error &&
+          Number(error.status) === 404
+        )
+          this.update({
+            error:
+              "Cet appel n’est plus disponible. La réception reste ouverte.",
+          });
+        else this.failed(error);
       }
     }
   }
@@ -591,6 +711,11 @@ export class IncomingController {
     ++this.generation;
     this.device?.destroy();
     this.device = null;
+    this.tokenDueAt = Infinity;
+    this.renewDue = false;
+    this.retryAt = 0;
+    this.renewing = false;
+    this.polling = false;
     const id = this.state.registrationId;
     this.update({ registrationId: null, registered: false, phase: "idle" });
     if (id) void this.transport.leave(id).catch(() => {});
@@ -633,9 +758,13 @@ export class IncomingController {
     this.polling = false;
     this.renewing = false;
     this.lastHeartbeat = 0;
+    this.retryAt = 0;
+    this.tokenDueAt = Infinity;
+    this.renewDue = false;
     this.update({
       wanted: false,
       registered: false,
+      recovering: false,
       local: false,
       phase: this.state.offer ? "checking" : "idle",
     });

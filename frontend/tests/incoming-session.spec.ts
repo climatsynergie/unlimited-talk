@@ -5,13 +5,23 @@ import { disabledDialer } from "./fixtures/dialer-disabled";
 const queueId = "00000000-0000-0000-0000-000000000050";
 const offerId = "00000000-0000-0000-0000-000000000051";
 const registrationId = "00000000-0000-0000-0000-000000000052";
-type Proof = { disconnected: number; destroyed: number; created: number };
+type Proof = {
+  disconnected: number;
+  destroyed: number;
+  created: number;
+  registrations: number;
+  updatedTokens: number;
+  tokenRefreshMs: number;
+};
 async function setup(page: Page) {
   const fixture = {
     active: false,
     finished: false,
     accepted: false,
     epoch: 1,
+    tokenFailures: 0,
+    tokenRequests: 0,
+    startupHangs: 0,
     unexpected: [] as string[],
     logout: null as null | ((route: Route) => Promise<void>),
   };
@@ -136,6 +146,20 @@ async function setup(page: Page) {
       json: { id: registrationId, token: "SYNTHETIC_INCOMING_ONLY" },
     }),
   );
+  await page.route(
+    `**/api/inbound/reception/${registrationId}/token`,
+    (route) => {
+      fixture.tokenRequests++;
+      return fixture.tokenFailures-- > 0
+        ? route.fulfill({
+            status: 503,
+            json: { detail: "Coupure réseau simulée." },
+          })
+        : route.fulfill({
+            json: { token: "SYNTHETIC_RENEWED_TOKEN", expires_in: 300 },
+          });
+    },
+  );
   await page.route(`**/api/inbound/reception/${registrationId}`, (route) =>
     fixture.epoch === 1
       ? route.fulfill({
@@ -169,13 +193,14 @@ async function setup(page: Page) {
     route.fulfill({
       contentType: "text/javascript",
       body: `
-    window.incomingSessionProof={disconnected:0,destroyed:0,created:0};
+    window.incomingSessionProof={disconnected:0,destroyed:0,created:0,registrations:0,updatedTokens:0,tokenRefreshMs:0};
+    window.incomingSessionHangRegisters=${fixture.startupHangs};
     export class Device {
       state='unregistered'; handlers=new Map(); audio={setInputDevice:async()=>{},unsetInputDevice:async()=>{}};
-      constructor(){window.incomingSessionProof.created++;window.incomingSessionProof.device=this;}
+      constructor(token,options){window.incomingSessionProof.created++;window.incomingSessionProof.device=this;window.incomingSessionProof.tokenRefreshMs=options.tokenRefreshMs;}
       on(event,callback){this.handlers.set(event,callback);}
-      async register(){this.state='registered';this.handlers.get('registered')?.();}
-      updateToken(){}
+      async register(){window.incomingSessionProof.registrations++;if(window.incomingSessionHangRegisters>0){window.incomingSessionHangRegisters--;this.state='registering';return new Promise(()=>{});}this.state='registered';this.handlers.get('registered')?.();}
+      updateToken(){window.incomingSessionProof.updatedTokens++;}
       destroy(){window.incomingSessionProof.destroyed++;}
     }
     window.ringIncomingSession=()=>{
@@ -188,6 +213,121 @@ async function setup(page: Page) {
   );
   return fixture;
 }
+
+test("réception : inscription SDK bloquée puis reprise automatique avec un téléphone neuf", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  f.startupHangs = 1;
+  await page.goto("/appels-entrants");
+  await page
+    .getByRole("button", { name: "Recevoir les appels", exact: true })
+    .click();
+  await expect(
+    page.getByText("Connexion du téléphone…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Réception ouverte", { exact: true }),
+  ).toBeVisible({ timeout: 20_000 });
+  expect(f.tokenRequests).toBe(1);
+  expect((await proof(page)).created).toBe(2);
+  expect((await proof(page)).destroyed).toBe(1);
+  expect(f.unexpected).toEqual([]);
+});
+
+test("réception : erreur SDK sans événement de déconnexion puis nouvel appel sans deuxième clic", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await page.goto("/appels-entrants");
+  await page
+    .getByRole("button", { name: "Recevoir les appels", exact: true })
+    .click();
+  await expect(
+    page.getByText("Réception ouverte", { exact: true }),
+  ).toBeVisible();
+  expect((await proof(page)).tokenRefreshMs).toBe(60_000);
+  await page.evaluate(() => {
+    const device = (
+      window as unknown as {
+        incomingSessionProof: {
+          device: {
+            state: string;
+            handlers: Map<string, (error: { code: number }) => void>;
+          };
+        };
+      }
+    ).incomingSessionProof.device;
+    // SDK 2.18.5 can emit an error while its public state remains registered.
+    device.handlers.get("error")?.({ code: 53000 });
+  });
+  await expect(
+    page.getByText("Reconnexion automatique…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Recevoir les appels", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Réception ouverte", { exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  expect(f.tokenRequests).toBe(1);
+  expect((await proof(page)).registrations).toBe(2);
+  expect((await proof(page)).created).toBe(2);
+  expect((await proof(page)).destroyed).toBe(1);
+  f.active = true;
+  await page.evaluate(() =>
+    (
+      window as unknown as { ringIncomingSession: () => void }
+    ).ringIncomingSession(),
+  );
+  const bar = page.getByRole("complementary", {
+    name: "Appel entrant en cours",
+    exact: true,
+  });
+  await bar.getByRole("button", { name: "Répondre", exact: true }).click();
+  await expect(bar).toContainText("En conversation");
+  expect(f.unexpected).toEqual([]);
+});
+
+test("réception : renouvellement après trois indisponibilités sans pause et pause volontaire respectée", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await page.goto("/appels-entrants");
+  await page
+    .getByRole("button", { name: "Recevoir les appels", exact: true })
+    .click();
+  await expect(
+    page.getByText("Réception ouverte", { exact: true }),
+  ).toBeVisible();
+  f.tokenFailures = 3;
+  await page.evaluate(() => {
+    const device = (
+      window as unknown as {
+        incomingSessionProof: { device: { handlers: Map<string, () => void> } };
+      }
+    ).incomingSessionProof.device;
+    device.handlers.get("tokenWillExpire")?.();
+  });
+  await expect.poll(() => f.tokenRequests, { timeout: 25_000 }).toBe(4);
+  await expect(
+    page.getByText("Réception ouverte", { exact: true }),
+  ).toBeVisible();
+  expect((await proof(page)).updatedTokens).toBe(1);
+  await page
+    .getByRole("button", { name: "Mettre la réception en pause", exact: true })
+    .click();
+  await expect(
+    page.getByText("Réception en pause", { exact: true }),
+  ).toBeVisible();
+  const before = await proof(page);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(
+    page.getByRole("button", { name: "Recevoir les appels", exact: true }),
+  ).toBeVisible();
+  expect(await proof(page)).toEqual(before);
+  expect(f.unexpected).toEqual([]);
+});
 async function proof(page: Page) {
   return page.evaluate(
     () =>

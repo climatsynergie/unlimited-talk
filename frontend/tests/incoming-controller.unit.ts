@@ -16,6 +16,226 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const turn = () => new Promise<void>((r) => setImmediate(r));
+
+test("transient receiver signaling errors recover automatically without another reception click", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  f.handlers.error();
+  assert.equal(
+    f.controller.state.wanted,
+    true,
+    "network loss must preserve the agent's choice",
+  );
+  assert.equal(
+    f.controller.state.registered,
+    false,
+    "an offline device must not appear ready",
+  );
+  now += 30_000;
+  await f.controller.tick();
+  assert.equal(f.controller.state.registered, true);
+  assert.equal(f.controller.state.error, "");
+  assert.equal(f.stats().tokens, 1);
+  assert.equal(f.stats().registrations, 2);
+  assert.equal(f.stats().destroyed, 0);
+});
+
+test("repeated control-plane outages retain reception intent and recover without user intervention", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  const heartbeat = f.transport.heartbeat;
+  let attempts = 0;
+  f.transport.heartbeat = async () => {
+    attempts++;
+    throw new Error("synthetic network outage");
+  };
+  for (let i = 0; i < 4; i++) {
+    now += 30_000;
+    await f.controller.tick();
+  }
+  assert.equal(attempts, 4);
+  assert.equal(f.controller.state.wanted, true);
+  assert.match(f.controller.state.error, /automatique/);
+  f.transport.heartbeat = heartbeat;
+  now += 30_000;
+  await f.controller.tick();
+  assert.equal(f.controller.state.wanted, true);
+  assert.equal(f.controller.state.registered, true);
+  assert.equal(f.controller.state.error, "");
+});
+
+test("reception retry backoff is bounded and a manual pause cancels pending recovery", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  const token = f.transport.token;
+  let attempts = 0;
+  f.transport.token = async () => {
+    attempts++;
+    throw new Error("offline");
+  };
+  f.handlers.error({ code: 53000 });
+  for (const delay of [2000, 4000, 8000, 16000, 30000, 30000]) {
+    const before = attempts;
+    await f.controller.tick();
+    assert.equal(attempts, before, "polling must honor the retry delay");
+    now += delay;
+    await f.controller.tick();
+    assert.equal(attempts, before + 1);
+  }
+  await f.controller.pause();
+  f.transport.token = token;
+  now += 120_000;
+  await f.controller.tick();
+  assert.equal(f.controller.state.wanted, false);
+  assert.equal(f.controller.state.recovering, false);
+  assert.equal(f.stats().registrations, 1);
+  assert.equal(f.stats().destroyed, 1);
+});
+
+test("idle reception refreshes credentials before expiry even if the SDK warning was missed", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  now += 239_000;
+  await f.controller.tick();
+  assert.equal(f.stats().tokens, 0);
+  now += 1000;
+  await f.controller.tick();
+  assert.equal(f.stats().tokens, 1);
+  now += 240_000;
+  await f.controller.tick();
+  assert.equal(f.stats().tokens, 2);
+  assert.equal(f.controller.state.wanted, true);
+});
+
+for (const status of [401, 403, 404, 409]) {
+  test(`reception recovery stops on application access failure ${status}`, async (t) => {
+    const f = fixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.start();
+    f.transport.token = async () => {
+      throw { status };
+    };
+    f.handlers.tokenWillExpire();
+    await f.controller.tick();
+    assert.equal(f.controller.state.wanted, false);
+    assert.equal(f.controller.state.recovering, false);
+    assert.equal(f.stats().updatedTokens.length, 0);
+  });
+}
+
+for (const code of [20104, 31205]) {
+  test(`expired SDK token ${code} is refreshed without requiring another click`, async (t) => {
+    let now = 50_000;
+    t.mock.method(performance, "now", () => now);
+    const f = fixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.start();
+    f.handlers.error({ code });
+    now += 2000;
+    await f.controller.tick();
+    assert.equal(f.controller.state.wanted, true);
+    assert.equal(f.controller.state.registered, true);
+    assert.equal(f.stats().tokens, 1);
+  });
+}
+
+for (const code of [31202, 31401]) {
+  test(`invalid configuration or microphone denial ${code} requires intervention`, async (t) => {
+    let now = 50_000;
+    t.mock.method(performance, "now", () => now);
+    const f = fixture();
+    t.after(() => f.controller.dispose());
+    await f.controller.start();
+    f.handlers.error({ code });
+    now += 30_000;
+    await f.controller.tick();
+    assert.equal(f.controller.state.wanted, false);
+    assert.equal(f.stats().tokens, 0);
+    assert.match(f.controller.state.error, new RegExp(String(code)));
+  });
+}
+
+test("a delayed token cannot re-register a receiver after the agent manually paused it", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  const pending = deferred<{ token: string }>();
+  f.transport.token = () => pending.promise;
+  f.handlers.unregistered();
+  const renewal = f.controller.tick();
+  await turn();
+  await f.controller.pause();
+  pending.resolve({ token: "OBSOLETE_TOKEN" });
+  await renewal;
+  assert.equal(f.controller.state.wanted, false);
+  assert.equal(f.stats().updatedTokens.length, 0);
+  assert.equal(f.stats().registrations, 1);
+  // A superseded renewal must not leave the next lifecycle permanently locked.
+  f.transport.token = async () => ({ token: "CURRENT_TOKEN" });
+  await f.controller.start();
+  f.handlers.tokenWillExpire();
+  await f.controller.tick();
+  assert.equal(f.controller.state.wanted, true);
+  assert.deepEqual(f.stats().updatedTokens, ["CURRENT_TOKEN"]);
+});
+
+test("expired reception credentials recover after the call without resetting active audio", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  f.live = true;
+  const call = new f.Media();
+  f.handlers.incoming(call);
+  await turn();
+  await f.controller.accept();
+  f.handlers.error({ code: 20104 });
+  now += 30_000;
+  await f.controller.tick();
+  assert.equal(f.controller.state.wanted, true);
+  assert.equal(f.controller.state.phase, "connected");
+  assert.equal(f.stats().tokens, 0);
+  assert.equal(f.stats().destroyed, 0);
+  assert.equal(f.stats().disconnected, 0);
+  f.offer.state = "finished";
+  f.offer.call_state = "finished";
+  f.live = false;
+  call.emit("disconnect");
+  await turn();
+  await f.controller.tick();
+  assert.equal(f.stats().tokens, 1);
+  assert.equal(f.controller.state.registered, true);
+  assert.equal(f.controller.state.wanted, true);
+  assert.equal(f.controller.state.offer, null);
+});
+
+test("a delayed pause acknowledgement cannot close a newly resumed idle receiver", async (t) => {
+  const f = fixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.start();
+  const gate = deferred<null>();
+  f.heartbeatGate = gate;
+  const pause = f.controller.pause();
+  const resume = f.controller.start();
+  gate.resolve(null);
+  await Promise.all([pause, resume]);
+  assert.equal(f.controller.state.wanted, true);
+  assert.equal(f.controller.state.registered, true);
+  assert.equal(f.stats().destroyed, 0);
+});
 function fixture() {
   const offer: IncomingOffer = {
     id: offerId,
@@ -251,22 +471,36 @@ test("logout during setup destroys a late device and ignores its callbacks", asy
   assert.equal(f.stats().busy, false);
   f.controller.dispose();
 });
-test("three network failures pause new reception without dropping existing audio", async () => {
+test("repeated network failures recover reception without dropping existing audio", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
   const f = fixture();
   await f.controller.start();
   f.live = true;
   f.handlers.incoming(new f.Media());
   await turn();
   await f.controller.accept();
+  const offer = f.transport.offer;
+  let failures = 0;
   f.transport.offer = async () => {
+    failures++;
     throw new Error("network");
   };
-  await f.controller.tick();
-  await f.controller.tick();
-  await f.controller.tick();
-  assert.equal(f.controller.state.wanted, false);
+  for (let i = 0; i < 3; i++) {
+    now += 30_000;
+    await f.controller.tick();
+  }
+  assert.equal(failures, 3);
+  assert.equal(f.controller.state.wanted, true);
+  assert.equal(f.controller.state.recovering, true);
   assert.equal(f.stats().disconnected, 0);
   assert.equal(f.stats().busy, true);
+  f.transport.offer = offer;
+  now += 30_000;
+  await f.controller.tick();
+  assert.equal(f.controller.state.recovering, false);
+  assert.equal(f.controller.state.phase, "connected");
+  assert.equal(f.stats().disconnected, 0);
   f.controller.dispose();
 });
 
@@ -302,8 +536,8 @@ test("a late initial heartbeat failure cannot destroy an accepted incoming call"
   assert.equal(f.controller.state.local, true);
   assert.equal(
     f.controller.state.wanted,
-    false,
-    "only future offers should pause",
+    true,
+    "network recovery must retain reception intent",
   );
 });
 
@@ -363,7 +597,9 @@ test("idle incoming token renewal updates the existing device and restores lost 
   assert.equal(f.stats().destroyed, 0);
 });
 
-test("idle token network failures pause reception and explicit retry renews without replacing media", async (t) => {
+test("idle token network failures back off and renew automatically without replacing media", async (t) => {
+  let now = 50_000;
+  t.mock.method(performance, "now", () => now);
   const f = fixture();
   t.after(() => f.controller.dispose());
   await f.controller.start();
@@ -381,14 +617,18 @@ test("idle token network failures pause reception and explicit retry renews with
     "one transient failure permits retry",
   );
   await f.controller.tick();
+  now += 30_000;
+  await f.controller.tick();
+  now += 30_000;
   await f.controller.tick();
   assert.equal(attempts, 3);
-  assert.equal(f.controller.state.wanted, false);
-  assert.match(f.controller.state.error, /perte de connexion/);
+  assert.equal(f.controller.state.wanted, true);
+  assert.match(f.controller.state.error, /automatique/);
   assert.deepEqual(f.stats().updatedTokens, []);
   assert.equal(f.stats().destroyed, 0);
   f.transport.token = token;
-  await f.controller.start();
+  now += 30_000;
+  await f.controller.tick();
   assert.equal(f.controller.state.wanted, true);
   assert.equal(f.controller.state.registered, true);
   assert.equal(f.stats().tokens, 1);

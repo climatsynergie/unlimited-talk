@@ -130,6 +130,29 @@ function makeDevice(t, token = jwt()) {
 }
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
+test("actual incoming SDK expiry stops presence renewal while Device.state still says registered", (t) => {
+  isolate(t);
+  const { device, stream } = makeDevice(t);
+  device._setState(Device.State.Registered);
+  const stopped = t.mock.method(device, "_stopRegistrationTimer");
+  const observed = [];
+  device.on("error", (error) => observed.push(error.code));
+  stream.emit("error", {
+    error: { code: 31205, message: "Synthetic expired JWT" },
+  });
+  assert.equal(stopped.mock.callCount(), 1);
+  assert.equal(
+    device.state,
+    "registered",
+    "SDK state alone cannot prove working reception after an error",
+  );
+  assert.deepEqual(
+    observed,
+    [20104],
+    "precise SDK mode maps legacy expiry to 20104",
+  );
+});
+
 test(
   "SDK 2.18.5 outgoing errors lack a Call association; actual incoming offers use the calls list",
   { timeout: 5_000 },

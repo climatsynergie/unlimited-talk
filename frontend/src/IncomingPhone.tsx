@@ -26,11 +26,15 @@ export function ReceptionControl() {
           réception reste ouverte lorsque vous changez de page.
         </p>
         <p role="status">
-          {state.wanted && state.registered
-            ? "Réception ouverte"
-            : state.phase === "registering"
-              ? labels.registering
-              : "Réception en pause"}
+          {state.wanted &&
+          (state.recovering || !state.registered) &&
+          state.phase !== "registering"
+            ? "Reconnexion automatique…"
+            : state.wanted && state.registered
+              ? "Réception ouverte"
+              : state.phase === "registering"
+                ? labels.registering
+                : "Réception en pause"}
         </p>
         {state.queues.length ? (
           <small>{state.queues.map((q) => q.name).join(" · ")}</small>

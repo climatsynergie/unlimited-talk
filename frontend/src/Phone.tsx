@@ -245,7 +245,17 @@ export function PhoneProvider({
   useEffect(() => {
     if (!reception.registrationId && !reception.offer) return;
     const timer = window.setInterval(() => void incoming.tick(), 2000);
-    return () => clearInterval(timer);
+    const online = () => incoming.wake();
+    const visible = () => {
+      if (document.visibilityState === "visible") incoming.wake();
+    };
+    window.addEventListener("online", online);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("online", online);
+      document.removeEventListener("visibilitychange", visible);
+    };
   }, [incoming, reception.registrationId, reception.offer?.id]);
   useEffect(() => {
     if (!reception.local) return;
