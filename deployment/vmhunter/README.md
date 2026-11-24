@@ -1,4 +1,94 @@
-# VM Hunter pilot: observation only
+# VM Hunter: observation and pre-agent screening
+
+Both modes are disabled by default. The normal application deployment does not
+install the optional overlay or supply an enabled private policy. Incoming and
+manual calls are excluded. No database migration is introduced.
+
+`pilot.example.json` retains version-1 observation, described in the historical
+section below. `pilot.screen.example.json` adds version-2 screening with separate
+`audio_approved` and `screening_approved` booleans. The inactive example has no
+selected agents or numbers. Both modes require the intersection of campaign,
+1–2 selected agents and 1–10 consenting test numbers. PostgreSQL rechecks current
+assignment, active users and campaign, transactional budget and concurrent jobs.
+
+## Screening call flow
+
+1. The committed reservation adds a `Number url` whisper to the original Dial.
+   `answerOnBridge` keeps the agent on ringing until it finishes. Recordings,
+   callbacks, caller selection and the 30-minute limit stay with that Dial.
+2. A signed account/parent/child-bound webhook requests analysis from the private
+   sidecar. Missing service, admission limits and provider cooldown bypass the
+   greeting and connect normally.
+3. The client hears **« Bonjour, ici Maisonverte Québec. Un conseiller vous répond
+   dans un instant. »**, followed by a one-second DTMF wait. The whisper uses
+   supported `Gather`/`Say` verbs; no unsupported `Start/Stream` or `Pause`.
+4. The signed result rejects only `MACHINE/MACHINE` or `MACHINE/MACHINE_BEEP`
+   with confirmed cleanup, an unchanged approved policy and a decision window
+   younger than eight seconds. Human, silence, MAXWORD, noise, screening
+   assistants, disconnect tones, unknown causes, auth/quota errors, missing
+   results and any caller DTMF (including `#`) connect normally. Late results
+   cannot reverse an already released decision.
+5. Verified machines use the existing voicemail disposition, excluded from
+   answered-conversation and talk totals. The pipeline becomes `Pas de réponse`
+   only if no newer human edit, appointment, callback or restriction wins.
+   Filtering does not pause the dialer; the usual ten-second wrap-up applies.
+
+There is no REST call creation, redirect or hangup. Only the signed whisper can
+return `Hangup` on the approved child. Manual pause/stop remains authoritative.
+No broad browser SDK error suppression was added: actual SDK behavior needs
+real-call acceptance.
+
+The sidecar samples only the PSTN child's inbound audio. Audio is bounded to
+3.5 seconds, the provider deadline to five seconds and the whole job to nine
+seconds. A stale screening result cannot reject after eight seconds. These
+bounds do not promise a particular live connection delay.
+
+Provider auth/quota/subscription errors add a 30-second admission cooldown;
+other failed analyses add two seconds. Calls bypass the filter during cooldown.
+Unconfirmed stream cleanup and stale claims also retain the existing durable
+orphan circuit across restarts. Review/stop orphan streams before recovery;
+SIGKILL cannot run in-memory cleanup. Keys, raw audio, transcripts, capabilities
+and provider response bodies are not added to application logs.
+
+## Activation and rollback gates
+
+- Resolve processing geography and consent: the published cloud DPA states US
+  hosting. The answer about Canada is still ambiguous; do not transfer customer
+  audio on that basis.
+- Choose agents and consenting test numbers; complete current CI/provenance,
+  security review and explicitly authorized guarded deployment during call drain.
+- Use private files readable by UID 10001 and a root-private enclosing directory.
+  The optional overlay mounts exactly five secrets, runs non-root/read-only,
+  and has no published sidecar port. Never put keys in Git, arguments or chat.
+- Verify TLS egress, real key permissions, metering and public WSS at exactly
+  `/api/telephony/vmhunter/media`. Keep `/private/observe` internal.
+- Signed POST routes `screen-start/{uuid}` and `screen-result/{uuid}` under
+  `/api/telephony/twilio/` must pass the perimeter. Optional
+  `public-routes.caddy` narrows the exceptions; never exempt the whole app.
+- Complete human/voicemail/silence/screening-assistant trials first with one
+  agent, then two concurrently. Listen both ways, inspect recordings, measure
+  greeting/connection delay, verify stream stopping and the next call without
+  auto-pause. Synthetic verdicts do not establish real accuracy or SDK behavior.
+- Native-library security blockers remain documented in QA reports. Automated
+  functionality checks are not a production GO decision.
+
+To disable new screening, replace the private policy with its disabled example
+or remove `VMHUNTER_PILOT_FILE`. Keep services/keys available until pending jobs
+and calls drain. Disabling during a whisper releases it at its next decision.
+Verify no orphan streams before stopping the sidecar or rolling back the image.
+Preserve append-only events: no destructive schema downgrade is needed.
+
+Real acceptance must be separately authorized. Stop on lost audio, an erroneous
+human rejection, auto-pause, orphan stream or unacceptable delay/usage. The
+requested greeting changes speech timing; VM Hunter recommends no prompt during
+analysis. That tradeoff requires volunteers and human labels, not just mocks.
+Two-agent simulations do not prove capacity for 17–20 real agents or transfers.
+
+## Historical version-1 observation notes
+
+The following describes the preceding observation-only build. Statements about
+unimplemented screening apply to version 1; version 2 above implements it but
+has not passed real-call acceptance or production activation gates.
 
 This optional integration is **not activated or deployed** by the normal release.
 It does not create, redirect or hang up calls. The existing browser-first

@@ -39,6 +39,7 @@ class Streams:
 class ObserverTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.received=[]
+        self.answer={'AMDSTATUS':'MACHINE','AMDCAUSE':'MACHINE_BEEP'}
         async def provider(request):
             ws=web.WebSocketResponse();await ws.prepare(request)
             self.received.append(await ws.receive_json())
@@ -46,7 +47,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
                 message=await ws.receive()
                 self.received.append(message.data)
                 if message.type==aiohttp.WSMsgType.BINARY:
-                    await ws.send_json({'AMDSTATUS':'MACHINE','AMDCAUSE':'MACHINE_BEEP'})
+                    await ws.send_json(self.answer)
             finally:await ws.close()
             return ws
         provider_app=web.Application();provider_app.router.add_get('/ws',provider)
@@ -156,6 +157,21 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.store.claims.clear()
         self.assertEqual(await self.dispatch(),202)
         self.assertFalse(self.store.claims)
+
+    async def test_auth_failure_bypasses_new_analysis_until_backoff_expires(self):
+        self.answer={'AMDSTATUS':'FAILED','AMDCAUSE':'AUTH_FAILED'}
+        self.observer.clock=lambda:100.0
+        await self.dispatch();await self.streams.started.wait()
+        async with await self.twilio() as ws:
+            await ws.send_json(media());await ws.receive()
+        await self.finish()
+        self.assertEqual(self.observer.backoff_until,130.0)
+        self.store.claims.clear()
+        await self.dispatch()
+        self.assertFalse(self.store.claims)
+        self.observer.clock=lambda:131.0
+        await self.dispatch()
+        self.assertEqual(len(self.store.claims),1)
 
     async def test_shutdown_stops_active_stream_and_persists_failure(self):
         await self.dispatch();await self.streams.started.wait()

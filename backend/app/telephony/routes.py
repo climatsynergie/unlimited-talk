@@ -165,16 +165,20 @@ def apply_webhook(request, configured, kind, identifier, params):
     try:
         destination = None
         ring_seconds = None
+        screening = False
         with request.app.state.engine.begin() as db:
             if kind == 'voice':
                 accepted = getattr(request.app.state, 'voice_calling_enabled', False) and service.consume(db, configured, params)
                 if accepted:
-                    selected = identity.query(db, 'SELECT destination,caller_number,campaign_id FROM staging.voice_intents WHERE id=:id',
+                    selected = identity.query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id',
                                               id=UUID(params['Intent'])).mappings().one()
                     destination = selected['destination']
                     if isinstance(configured,ManualVoiceProfile):
                         policy=dialer_policy.settings(db,selected['campaign_id']) if selected['campaign_id'] else None
                         ring_seconds=policy['policy']['ring_seconds'] if policy else 35
+                        if os.environ.get('VMHUNTER_PILOT_FILE'):
+                            from app.telephony.vmhunter_screen import prepare
+                            screening = prepare(db, configured, selected)
             else:
                 service.notify(db, configured, kind, identifier, params)
                 accepted = False
@@ -183,7 +187,7 @@ def apply_webhook(request, configured, kind, identifier, params):
     # DB commit precedes the only response that can create the external call.
     # Replays and revoked/expired reservations receive Hangup, never another Dial.
     if accepted:
-        return controlled_call_twiml(configured, UUID(params['Intent']), destination,selected['caller_number'],ring_seconds=ring_seconds)
+        return controlled_call_twiml(configured, UUID(params['Intent']), destination,selected['caller_number'],ring_seconds=ring_seconds,screening=screening)
     return HANGUP
 
 
@@ -227,3 +231,19 @@ async def finish(identifier: UUID, request: Request):
 @router.post('/twilio/recording/{identifier}', include_in_schema=False)
 async def recording(identifier: UUID, request: Request):
     return await callback(request, 'recording', identifier)
+
+
+@router.post('/twilio/screen-start/{identifier}', include_in_schema=False)
+async def screen_start(identifier: UUID, request: Request):
+    from app.telephony.vmhunter_screen import start
+    configured, params = await signed_form(request, 'screen-start', identifier)
+    xml = await start(request, configured, identifier, params)
+    return Response(xml, media_type='application/xml')
+
+
+@router.post('/twilio/screen-result/{identifier}', include_in_schema=False)
+async def screen_result(identifier: UUID, request: Request):
+    from app.telephony.vmhunter_screen import finish
+    configured, params = await signed_form(request, 'screen-result', identifier)
+    xml = await finish(request, configured, identifier, params)
+    return Response(xml, media_type='application/xml')

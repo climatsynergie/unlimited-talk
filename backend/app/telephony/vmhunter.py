@@ -1,7 +1,8 @@
-"""Bounded VM Hunter protocol. No call creation, hangup or CRM mutation.
+"""Bounded VM Hunter protocol. No provider call creation or CRM mutation.
 
 Cloud transport is intentionally separate from the phone state machine. The
-first pilot observes classifications; it cannot change call dispositions.
+first pilot observes classifications. Explicitly approved screening uses a
+separate decision function which preserves uncertain and failed calls.
 """
 import asyncio
 import base64
@@ -110,15 +111,25 @@ class Pilot:
     max_analyses: int
     test_numbers: frozenset
     audio_approved: bool
+    mode: str = 'observe'
+    screening_approved: bool = False
 
     @classmethod
     def parse(cls, value):
         try:
-            if (not isinstance(value, dict) or set(value) != {
+            if not isinstance(value, dict):
+                raise ProtocolError()
+            version = value.get('version')
+            screening = type(version) is int and version == 2
+            expected = {
                     'version', 'pilot_id', 'enabled', 'mode', 'campaign_id',
                     'agent_ids', 'max_analyses', 'test_numbers', 'audio_approved'}
-                    or type(value['version']) is not int or value['version'] != 1
-                    or value['mode'] != 'observe'
+            if screening:
+                expected.add('screening_approved')
+            if (set(value) != expected
+                    or type(version) is not int or version not in {1, 2}
+                    or value['mode'] != ('screen' if screening else 'observe')
+                    or screening and type(value['screening_approved']) is not bool
                     or UUID(value['campaign_id']) != PILOT_CAMPAIGN
                     or type(value['enabled']) is not bool
                     or type(value['audio_approved']) is not bool
@@ -133,10 +144,12 @@ class Pilot:
                     or len(numbers) != len(value['test_numbers']) or len(numbers) > 10
                     or any(not isinstance(number, str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}', number)
                            for number in numbers)
-                    or value['enabled'] and (not agents or not numbers or not value['audio_approved'])):
+                    or value['enabled'] and (not agents or not numbers or not value['audio_approved']
+                        or screening and not value['screening_approved'])):
                 raise ProtocolError()
             return cls(UUID(value['pilot_id']), value['enabled'], agents,
-                       value['max_analyses'], numbers, value['audio_approved'])
+                       value['max_analyses'], numbers, value['audio_approved'],
+                       value['mode'], value.get('screening_approved', False))
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ProtocolError() from None
 
@@ -146,7 +159,18 @@ class Pilot:
             and row.get('actor_id') in self.agents
             and row.get('destination') in self.test_numbers
             and row.get('dialer_generation') is not None
-            and row.get('state') == 'answered')
+            and row.get('state') in ({'authorized', 'ringing', 'answered'}
+                                    if self.mode == 'screen' and self.screening_approved else {'answered'}))
+
+
+def screen_action(result, *, stop_confirmed):
+    """Only explicit machine/beep decisions with completed cleanup can reject.
+
+    Silence, noise, cut-off speech, call screening, disconnected-number tones,
+    provider failures and future/unknown causes must reach the agent.
+    """
+    return ('hangup' if stop_confirmed is True and result.status == 'MACHINE'
+            and result.cause in {'MACHINE', 'MACHINE_BEEP'} else 'continue')
 
 
 def ticket(secret, kind, payload, *, now=None):

@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "pilot_id": "a0f88e1d-144f-4af2-8b26-078a99da0bd0",
+  "enabled": false,
+  "mode": "screen",
+  "campaign_id": "2bdf5195-0b52-49b1-aecc-0caaf5459e77",
+  "agent_ids": [],
+  "max_analyses": 500,
+  "test_numbers": [],
+  "audio_approved": false,
+  "screening_approved": false
+}

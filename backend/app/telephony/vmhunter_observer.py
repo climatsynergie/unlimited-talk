@@ -1,7 +1,7 @@
-"""Opt-in observation sidecar. It can start/stop media streams, never calls.
+"""Opt-in audio-analysis sidecar. It can start/stop media streams, never calls.
 
 Not enabled by the normal application or deployment. A signed child-answer
-callback merely queues a bounded internal observation request after its commit.
+callback or signed pre-bridge hook queues a bounded internal analysis request.
 The sidecar independently rechecks the campaign, agent, test number and budget.
 """
 import asyncio
@@ -37,7 +37,7 @@ async def dispatch(profile, identifier, params):
         return
     try:
         pilot = policy_from_file(path)
-        if not pilot.enabled:
+        if not pilot.enabled or pilot.mode != 'observe':
             return
         payload = {'intent_id': str(identifier), 'call_sid': params['CallSid'],
                    'pilot_id': str(pilot.identifier)}
@@ -74,6 +74,16 @@ class Store:
                 FOR UPDATE OF i'''), {'id': identifier, 'account': self.profile.account_sid, 'call': call}).mappings().first()
             if not row or not self.pilot.includes(row):
                 return None
+            if self.pilot.mode == 'screen':
+                snapshot = db.execute(text("SELECT details FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.screen'"),
+                                      {'id': identifier}).scalar_one_or_none()
+                started = db.execute(text("SELECT 1 FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.screen.started'"),
+                                     {'id': identifier}).first()
+                decided = db.execute(text("SELECT 1 FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.screen.decision'"),
+                                     {'id': identifier}).first()
+                if (snapshot != {'pilot_id': str(pilot_id), 'mode': 'screen'}
+                        or not started or decided or not self.pilot.screening_approved):
+                    return None
             existing = db.execute(text("SELECT 1 FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.claim' LIMIT 1"),
                                   {'id': identifier}).first()
             if existing:
@@ -197,13 +207,14 @@ class Streams:
 
 
 class Observer:
-    def __init__(self, profile, pilot, store, streams, provider, *, job_seconds=9, handshake_seconds=2):
+    def __init__(self, profile, pilot, store, streams, provider, *, job_seconds=9, handshake_seconds=2, clock=time.monotonic):
         self.profile, self.pilot, self.store = profile, pilot, store
         self.streams, self.provider = streams, provider
         self.jobs = {}
         self.handshakes = 0
         self.degraded = False
         self.job_seconds, self.handshake_seconds = job_seconds, handshake_seconds
+        self.clock, self.backoff_until = clock, 0.0
 
     async def observe(self, request):
         try:
@@ -214,13 +225,14 @@ class Observer:
             parse_payload(payload)
         except (vm.ProtocolError, web.HTTPRequestEntityTooLarge):
             return web.Response(status=403)
-        if not self.pilot.enabled or self.degraded or len(self.jobs) >= 2:
-            return web.Response(status=202)
+        if (not self.pilot.enabled or self.degraded or len(self.jobs) >= 2
+                or self.clock() < self.backoff_until):
+            return web.json_response({'accepted': False}, status=202)
         try:
             claimed = await asyncio.to_thread(self.store.claim, payload)
         except Exception:
             log.warning('vmhunter_claim_unavailable')
-            return web.Response(status=202)
+            return web.json_response({'accepted': False}, status=202)
         if claimed:
             nonce = claimed['nonce']
             # No await between admission and registration of this local job.
@@ -228,7 +240,7 @@ class Observer:
                    'done': asyncio.get_running_loop().create_future()}
             self.jobs[nonce] = job
             job['task'] = asyncio.create_task(self.run(job))
-        return web.Response(status=202)
+        return web.json_response({'accepted': bool(claimed)}, status=202)
 
     async def run(self, job):
         payload = job['payload']
@@ -242,6 +254,9 @@ class Observer:
         except Exception:
             log.warning('vmhunter_stream_unavailable')
         finally:
+            if result.status == 'FAILED':
+                seconds = 30 if result.cause in {'AUTH_FAILED', 'LIMIT_REACHED', 'PERIOD_EXPIRED', 'NO_SUBSCRIPTION'} else 2
+                self.backoff_until = max(self.backoff_until, self.clock() + seconds)
             # Always stop billing, including on timeout, disconnect or shutdown.
             if job['socket']:
                 with suppress(Exception):
@@ -322,8 +337,9 @@ def application(observer):
     app.router.add_get(MEDIA_PATH, observer.media)
 
     async def live(_request):
-        return web.json_response({'status': 'alive', 'mode': 'observe',
-                                  'accepting': observer.pilot.enabled and not observer.degraded})
+        return web.json_response({'status': 'alive', 'mode': observer.pilot.mode,
+                                  'accepting': observer.pilot.enabled and not observer.degraded
+                                      and observer.clock() >= observer.backoff_until})
     app.router.add_get('/health/live', live)
 
     async def cleanup(_app):
