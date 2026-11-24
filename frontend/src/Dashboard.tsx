@@ -246,7 +246,7 @@ function Bars({
 export function Dashboard() {
   const [draft, setDraft] = useState<Filters>(() => {
     const end = today("America/Toronto");
-    return { start: dayBefore(end, 6), end, timezone: "America/Toronto" };
+    return { start: end, end, timezone: "America/Toronto" };
   });
   const [filters, setFilters] = useState(draft);
   const [selected, setSelected] = useState("");
