@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
+import time
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -109,7 +110,6 @@ third_payload=dict(intent_id=str(third),call_sid=third_child,pilot_id=str(pilot.
 assert store.claim(third_payload) is None
 expanded=Store(engine,profile,replace(pilot,max_analyses=3))
 third_claim=expanded.claim(third_payload);assert third_claim is not None
-expanded.result(third_claim,vm.Result('FAILED','stream_unavailable'),stop_confirmed=False)
 # A new process/store must not reset an unconfirmed-stop circuit. Simulate the
 # next eligible call with an expanded budget so only the circuit can reject it.
 fourth=uuid4();fourth_child='CA'+uuid4().hex
@@ -123,6 +123,11 @@ with engine.begin() as db:
             campaign_id,contact_id,caller_number_id,dialer_generation,:browser FROM staging.voice_intents WHERE id=:old""",
         id=fourth,parent='CA'+uuid4().hex,child=fourth_child,browser=uuid4(),old=third)
 restarted=Store(engine,profile,replace(pilot,max_analyses=4))
+# Let the actual DB lease window expire instead of bypassing append-only event
+# permissions or weakening the production timeout in order to test recovery.
+time.sleep(20.1)
+assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
+expanded.result(third_claim,vm.Result('FAILED','stream_unavailable'),stop_confirmed=False)
 assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
 # Leave no active synthetic calls for the surrounding API regression suite.
 with engine.begin() as db:
@@ -133,5 +138,6 @@ with engine.begin() as db:
 # no destructive migration. Verify predecessor imports/reads in a separate proof.
 print(json.dumps({'schema':'0012_incoming_runtime','competing_claims':2,'granted_claims':1,
     'idempotent_results':True,'scoped_assignment':True,'phone_and_pipeline_facts_unchanged':True,'analysis_budget_enforced':True,
-    'migration_required':False,'stop_failure_circuit_survives_restart':True,'external_calls':0}))
+    'migration_required':False,'stale_claim_circuit_survives_restart':True,
+    'stop_failure_circuit_survives_restart':True,'external_calls':0}))
 engine.dispose()
