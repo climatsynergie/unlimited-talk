@@ -43,12 +43,47 @@ Evidence: `qa-reports/evidence/vmhunter-helper-install-20261124.{json,log}`
 and installer source in the same evidence directory. Final committed-source
 tests: exit 0, 11 tests (`vmhunter-credential-final-20261124.{json,log}`).
 
+## PASS — user credential entry and campaign identity
+
+User reported completing entry. Executed root-server command:
+
+```sh
+python3 /root/store-vmhunter-credentials.py status
+```
+
+Exit 0: stored configuration and file protections validated without displaying
+the key. This does not authenticate the key with the provider.
+
+User selected “chin list 514 region”; confirmed exact campaign:
+`CHIN LIST 514_REGION`, UUID `2bdf5195-0b52-49b1-aecc-0caaf5459e77`.
+It is active, uses `America/Toronto`, has 9 active assigned agents and its existing
+automatic dialer is enabled. No campaign settings or assignments were changed.
+
+Executed command:
+
+```sh
+python3 qa-reports/tools/run_check.py vmhunter-campaign-inspection-20261124 -- python3 qa-reports/evidence/vmhunter_campaign_inspect_20261124.py
+```
+
+Exit 0. PostgreSQL `SHOW transaction_read_only` returned `on`; bounded,
+parameterized inspection with 3-second statement timeout. Evidence:
+`qa-reports/evidence/vmhunter-campaign-inspection-20261124.{json,log}` and
+inspection script in that directory.
+
+Pilot design must select BOTH this immutable campaign ID and explicitly chosen
+pilot agent IDs, never all 9 campaign members by default. Agent choices remain
+pending. Manual calls, other campaigns and inbound reception remain out of scope.
+The existing outgoing call generator is agent-first `Dial/Number` with dual
+recording, child-leg status callbacks and a dial-finish callback. Screening before
+agent connection needs a separately tested flow preserving those contracts.
+No media bridge or filtering code has been installed or enabled.
+
 ## NOT TESTED / pending
 
-- User credential entry and provider authentication.
+- Provider authentication.
 - Media stream conversion and integration, classification and call routing.
 - Failure recovery and real-call acceptance with agents.
-- Campaign and pilot agent selection; customer-facing greeting.
+- Pilot agent selection and customer-facing greeting.
 - Provider audio-processing terms and training opt-out confirmation.
 
 The pilot remains inactive. This report does not claim telephony readiness.
