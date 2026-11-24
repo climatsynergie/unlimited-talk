@@ -42,6 +42,10 @@ The sidecar samples only the PSTN child's inbound audio. Audio is bounded to
 3.5 seconds, the provider deadline to five seconds and the whole job to nine
 seconds. A stale screening result cannot reject after eight seconds. These
 bounds do not promise a particular live connection delay.
+The window starts at the first observed PSTN answer or whisper, not at the
+reservation: a long ringing period does not expire it. If a DB outage prevented
+screen-start from being recorded, the ordinary answer still recovers after the
+bounded window; a delayed start cannot reopen screening after that recovery.
 
 Provider auth/quota/subscription errors add a 30-second admission cooldown;
 other failed analyses add two seconds. Calls bypass the filter during cooldown.

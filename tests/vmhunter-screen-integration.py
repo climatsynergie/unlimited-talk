@@ -307,11 +307,38 @@ async def main():
         expired=new_call();await voice(session,expired);await progress(session,expired)
         fields=dict(CallSid=expired['child'],ParentCallSid=expired['parent'])
         await signed(session,'screen-start',expired,fields);await wait_result(expired)
+        # A transient DB failure can return the ordinary bridge before a
+        # screen-start event exists. Its later answer status must still recover.
+        from unittest.mock import patch
+        from sqlalchemy.exc import OperationalError
+        no_start=new_call(1);await voice(session,no_start);await progress(session,no_start)
+        with patch.object(screen,'begin',side_effect=OperationalError('synthetic outage',{},None)):
+            assert len(list(await signed(session,'screen-start',no_start,
+                dict(CallSid=no_start['child'],ParentCallSid=no_start['parent']))))==0
+        assert not events(no_start,'vmhunter.screen.started')
         await asyncio.sleep(8.1)
+        await progress(session,no_start,sequence='1')
+        assert row(no_start)['state']=='answered','Missing screen-start blocked ordinary status recovery indefinitely'
+        before=streams.started
+        assert len(list(await signed(session,'screen-start',no_start,
+            dict(CallSid=no_start['child'],ParentCallSid=no_start['parent']))))==0
+        assert streams.started==before,'Delayed screen-start restarted analysis after ordinary recovery'
+        assert not events(no_start,'disposition.voicemail');await finish_call(session,no_start)
         await progress(session,expired,sequence='1')
         assert row(expired)['state']=='answered','Expired screening blocked ordinary status recovery'
         assert len(list(await signed(session,'screen-result',expired,fields)))==0
         assert not events(expired,'disposition.voicemail');await finish_call(session,expired)
+
+        # Ringing time is not screening time: an older reservation must still
+        # screen normally once the called party actually answers.
+        long_ring=new_call(1);await voice(session,long_ring)
+        await asyncio.sleep(8.1)
+        await progress(session,long_ring)
+        fields=dict(CallSid=long_ring['child'],ParentCallSid=long_ring['parent'])
+        assert (await signed(session,'screen-start',long_ring,fields)).find('Gather') is not None
+        await wait_result(long_ring)
+        assert (await signed(session,'screen-result',long_ring,fields)).find('Hangup') is not None
+        await finish_call(session,long_ring)
 
         # Agent pause and stop affect the next call, and must never be undone by
         # a current call's successful filtering/completion.
@@ -376,11 +403,13 @@ async def main():
 
         assert provider_audio and all(frame==b'\0'*320 for frame in provider_audio)
         assert all(config['config']['sample_rate']==8000 for config in provider_configs)
-        print(json.dumps({'signed_voice_to_prebridge_pipeline':True,'safe_decisions':len(results)+8,
+        print(json.dumps({'signed_voice_to_prebridge_pipeline':True,'safe_decisions':len(results)+10,
             'real_local_two_agent_concurrency':True,'voicemail_excluded_from_talk':True,
             'voicemail_pipeline_no_answer':True,'dialers_remain_running':True,
             'manual_and_unselected_unchanged':True,'human_pipeline_edit_preserved':True,'actual_deadline_recovery':True,
             'explicit_pause_and_stop_preserved':True,
+            'missing_start_database_outage_recovers':True,
+            'late_start_cannot_reverse_recovery':True,'ringing_does_not_expire_screening':True,
             'provider_analyses':len(provider_configs),'real_calls':0}))
     finally:
         screen.RPC_URL=old_rpc

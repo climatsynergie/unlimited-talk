@@ -65,15 +65,24 @@ def prepare(db, profile, row):
 
 
 def pending(db, identifier):
+    # A fail-open DB outage in screen-start can leave no started event at all.
+    # Anchor the first observed PSTN answer as well, not the reservation: ringing
+    # can last much longer than the screening window. The same row lock used by
+    # advance/begin serializes this append-only, idempotent recovery marker.
+    if query(db, '''SELECT 1 FROM staging.voice_events s
+        WHERE s.intent_id=:id AND s.kind='vmhunter.screen'
+        AND NOT EXISTS (SELECT 1 FROM staging.voice_events b WHERE b.intent_id=s.intent_id
+            AND b.kind IN ('vmhunter.screen.started','vmhunter.screen.waiting','vmhunter.screen.decision'))
+        LIMIT 1''', id=identifier).first():
+        service.event(db, identifier, 'vmhunter.screen.waiting', {})
     return query(db, '''SELECT 1 FROM staging.voice_events s
         WHERE s.intent_id=:id AND s.kind='vmhunter.screen'
         AND NOT EXISTS (SELECT 1 FROM staging.voice_events d
             WHERE d.intent_id=s.intent_id AND d.kind='vmhunter.screen.decision'
                 AND d.details->>'action'='continue')
-        AND (NOT EXISTS (SELECT 1 FROM staging.voice_events b
-                WHERE b.intent_id=s.intent_id AND b.kind='vmhunter.screen.started')
-            OR EXISTS (SELECT 1 FROM staging.voice_events b WHERE b.intent_id=s.intent_id
-                AND b.kind='vmhunter.screen.started' AND b.created_at>clock_timestamp()-interval '8 seconds')
+        AND ((SELECT min(b.created_at) FROM staging.voice_events b WHERE b.intent_id=s.intent_id
+                AND b.kind IN ('vmhunter.screen.started','vmhunter.screen.waiting'))
+                    >clock_timestamp()-interval '8 seconds'
             OR EXISTS (SELECT 1 FROM staging.voice_events d WHERE d.intent_id=s.intent_id
                 AND d.kind='vmhunter.screen.decision' AND d.details->>'action'='hangup')) LIMIT 1''',
         id=identifier).first() is not None
@@ -103,8 +112,9 @@ def begin(engine, profile, identifier, params):
         service.attach_child(db, row, params['CallSid'])
         row['child_call_sid'] = params['CallSid']
         first = service.event(db, identifier, 'vmhunter.screen.started', {'call_sid': params['CallSid']})
-        fresh = query(db, """SELECT created_at>clock_timestamp()-interval '8 seconds'
-            FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.screen.started'""",
+        fresh = query(db, """SELECT min(created_at)>clock_timestamp()-interval '8 seconds'
+            FROM staging.voice_events WHERE intent_id=:id
+                AND kind IN ('vmhunter.screen.started','vmhunter.screen.waiting')""",
             id=identifier).scalar_one()
         return {'first': first, 'fresh': fresh, 'row': row, 'pilot_id': snapshot['pilot_id']}
 
@@ -142,8 +152,9 @@ def complete(engine, profile, identifier, params, *, force_continue=False):
         current = configured()
         allowed = (current is not None and str(current.identifier) == snapshot['pilot_id']
                    and current.includes(row))
-        fresh = query(db, """SELECT created_at>clock_timestamp()-interval '8 seconds'
-            FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.screen.started'""",
+        fresh = query(db, """SELECT min(created_at)>clock_timestamp()-interval '8 seconds'
+            FROM staging.voice_events WHERE intent_id=:id
+                AND kind IN ('vmhunter.screen.started','vmhunter.screen.waiting')""",
             id=identifier).scalar_one_or_none()
         result = query(db, "SELECT details FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.result'",
                        id=identifier).scalar_one_or_none()
