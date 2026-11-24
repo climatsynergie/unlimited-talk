@@ -19,14 +19,16 @@ with engine.connect() as db:
     assert query(db,'SELECT version_num FROM staging.alembic_version').scalar_one()=='0012_incoming_runtime'
     identifiers=query(db,'SELECT id FROM staging.voice_intents WHERE campaign_id=:campaign ORDER BY id',
         campaign=UUID('2bdf5195-0b52-49b1-aecc-0caaf5459e77')).scalars().all()
-    assert len(identifiers)==3
+    assert len(identifiers)==4
+    claims=results=0
     for identifier in identifiers:
         history=service.history(db,identifier)
         assert history['intent']['state']=='finished'
-        assert len([e for e in history['events'] if e['kind']=='vmhunter.claim'])==1
-        assert len([e for e in history['events'] if e['kind']=='vmhunter.result'])==1
+        claims+=len([e for e in history['events'] if e['kind']=='vmhunter.claim'])
+        results+=len([e for e in history['events'] if e['kind']=='vmhunter.result'])
+    assert claims==results==3
     assert query(db,'SHOW transaction_read_only').scalar_one()=='on'
 print(json.dumps({'preceding_revision':os.environ['PREVIOUS_REVISION'],
-    'preceding_code_reads_new_event_kinds':True,'intents_verified':3,
+    'preceding_code_reads_new_event_kinds':True,'intents_verified':4,
     'schema':'0012_incoming_runtime','destructive_downgrade_required':False,'read_only':True}))
 engine.dispose()

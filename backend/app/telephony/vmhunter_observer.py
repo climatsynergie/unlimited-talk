@@ -78,6 +78,20 @@ class Store:
                                   {'id': identifier}).first()
             if existing:
                 return None
+            # A restart must not reset the circuit after an unconfirmed stop or
+            # a process death. These append-only facts require operator review.
+            unresolved = db.execute(text('''SELECT 1 FROM staging.voice_events c
+                JOIN staging.voice_intents i ON i.id=c.intent_id
+                WHERE i.campaign_id=:campaign AND i.account_sid=:account
+                AND c.kind='vmhunter.claim'
+                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                    AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
+                AND (c.created_at<clock_timestamp()-interval '20 seconds'
+                    OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                        AND r.kind='vmhunter.result')) LIMIT 1'''),
+                {'campaign': vm.PILOT_CAMPAIGN, 'account': self.profile.account_sid}).first()
+            if unresolved:
+                return None
             used = db.execute(text('''SELECT count(*) FROM (
                 SELECT 1 FROM staging.voice_intents i JOIN staging.voice_events c ON c.intent_id=i.id
                 WHERE i.campaign_id=:campaign AND i.account_sid=:account AND c.kind='vmhunter.claim'

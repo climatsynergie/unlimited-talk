@@ -39,6 +39,10 @@ connection, with the announcement, is a subsequent call-flow acceptance gate.
   unique stream name. Explicit stop runs on success, failure and orderly shutdown.
   Unconfirmed stop opens a local circuit: new observations are skipped while
   ordinary calling remains available. Operators must investigate that warning.
+  PostgreSQL also blocks new claims after an unconfirmed stop or stale unfinished
+  claim, so restarting the process cannot silently reset the circuit. Resume
+  requires reviewed recovery after the provider's stream stop is verified;
+  automatic circuit reset is deliberately not implemented in this pilot.
 - Both internal dispatch and WebSocket start need short-lived, purpose-separated
   signed capabilities. Media must match the account, child call and stream.
   Tickets live in custom parameters, not URLs. Replay cannot start a second

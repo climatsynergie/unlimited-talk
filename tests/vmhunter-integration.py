@@ -109,7 +109,21 @@ third_payload=dict(intent_id=str(third),call_sid=third_child,pilot_id=str(pilot.
 assert store.claim(third_payload) is None
 expanded=Store(engine,profile,replace(pilot,max_analyses=3))
 third_claim=expanded.claim(third_payload);assert third_claim is not None
-expanded.result(third_claim,vm.Result('HUMAN','HUMAN'),stop_confirmed=True)
+expanded.result(third_claim,vm.Result('FAILED','stream_unavailable'),stop_confirmed=False)
+# A new process/store must not reset an unconfirmed-stop circuit. Simulate the
+# next eligible call with an expanded budget so only the circuit can reject it.
+fourth=uuid4();fourth_child='CA'+uuid4().hex
+with engine.begin() as db:
+    query(db,"UPDATE staging.voice_intents SET state='finished',outcome='completed',finished_at=clock_timestamp() WHERE id=:id",id=third)
+    query(db,"""INSERT INTO staging.voice_intents(id,actor_id,session_hash,profile_hash,account_sid,
+        application_sid,caller_number,destination,state,parent_call_sid,child_call_sid,expires_at,consumed_at,
+        campaign_id,contact_id,caller_number_id,dialer_generation,dialer_browser_id)
+        SELECT :id,actor_id,session_hash,profile_hash,account_sid,application_sid,caller_number,destination,
+            'answered',:parent,:child,clock_timestamp()+interval '4 minutes',clock_timestamp(),
+            campaign_id,contact_id,caller_number_id,dialer_generation,:browser FROM staging.voice_intents WHERE id=:old""",
+        id=fourth,parent='CA'+uuid4().hex,child=fourth_child,browser=uuid4(),old=third)
+restarted=Store(engine,profile,replace(pilot,max_analyses=4))
+assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
 # Leave no active synthetic calls for the surrounding API regression suite.
 with engine.begin() as db:
     query(db,"UPDATE staging.voice_intents SET state='finished',outcome='completed',finished_at=coalesce(finished_at,clock_timestamp()) WHERE campaign_id=:campaign",
@@ -119,5 +133,5 @@ with engine.begin() as db:
 # no destructive migration. Verify predecessor imports/reads in a separate proof.
 print(json.dumps({'schema':'0012_incoming_runtime','competing_claims':2,'granted_claims':1,
     'idempotent_results':True,'scoped_assignment':True,'phone_and_pipeline_facts_unchanged':True,'analysis_budget_enforced':True,
-    'migration_required':False,'external_calls':0}))
+    'migration_required':False,'stop_failure_circuit_survives_restart':True,'external_calls':0}))
 engine.dispose()
