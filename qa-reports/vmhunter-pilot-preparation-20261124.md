@@ -87,3 +87,11 @@ No media bridge or filtering code has been installed or enabled.
 - Provider audio-processing terms and training opt-out confirmation.
 
 The pilot remains inactive. This report does not claim telephony readiness.
+
+## Subsequent implementation
+
+The isolated observation integration and regression evidence are documented in
+`qa-reports/vmhunter-observation-20261124.md` and
+`deployment/vmhunter/README.md`. The company name supplied is Maisonverte Québec.
+The candidate has not been deployed; automatic voicemail suppression and the
+pre-agent announcement have not been enabled or implemented by this preparation.
