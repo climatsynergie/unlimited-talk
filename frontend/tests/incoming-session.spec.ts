@@ -22,6 +22,7 @@ async function setup(page: Page) {
     tokenFailures: 0,
     tokenRequests: 0,
     startupHangs: 0,
+    pauseGate: null as Promise<void> | null,
     unexpected: [] as string[],
     logout: null as null | ((route: Route) => Promise<void>),
   };
@@ -160,19 +161,28 @@ async function setup(page: Page) {
           });
     },
   );
-  await page.route(`**/api/inbound/reception/${registrationId}`, (route) =>
-    fixture.epoch === 1
-      ? route.fulfill({
-          json: {
-            available: route.request().postDataJSON().available,
-            media_ready: true,
-            active: active(),
-          },
-        })
-      : route.fulfill({
-          status: 404,
-          json: { detail: "Session de réception introuvable." },
-        }),
+  await page.route(
+    `**/api/inbound/reception/${registrationId}`,
+    async (route) => {
+      if (
+        fixture.epoch === 1 &&
+        !route.request().postDataJSON().available &&
+        fixture.pauseGate
+      )
+        await fixture.pauseGate;
+      return fixture.epoch === 1
+        ? route.fulfill({
+            json: {
+              available: route.request().postDataJSON().available,
+              media_ready: true,
+              active: active(),
+            },
+          })
+        : route.fulfill({
+            status: 404,
+            json: { detail: "Session de réception introuvable." },
+          });
+    },
   );
   await page.route(`**/api/inbound/reception/offers/${offerId}`, (route) => {
     if (fixture.epoch !== 1)
@@ -314,12 +324,26 @@ test("réception : renouvellement après trois indisponibilités sans pause et p
     page.getByText("Réception ouverte", { exact: true }),
   ).toBeVisible();
   expect((await proof(page)).updatedTokens).toBe(1);
+  let releasePause!: () => void;
+  f.pauseGate = new Promise<void>((resolve) => {
+    releasePause = resolve;
+  });
   await page
     .getByRole("button", { name: "Mettre la réception en pause", exact: true })
     .click();
   await expect(
     page.getByText("Réception en pause", { exact: true }),
   ).toBeVisible();
+  const pendingPause = await proof(page);
+  expect(pendingPause.destroyed).toBe(0);
+  const requestsBeforePause = f.tokenRequests;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  expect(await proof(page)).toEqual(pendingPause);
+  expect(f.tokenRequests).toBe(requestsBeforePause);
+  releasePause();
+  await expect.poll(async () => (await proof(page)).destroyed).toBe(1);
+  // Compare stable states after the server acknowledgement and SDK teardown,
+  // rather than mistaking the expected asynchronous teardown for a restart.
   const before = await proof(page);
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(
