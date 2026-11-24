@@ -1,8 +1,10 @@
 """Authenticated agent calls and narrowly scoped signed provider callbacks."""
 from uuid import UUID
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
@@ -188,7 +190,12 @@ def apply_webhook(request, configured, kind, identifier, params):
 async def callback(request, kind, identifier=None):
     configured, params = await signed_form(request, kind, identifier)
     xml = await run_in_threadpool(apply_webhook, request, configured, kind, identifier, params)
-    return Response(xml, media_type='application/xml')
+    background = None
+    if (os.environ.get('VMHUNTER_PILOT_FILE') and kind == 'status'
+            and params.get('CallStatus') == 'in-progress'):
+        from app.telephony.vmhunter_observer import dispatch
+        background = BackgroundTask(dispatch, configured, identifier, params)
+    return Response(xml, media_type='application/xml', background=background)
 
 
 @router.post('/twilio/voice', include_in_schema=False)

@@ -109,6 +109,8 @@ jobs:
         run: python3 tests/verify_callbacks.py
       - name: Verify signed Voice API, durable reservations and concurrent replays
         run: python3 tests/verify_voice.py
+      - name: Verify opt-in VM Hunter observation scope and concurrent budget on disposable PostgreSQL
+        run: python3 tests/verify_vmhunter.py
       - name: Verify inbound settings, manual follow-up and concurrent ownership
         run: python3 tests/verify_inbound.py
       - name: Verify automatic queues, callback ownership, regional callers and pause races

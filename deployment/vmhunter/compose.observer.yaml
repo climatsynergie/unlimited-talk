@@ -1,0 +1,33 @@
+# Optional overlay only. Not used by the existing guarded deployment workflow.
+# Paths are relative to the release directory when combined with compose.managed.yaml.
+services:
+  api:
+    environment:
+      VMHUNTER_PILOT_FILE: /run/secrets/vmhunter_pilot
+    secrets:
+      - vmhunter_pilot
+  vmhunter:
+    extends:
+      file: compose.managed.yaml
+      service: api
+    command: [python, -m, app.telephony.vmhunter_observer]
+    environment:
+      COMMUNICATIONS_MODE: webhooks_only
+      VMHUNTER_PILOT_FILE: /run/secrets/vmhunter_pilot
+      VMHUNTER_CREDENTIALS_FILE: /run/secrets/vmhunter_credentials
+    secrets:
+      - vmhunter_pilot
+      - vmhunter_credentials
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 40
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+secrets:
+  vmhunter_pilot:
+    file: /etc/unlimited-talk-staging/container-secrets/vmhunter_pilot
+  vmhunter_credentials:
+    file: /etc/unlimited-talk-staging/container-secrets/vmhunter_credentials
