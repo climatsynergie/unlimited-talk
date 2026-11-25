@@ -335,7 +335,11 @@ class Observer:
             async with asyncio.timeout(self.handshake_seconds):
                 phase = 'connected_frame'
                 first = vm.object_json(await ws.receive_str())
-                if first.get('event') != 'connected' or first.get('protocol') != 'Call' or first.get('version') != '1.0.0':
+                # Twilio's live REST-created stream reports 0.2.0; the
+                # current published example uses 1.0.0. Both still require the
+                # signed ticket and exact account/call/stream/audio bindings.
+                if (first.get('event') != 'connected' or first.get('protocol') != 'Call'
+                        or first.get('version') not in ('0.2.0', '1.0.0')):
                     version = first.get('version')
                     safe_version = (version if isinstance(version, str)
                                     and re.fullmatch(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', version) else 'invalid')

@@ -77,9 +77,9 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.005)
         self.fail('observer did not complete')
 
-    async def twilio(self,token=None,**changes):
+    async def twilio(self,token=None,protocol_version="1.0.0",**changes):
         ws=await self.session.ws_connect(self.server.make_url(module.MEDIA_PATH))
-        await ws.send_json({'event':'connected','protocol':'Call','version':'1.0.0'})
+        await ws.send_json({'event':'connected','protocol':'Call','version':protocol_version})
         await ws.send_json(start(customParameters={'ticket':token or self.streams.token},**changes))
         return ws
 
@@ -96,6 +96,33 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details,{'stop_confirmed':True})
         self.assertEqual(len(self.streams.stopped),1)
         self.assertNotIn('SYNTHETIC-VM-KEY',repr(self.store.results))
+
+    async def test_observed_twilio_0_2_handshake_reaches_provider_and_confirms_cleanup(self):
+        # Observed on the owner's real CHIN LIST test on 2026-11-25.
+        await self.dispatch()
+        await asyncio.wait_for(self.streams.started.wait(),1)
+        async with await self.twilio(protocol_version='0.2.0') as ws:
+            await ws.send_json(media())
+            await ws.receive()
+        _,result,details=await self.finish()
+        self.assertEqual(result,vm.Result('MACHINE','MACHINE_BEEP'))
+        self.assertEqual(self.received[1],b'\0'*320)
+        self.assertTrue(details['stop_confirmed'])
+        self.assertEqual(len(self.streams.stopped),1)
+        self.assertFalse(self.observer.degraded)
+
+    async def test_unknown_protocol_version_is_rejected_without_consuming_valid_job(self):
+        await self.dispatch()
+        await asyncio.wait_for(self.streams.started.wait(),1)
+        async with await self.twilio(protocol_version='2.0.0') as ws:
+            await ws.receive()
+        self.assertFalse(self.received)
+        async with await self.twilio(protocol_version='1.0.0') as ws:
+            await ws.send_json(media())
+            await ws.receive()
+        _,result,details=await self.finish()
+        self.assertEqual(result.status,'MACHINE')
+        self.assertTrue(details['stop_confirmed'])
 
     async def test_invalid_expired_and_wrong_purpose_tickets_cannot_start_analysis(self):
         for token in ['wrong',vm.ticket('wrong-key','dispatch',self.payload),

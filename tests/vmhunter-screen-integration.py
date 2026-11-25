@@ -198,7 +198,7 @@ async def main():
             self.started+=1;sid='MZ'+uuid4().hex
             async def pump():
                 async with session.ws_connect(sidecar.make_url('/api/telephony/vmhunter/media')) as ws:
-                    await ws.send_json({'event':'connected','protocol':'Call','version':'1.0.0'})
+                    await ws.send_json({'event':'connected','protocol':'Call','version':'0.2.0'})
                     await ws.send_json({'event':'start','start':{'streamSid':sid,'accountSid':profile.account_sid,
                         'callSid':payload['call_sid'],'tracks':['inbound'],'customParameters':{'ticket':token},
                         'mediaFormat':{'encoding':'audio/x-mulaw','sampleRate':8000,'channels':1}}})
