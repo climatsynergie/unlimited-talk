@@ -1,5 +1,8 @@
 # Coverage summary
 
+> **25 November 2026 operational update:** incoming client/appointment context and dormant VM Hunter code are deployed and verified on `36a451a4e974dc0a8ff80bbe5540806f57fa3c6f`, schema12, manual calling enabled. Fresh main CI/publication, signed artifact and 73 source hashes pass their stated boundaries. VM filtering is not activated; constrained egress/sidecar/perimeter and real audio acceptance remain outstanding. Native security findings remain open, so overall certification is still NO-GO. See [release evidence and commands](vmhunter-release-20261125.md) and [real-call acceptance plan](vmhunter-acceptance-20261125.md). Earlier statuses below are historical snapshots.
+
+
 Measured Python application line/branch coverage from instrumented synthetic unit, HTTP/API/PG, browser and recovery executions. This is code coverage, not percentage completion or proof of correctness. SQL predicates and React TSX browser branches are not measured by this metric.
 
 - Executed Python statements: **4774/5210 (91.63%)**.

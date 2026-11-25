@@ -1,5 +1,8 @@
 # Findings and verified repairs
 
+> **25 November 2026 operational update:** incoming client/appointment context and dormant VM Hunter code are deployed and verified on `36a451a4e974dc0a8ff80bbe5540806f57fa3c6f`, schema12, manual calling enabled. Fresh main CI/publication, signed artifact and 73 source hashes pass their stated boundaries. VM filtering is not activated; constrained egress/sidecar/perimeter and real audio acceptance remain outstanding. Native security findings remain open, so overall certification is still NO-GO. See [release evidence and commands](vmhunter-release-20261125.md) and [real-call acceptance plan](vmhunter-acceptance-20261125.md). Earlier statuses below are historical snapshots.
+
+
 14 November production incident: [QA-23 large-queue timeout and recovery](dialer-server-incident-20261114.md). Direct repair explicitly authorized: concurrent index plus scoped runtime-role emergency planner defaults restored measured selection and owner-confirmed calls. Durable raw-page query, guarded reset and scale regression are prepared; emergency defaults remain active until that source is deployed. Charlotte browser-connect failure remains separate/open.
 
 14 November inbound follow-up: [client sheet and direct callbacks](inbound-client-callbacks-20261114.md) records QA-22 (MEDIUM, reproduced and fixed), queue-scoped profile/restriction reads,27 browser and actual HTTP/PostgreSQL regressions.

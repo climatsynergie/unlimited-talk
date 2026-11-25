@@ -1,5 +1,8 @@
 # Release readiness
 
+> **25 November 2026 operational update:** incoming client/appointment context and dormant VM Hunter code are deployed and verified on `36a451a4e974dc0a8ff80bbe5540806f57fa3c6f`, schema12, manual calling enabled. Fresh main CI/publication, signed artifact and 73 source hashes pass their stated boundaries. VM filtering is not activated; constrained egress/sidecar/perimeter and real audio acceptance remain outstanding. Native security findings remain open, so overall certification is still NO-GO. See [release evidence and commands](vmhunter-release-20261125.md) and [real-call acceptance plan](vmhunter-acceptance-20261125.md). Earlier statuses below are historical snapshots.
+
+
 > 14 November operational incident: the owner explicitly authorized direct server repair. [Large-queue timeout recovery](dialer-server-incident-20261114.md) restored observed calls with online index/runtime-role tuning; the durable query is in QA and needs its own successful CI/deployment. Emergency defaults remain active, Charlotte browser-connect failures remain open, and broader formal NO-GO gates are unchanged. Earlier read-only/no-production-change statements below describe historical audit phases.
 
 > 14 November targeted follow-up: [optional construction year and invalid-number repair](construction-and-invalid-numbers-20261114.md) passes its stated local boundaries. ce47ea5 was observed live and healthy. Broader production certification remains NO-GO; historical release/deployment statements below describe earlier audit snapshots. New version3 qualification writes require a compatible reader when rolling back.

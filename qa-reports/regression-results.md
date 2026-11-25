@@ -1,5 +1,8 @@
 # Regression and release-validation results
 
+> **25 November 2026 operational update:** incoming client/appointment context and dormant VM Hunter code are deployed and verified on `36a451a4e974dc0a8ff80bbe5540806f57fa3c6f`, schema12, manual calling enabled. Fresh main CI/publication, signed artifact and 73 source hashes pass their stated boundaries. VM filtering is not activated; constrained egress/sidecar/perimeter and real audio acceptance remain outstanding. Native security findings remain open, so overall certification is still NO-GO. See [release evidence and commands](vmhunter-release-20261125.md) and [real-call acceptance plan](vmhunter-acceptance-20261125.md). Earlier statuses below are historical snapshots.
+
+
 14 November incident: [exact commands and evidence](dialer-server-incident-20261114.md) distinguish production read-only observations, authorized live index/role changes, restored calls,220 units, realistic scale/latency negatives, real HTTP/PG, and the corrected incoming test-fixture failure.
 
 14 November inbound callback UI: [executed checks and retained failures](inbound-client-callbacks-20261114.md),27 browser PASS,159 controller/SDK PASS,217 backend PASS, real incoming HTTP/PG PASS.

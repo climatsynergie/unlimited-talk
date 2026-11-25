@@ -1,5 +1,8 @@
 # Feature inventory
 
+> **25 November 2026 operational update:** incoming client/appointment context and dormant VM Hunter code are deployed and verified on `36a451a4e974dc0a8ff80bbe5540806f57fa3c6f`, schema12, manual calling enabled. Fresh main CI/publication, signed artifact and 73 source hashes pass their stated boundaries. VM filtering is not activated; constrained egress/sidecar/perimeter and real audio acceptance remain outstanding. Native security findings remain open, so overall certification is still NO-GO. See [release evidence and commands](vmhunter-release-20261125.md) and [real-call acceptance plan](vmhunter-acceptance-20261125.md). Earlier statuses below are historical snapshots.
+
+
 14 November addition: incoming follow-up and history open client coordinates with direct manual callback, in-sheet hangup/voicemail controls, unknown-caller handling and unchanged DNC enforcement. See [scope and evidence](inbound-client-callbacks-20261114.md).
 
 Audit baseline: deployed/main `662b450501a70431b0effbb087501e727111099d`; incoming release candidate `96f5055b7fff29257a0e306e0658721394cc80a7`. QA branch `qa/full-audit-20261108`. Initial discovery was read-only. Production health was observed READY on schema11/manual calling; observation is not functional acceptance.
