@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh provider-only HTTPS egress for the VM Hunter container
+After=docker.service unlimited-talk-staging-egress.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/unlimited-talk-vmhunter-runtime refresh-egress
+User=root
+Group=root
+UMask=0077
+TimeoutStartSec=25

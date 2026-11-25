@@ -21,7 +21,6 @@ import sys
 import time
 import urllib.request
 
-import yaml
 
 ROOT = Path('/etc/unlimited-talk-staging')
 BASE = Path('/srv/unlimited-talk-staging')
@@ -238,10 +237,10 @@ async def main():
         child=query(db,"SELECT child_call_sid FROM staging.voice_intents WHERE campaign_id=:campaign AND child_call_sid IS NOT NULL ORDER BY created_at DESC LIMIT 1",campaign=vm.PILOT_CAMPAIGN).scalar_one()
     engine.dispose()
     async with aiohttp.ClientSession(trust_env=False,timeout=aiohttp.ClientTimeout(total=12)) as session:
-        url='https://api.twilio.com/2010-04-01/Accounts/'+profile.account_sid+'/Calls/'+child+'/Streams.json'
+        url='https://api.twilio.com/2010-04-01/Accounts/'+profile.account_sid+'/Calls/'+child+'.json'
         async with session.get(url,auth=aiohttp.BasicAuth(profile.api_key_sid,profile.api_key_secret)) as response:
-            assert response.status==200,'Twilio Streams read permission failed'
-            result=await response.json();assert isinstance(result.get('streams'),list)
+            assert response.status==200,'Twilio account authentication failed'
+            result=await response.json();assert result.get('sid')==child and result.get('account_sid')==profile.account_sid
         import os
         from app.telephony.configuration import private_bytes
         credentials=json.loads(private_bytes(os.environ['VMHUNTER_CREDENTIALS_FILE']))
@@ -249,7 +248,7 @@ async def main():
             for _ in range(175):
                 yield bytes(320)
         result=await vm.Client(credentials['api_key'],session=session).classify('runtime-synthetic-probe',frames())
-        print(json.dumps(dict(tls=True,twilio_streams_read=True,provider_authenticated=result.status in {'HUMAN','MACHINE','CALLGUARD'},synthetic_result={'status':result.status,'cause':result.cause},real_calls=0)))
+        print(json.dumps(dict(tls=True,twilio_account_authenticated=True,provider_authenticated=result.status in {'HUMAN','MACHINE','CALLGUARD'},synthetic_result={'status':result.status,'cause':result.cause},real_calls=0)))
 asyncio.run(main())
 '''
     proof=json.loads(vm_exec(release, program))
@@ -258,6 +257,7 @@ asyncio.run(main())
 
 
 def activate(release):
+    import yaml
     module = installed_deployer()
     before = module.calling_state(release)
     if not before['calling_enabled']:
@@ -280,12 +280,14 @@ def activate(release):
     check = json.loads(run(['docker','compose','--project-directory',str(release),'--env-file',str(release/'.env'),'-f',str(candidate),'config','--format','json']))
     expected = json.loads(json.dumps(config))
     expected['services']['api']['environment']['VMHUNTER_PILOT_FILE']='/run/secrets/vmhunter_pilot'
-    expected['services']['api']['secrets'].append({'source':'vmhunter_pilot','target':'vmhunter_pilot'})
+    expected['services']['api']['secrets'].append({'source':'vmhunter_pilot','target':'/run/secrets/vmhunter_pilot'})
     expected['secrets']['vmhunter_pilot']={'name':config['name']+'_vmhunter_pilot','file':str(POLICY)}
     assert check==expected,'Only the reviewed API policy mount may change'
     closed = False
     try:
-        module.calling_action('disable', before['revision']); closed = True
+        closed = True
+        module.require_idle_calls(release)
+        module.calling_action('disable', before['revision'])
         module.require_idle_calls(release)
         for p, raw in candidates.items(): write_file(p,raw,0o644 if p in gateways else 0o600)
         gateway = run([*app_command(release),'ps','-q','gateway'])

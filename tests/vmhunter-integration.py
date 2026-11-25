@@ -11,7 +11,7 @@ from app.database import make_engine
 from app.identity.service import query
 from app.telephony import vmhunter as vm
 from app.telephony.vmhunter_observer import Store
-from app.telephony.service import profile_hash
+from app.telephony.service import profile_hash, event
 from app.telephony.twilio_voice import ManualVoiceProfile
 
 assert os.environ.get('DB_HOST') == 'db'
@@ -129,6 +129,17 @@ time.sleep(20.1)
 assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
 expanded.result(third_claim,vm.Result('FAILED','stream_unavailable'),stop_confirmed=False)
 assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
+# Recovery appends verified evidence; it never edits the failed historical result.
+with engine.begin() as db:
+    event(db,third,'vmhunter.cleanup_verified',dict(call_sid=third_child,
+        nonce='0'*32,stream_stop_confirmed=True,provider_status='completed'))
+assert restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier))) is None
+with engine.begin() as db:
+    event(db,third,'vmhunter.cleanup_verified',dict(call_sid=third_child,
+        nonce=third_claim['nonce'],stream_stop_confirmed=True,provider_status='completed'))
+fourth_claim=restarted.claim(dict(intent_id=str(fourth),call_sid=fourth_child,pilot_id=str(pilot.identifier)))
+assert fourth_claim is not None,'Verified terminal-call cleanup did not recover the circuit'
+restarted.result(fourth_claim,vm.Result('HUMAN','HUMAN'),stop_confirmed=True)
 # Leave no active synthetic calls for the surrounding API regression suite.
 with engine.begin() as db:
     query(db,"UPDATE staging.voice_intents SET state='finished',outcome='completed',finished_at=coalesce(finished_at,clock_timestamp()) WHERE campaign_id=:campaign",

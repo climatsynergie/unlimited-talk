@@ -15,15 +15,16 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests=[];self.status=None;self.redirect=None
         self.call='CA'+'1'*32;self.stream='MZ'+'2'*32
+        self.name='ut-vm-'+'a'*32
         async def handle(request):
             data=dict(await request.post())
             self.requests.append((request.method,request.path,data,request.headers.get('Authorization'),dict(request.query)))
             if self.redirect:return web.Response(status=302,headers={'Location':self.redirect})
             if self.status:return web.json_response({'private':'must not be reported'},status=self.status)
             if request.method=='GET':
-                return web.json_response({'streams':[{'sid':self.stream,'call_sid':self.call,'name':'unique-test'}]})
+                return web.json_response({'code':20004},status=405)
             if 'Status' in data:
-                return web.json_response({'sid':self.stream,'status':data['Status']})
+                return web.json_response({'sid':self.stream,'call_sid':self.call,'name':self.name,'status':data['Status']})
             return web.json_response({'sid':self.stream,'call_sid':self.call},status=201)
         app=web.Application();app.router.add_route('*','/{path:.*}',handle)
         self.server=TestServer(app);await self.server.start_server()
@@ -51,11 +52,24 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.client.stop(self.call,self.stream))
         self.assertEqual(self.requests[0][:3],('POST','/Calls/'+self.call+'/Streams/'+self.stream+'.json',{'Status':'stopped'}))
 
-    async def test_timeout_recovery_is_read_only_and_uses_exact_stream_name(self):
-        self.assertEqual(await self.client.recover(self.call,'unique-test'),self.stream)
-        self.assertEqual(self.requests[0][0],'GET')
-        self.assertEqual(self.requests[0][-1],{'PageSize':'4'})
-        self.assertIsNone(await self.client.recover(self.call,'another-name'))
+    async def test_timeout_recovery_stops_exact_named_stream_using_supported_post(self):
+        self.assertEqual(await self.client.recover(self.call,self.name),self.stream)
+        self.assertEqual(self.requests[0][:3],('POST','/Calls/'+self.call+'/Streams/'+self.name+'.json',{'Status':'stopped'}))
+        self.assertNotIn('To',self.requests[0][2])
+        self.assertFalse(any(request[0]=='GET' for request in self.requests))
+
+    async def test_ambiguous_creation_missing_named_stream_does_not_clear_the_circuit(self):
+        self.status=404
+        self.assertIsNone(await self.client.recover(self.call,self.name))
+
+    async def test_rejection_is_diagnostic_without_exposing_provider_body(self):
+        self.status=400
+        with self.assertLogs('app.telephony.vmhunter_observer',level='WARNING') as messages:
+            with self.assertRaises(vm.ProtocolError):
+                await self.client.start({'call_sid':self.call},self.name,'SYNTHETIC-CAPABILITY')
+        self.assertIn('http_status=400',' '.join(messages.output))
+        self.assertNotIn('private',' '.join(messages.output))
+        self.assertNotIn('SYNTHETIC-CAPABILITY',' '.join(messages.output))
 
     async def test_auth_failure_never_returns_provider_body(self):
         self.status=401

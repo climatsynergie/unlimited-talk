@@ -1,0 +1,77 @@
+name: VM Hunter Worker CI
+on:
+  push:
+    branches: [main, "qa/**"]
+    paths:
+      - backend/app/telephony/vmhunter*.py
+      - deployment/vmhunter/**
+      - tests/test_vmhunter*.py
+      - tests/vmhunter*.py
+      - tests/verify_vmhunter*.py
+      - .github/workflows/vmhunter-worker.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vmhunter-worker-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build the isolated worker from the pinned tested application image
+        run: docker build --build-arg GIT_REVISION="$GITHUB_SHA" -f deployment/vmhunter/Dockerfile -t unlimited-talk-vmhunter:test .
+      - name: Test backend boundaries and real loopback provider contracts
+        run: >-
+          docker run --rm --network none --read-only
+          --tmpfs /tmp:rw,noexec,nosuid,size=32m --cap-drop ALL
+          --security-opt no-new-privileges --memory 256m
+          -v "$PWD/tests:/tests:ro" -v "$PWD/scripts:/scripts:ro"
+          unlimited-talk-vmhunter:test python -m unittest discover -s /tests -p 'test_*.py' -v
+      - name: Prepare disposable database credentials and worker image override
+        run: |
+          python3 scripts/bootstrap-secrets.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path('worker-ci.json').write_text(json.dumps({'services':{'api':{'image':'unlimited-talk-vmhunter:test'}}}))
+          PY
+      - name: Test signed HTTP, PostgreSQL, screening decisions and two-agent continuation
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py
+      - name: Test durable leases, budgets and verified cleanup recovery
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-integration.py
+      - name: Publish the exact tested worker
+        if: github.ref == 'refs/heads/main'
+        id: publish
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$REGISTRY_USER" --password-stdin
+          image="ghcr.io/climatsynergie/unlimited-talk-api:vmhunter-git-$GITHUB_SHA"
+          docker tag unlimited-talk-vmhunter:test "$image"
+          docker push "$image"
+          reference=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')
+          printf 'digest=%s\n' "${reference##*@}" >> "$GITHUB_OUTPUT"
+      - name: Attest tested worker provenance
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-name: ghcr.io/climatsynergie/unlimited-talk-api
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true

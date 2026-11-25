@@ -9,6 +9,7 @@ from contextlib import suppress
 import json
 import logging
 import os
+import re
 import time
 from uuid import UUID, uuid4
 
@@ -114,6 +115,13 @@ class Store:
                 AND c.kind='vmhunter.claim'
                 AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
                     AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
+                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                    AND r.kind='vmhunter.cleanup_verified'
+                    AND i.state IN ('finished','cancelled','expired')
+                    AND r.details->>'stream_stop_confirmed'='true'
+                    AND r.details->>'call_sid'=c.details->>'call_sid'
+                    AND r.details->>'nonce'=c.details->>'nonce'
+                    AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
                 AND (c.created_at<clock_timestamp()-interval '20 seconds'
                     OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
                         AND r.kind='vmhunter.result')) LIMIT 1'''),
@@ -174,7 +182,8 @@ class Streams:
         self.profile, self.session = profile, session
 
     def url(self, call, stream=None):
-        if not sid(call, 'CA') or stream is not None and not sid(stream, 'MZ'):
+        named = isinstance(stream, str) and re.fullmatch(r'ut-vm-[0-9a-f]{32}', stream)
+        if not sid(call, 'CA') or stream is not None and not (sid(stream, 'MZ') or named):
             raise vm.ProtocolError()
         return ('https://api.twilio.com/2010-04-01/Accounts/' + self.profile.account_sid
                 + '/Calls/' + call + '/Streams' + ('/' + stream if stream else '') + '.json')
@@ -188,6 +197,13 @@ class Streams:
                 timeout=aiohttp.ClientTimeout(total=2), allow_redirects=False) as response:
             raw = await response.content.read(vm.MAX_MESSAGE + 1)
             if response.status != 201:
+                code = None
+                try:
+                    value = vm.object_json(raw)
+                    code = value.get('code') if type(value.get('code')) is int else None
+                except vm.ProtocolError:
+                    pass
+                log.warning('vmhunter_stream_start_rejected http_status=%s error_code=%s', response.status, code)
                 raise vm.ProtocolError()
             result = vm.object_json(raw)
             if not sid(result.get('sid'), 'MZ') or result.get('call_sid') != payload['call_sid']:
@@ -208,20 +224,21 @@ class Streams:
             return result.get('sid') == stream and result.get('status') == 'stopped'
 
     async def recover(self, call, name):
-        """Resolve a timed-out creation by its unique name; never create again."""
-        async with self.session.get(self.url(call), params={'PageSize': '4'},
+        """Stop an uncertain creation by its unique name; never create again.
+
+        Twilio has no GET/list Streams operation. Its supported stop endpoint
+        accepts the stream name. A missing resource cannot prove an ambiguous
+        creation was cleaned up, so 404 retains the durable safety circuit.
+        """
+        async with self.session.post(self.url(call, name), data={'Status': 'stopped'},
                 auth=aiohttp.BasicAuth(self.profile.api_key_sid, self.profile.api_key_secret),
                 timeout=aiohttp.ClientTimeout(total=2), allow_redirects=False) as response:
             raw = await response.content.read(vm.MAX_MESSAGE + 1)
             if response.status != 200:
                 return None
             value = vm.object_json(raw)
-            streams = value.get('streams')
-            if not isinstance(streams, list) or len(streams) > 4:
-                return None
-            found = [item.get('sid') for item in streams if isinstance(item, dict)
-                     and item.get('name') == name and item.get('call_sid') == call]
-            return found[0] if len(found) == 1 and sid(found[0], 'MZ') else None
+            return (value['sid'] if sid(value.get('sid'), 'MZ') and value.get('name') == name
+                    and value.get('call_sid') == call and value.get('status') == 'stopped' else None)
 
 
 class Observer:
@@ -248,7 +265,10 @@ class Observer:
             return web.json_response({'accepted': False}, status=202)
         try:
             claimed = await asyncio.to_thread(self.store.claim, payload)
-        except Exception:
+        except Exception as error:
+            original = getattr(error, 'orig', None)
+            code = getattr(original, 'sqlstate', None)
+            log.warning('vmhunter_claim_error type=%s sqlstate=%s', type(error).__name__, code)
             log.warning('vmhunter_claim_unavailable')
             return web.json_response({'accepted': False}, status=202)
         if claimed:

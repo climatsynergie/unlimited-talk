@@ -8,10 +8,13 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 from uuid import uuid4
 
 root=Path(__file__).resolve().parents[1]
+proof_script=sys.argv[1] if len(sys.argv)>1 else 'vmhunter-screen-integration.py'
+assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py'}
 base=['sudo','-n','docker','compose','--project-directory',str(root)]
 base+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*base,'config','--format','json']))
@@ -44,7 +47,7 @@ definition=dict(name='ut-screen-proof-'+uuid4().hex[:12],
             healthcheck={'test':['CMD','pg_isready','-U','postgres','-d','unlimited_talk_staging'],
                 'interval':'2s','timeout':'2s','retries':30}),
         'migrate':migrate,
-        'proof':{**app_service,'command':['python','/tests/vmhunter-screen-integration.py']}},
+        'proof':{**app_service,'command':['python','/tests/'+proof_script]}},
     networks={'isolated':{'internal':True}},secrets=secrets)
 with tempfile.TemporaryDirectory(prefix='ut-screen-compose-') as folder:
     path=Path(folder)/'compose.json';path.write_text(json.dumps(definition))

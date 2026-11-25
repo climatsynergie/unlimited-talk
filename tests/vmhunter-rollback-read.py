@@ -26,7 +26,7 @@ with engine.connect() as db:
         assert history['intent']['state']=='finished'
         claims+=len([e for e in history['events'] if e['kind']=='vmhunter.claim'])
         results+=len([e for e in history['events'] if e['kind']=='vmhunter.result'])
-    assert claims==results==3
+    assert claims==results==4
     assert query(db,'SHOW transaction_read_only').scalar_one()=='on'
 print(json.dumps({'preceding_revision':os.environ['PREVIOUS_REVISION'],
     'preceding_code_reads_new_event_kinds':True,'intents_verified':4,
