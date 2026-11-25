@@ -1415,10 +1415,6 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                                             board.queue.timezone,
                                           )
                                         : null}
-                                    <small className="inbound-open-label">
-                                      Fiche client{" "}
-                                      <span aria-hidden="true">→</span>
-                                    </small>
                                   </span>
                                 </button>
                                 <div className="inbound-contact-actions">
@@ -1491,9 +1487,6 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                                     )}
                                   </span>
                                 ) : null}
-                                <small className="inbound-open-label">
-                                  Fiche client →
-                                </small>
                               </button>
                               <div className="inbound-contact-actions">
                                 <button
