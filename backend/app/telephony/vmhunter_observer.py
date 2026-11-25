@@ -207,6 +207,8 @@ class Streams:
                 raise vm.ProtocolError()
             result = vm.object_json(raw)
             if not sid(result.get('sid'), 'MZ') or result.get('call_sid') != payload['call_sid']:
+                log.warning('vmhunter_stream_binding_rejected sid_valid=%s call_matches=%s',
+                            sid(result.get('sid'), 'MZ'), result.get('call_sid') == payload['call_sid'])
                 raise vm.ProtocolError()
             return result['sid']
 
@@ -284,12 +286,16 @@ class Observer:
         payload = job['payload']
         result = vm.Result('FAILED', 'stream_unavailable')
         stopped = False
+        phase = 'stream_create'
         try:
             async with asyncio.timeout(self.job_seconds):
                 token = vm.ticket(self.profile.shared_key_secret, 'media', payload)
                 job['stream'] = await self.streams.start(payload, 'ut-vm-' + payload['nonce'], token)
+                phase = 'classification_wait'
                 result = await job['done']
-        except Exception:
+        except Exception as error:
+            log.warning('vmhunter_stream_failure phase=%s type=%s stream_known=%s media_connected=%s',
+                        phase, type(error).__name__, bool(job['stream']), job['socket'] is not None)
             log.warning('vmhunter_stream_unavailable')
         finally:
             if result.status == 'FAILED':
@@ -322,16 +328,23 @@ class Observer:
         self.handshakes += 1
         ws = web.WebSocketResponse(max_msg_size=vm.MAX_MESSAGE, heartbeat=None, timeout=0.2)
         job = None
+        phase = 'upgrade'
+        ticket_present = False
         try:
             await ws.prepare(request)
             async with asyncio.timeout(self.handshake_seconds):
+                phase = 'connected_frame'
                 first = vm.object_json(await ws.receive_str())
                 if first.get('event') != 'connected' or first.get('protocol') != 'Call' or first.get('version') != '1.0.0':
                     raise vm.ProtocolError()
+                phase = 'start_frame'
                 start = vm.object_json(await ws.receive_str())
                 token = start.get('start', {}).get('customParameters', {}).get('ticket')
+                ticket_present = isinstance(token, str) and bool(token)
+                phase = 'capability'
                 payload = vm.unticket(self.profile.shared_key_secret, 'media', token)
                 parse_payload(payload, nonce=True)
+                phase = 'admitted_job'
                 job = self.jobs.get(payload['nonce'])
                 if not job or job['payload'] != payload or job['socket'] is not None:
                     raise vm.ProtocolError()
@@ -350,10 +363,13 @@ class Observer:
                     for frame in audio.feed(message):
                         yield frame
 
+            phase = 'provider_audio'
             result = await self.provider.classify(payload['intent_id'], frames())
             if not job['done'].done():
                 job['done'].set_result(result)
-        except Exception:
+        except Exception as error:
+            log.warning('vmhunter_media_rejected phase=%s type=%s ticket_present=%s',
+                        phase, type(error).__name__, ticket_present)
             if job and job.get('socket') is ws and not job['done'].done():
                 job['done'].set_result(vm.Result('FAILED', 'invalid_or_interrupted_media'))
         finally:
