@@ -336,6 +336,11 @@ class Observer:
                 phase = 'connected_frame'
                 first = vm.object_json(await ws.receive_str())
                 if first.get('event') != 'connected' or first.get('protocol') != 'Call' or first.get('version') != '1.0.0':
+                    version = first.get('version')
+                    safe_version = (version if isinstance(version, str)
+                                    and re.fullmatch(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', version) else 'invalid')
+                    log.warning('vmhunter_connected_rejected event_matches=%s protocol_matches=%s version=%s',
+                                first.get('event') == 'connected', first.get('protocol') == 'Call', safe_version)
                     raise vm.ProtocolError()
                 phase = 'start_frame'
                 start = vm.object_json(await ws.receive_str())
