@@ -1,0 +1,61 @@
+# Optional overlay only. Not used by the existing guarded deployment workflow.
+# Paths are relative to the release directory when combined with compose.managed.yaml.
+services:
+  api:
+    environment:
+      VMHUNTER_PILOT_FILE: /run/secrets/vmhunter_pilot
+    secrets:
+      - vmhunter_pilot
+  vmhunter:
+    image: ${STAGING_IMAGE:?Set a tested image by immutable digest}
+    pull_policy: never
+    user: 10001:10001
+    networks: [staging]
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=32m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: on-failure:5
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '2'
+    command: [python, -m, app.telephony.vmhunter_observer]
+    environment:
+      APP_ENV: staging
+      COMMUNICATIONS_MODE: webhooks_only
+      DB_DEPLOYMENT: managed
+      DB_PRIVATE_CIDR: ${STAGING_DB_CIDR:?Set the private staging database CIDR}
+      DB_HOST: ${STAGING_DB_HOST:?Set the private staging database hostname}
+      DB_NAME: unlimited_talk_staging
+      DB_USER: ut_staging_runtime
+      DB_PASSWORD_FILE: /run/secrets/runtime_password
+      DB_SSLMODE: verify-full
+      DB_SSLROOTCERT: /run/secrets/postgres_ca
+      APP_ORIGIN: ${STAGING_APP_ORIGIN:?Set the HTTPS staging origin}
+      VOICE_TEST_PROFILE_FILE: /run/secrets/voice_profile
+      VMHUNTER_PILOT_FILE: /run/secrets/vmhunter_pilot
+      VMHUNTER_CREDENTIALS_FILE: /run/secrets/vmhunter_credentials
+    secrets:
+      - postgres_ca
+      - runtime_password
+      - voice_profile
+      - vmhunter_pilot
+      - vmhunter_credentials
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 40
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+secrets:
+  vmhunter_pilot:
+    file: /etc/unlimited-talk-staging/container-secrets/vmhunter_pilot
+  vmhunter_credentials:
+    file: /etc/unlimited-talk-staging/container-secrets/vmhunter_credentials

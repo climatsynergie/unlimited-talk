@@ -23,7 +23,8 @@ MANUAL_TOKEN_TTL_SECONDS = MAX_MANUAL_CALL_SECONDS + 180
 MAX_WEBHOOK_BYTES = 16384
 FIXED_HOOK_KINDS = frozenset({'voice', 'parent-status', 'probe','incoming','incoming-parent-status'})
 INTENT_HOOK_KINDS = frozenset({'status', 'recording', 'finish','incoming-step','incoming-dial-finish',
-    'incoming-agent-status','incoming-agent-answer','incoming-recording','incoming-voicemail-finish'})
+    'incoming-agent-status','incoming-agent-answer','incoming-recording','incoming-voicemail-finish',
+    'screen-start', 'screen-result'})
 HOOK_KINDS = FIXED_HOOK_KINDS | INTENT_HOOK_KINDS
 CRITICAL_FIELDS = frozenset({'AccountSid', 'CallSid', 'ParentCallSid', 'From', 'To', 'Intent',
                             'CallStatus', 'SequenceNumber', 'DialCallSid', 'DialCallStatus',
@@ -239,7 +240,7 @@ def authenticate_probe(profile, body, content_type, signature, signing_settings,
     authenticate_webhook(profile, 'probe', None, body, content_type, signature, signing_settings)
 
 
-def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None, caller_number=None, *, ring_seconds=None):
+def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=None, caller_number=None, *, ring_seconds=None, screening=False):
     """Render only AFTER the durable intent gate; no client-supplied To exists."""
     caller_number = caller_number or profile.caller_number
     if not isinstance(caller_number,str) or not re.fullmatch(r'\+[1-9][0-9]{8,14}',caller_number):
@@ -265,7 +266,10 @@ def controlled_call_twiml(profile: VoiceProfile, intent_id: UUID, destination=No
                          recording_status_callback_method='POST',
                          recording_status_callback_event='completed',
                          action=webhook_url(profile, 'finish', intent_id), method='POST')
-    dial.number(destination,
+    if type(screening) is not bool or screening and not isinstance(profile, ManualVoiceProfile):
+        raise VoiceConfigurationError('Mode de filtrage invalide.')
+    options = {'url': webhook_url(profile, 'screen-start', intent_id), 'method': 'POST'} if screening else {}
+    dial.number(destination, **options,
                 status_callback=webhook_url(profile, 'status', intent_id),
                 status_callback_method='POST',
                 status_callback_event='initiated ringing answered completed')

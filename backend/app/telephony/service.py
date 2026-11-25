@@ -230,6 +230,10 @@ def advance(db, row, status, source_rank, sequence=None):
                 ON CONFLICT(intent_id) DO UPDATE SET completed_at=NULL,
                     next_attempt_at=clock_timestamp()+interval '2 seconds' ''',id=row['id'])
     elif row['state'] not in TERMINAL and RANK[PROGRESS[status]] > RANK.get(row['state'], -1):
+        if status == 'in-progress' and row.get('dialer_generation') is not None:
+            from app.telephony.vmhunter_screen import pending
+            if pending(db, row['id']):
+                return  # PSTN answered, but agent bridge is still held by the whisper.
         query(db, 'UPDATE staging.voice_intents SET state=:state WHERE id=:id', id=row['id'], state=PROGRESS[status])
 
 

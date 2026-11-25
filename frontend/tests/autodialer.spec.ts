@@ -582,6 +582,33 @@ test("agent : Arrêter pendant la récupération empêche toute répétition tar
   ).toBe(0);
 });
 
+test("agent : boîte vocale filtrée avant connexion, puis appel suivant sans pause", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-11-03T12:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-11-03T12:00:01Z"));
+  const f = await setup(page);
+  await start(page);
+  const row = [...f.rows.values()][0];
+  row.state = "finished";
+  row.outcome = "completed";
+  // SIP Decline on the unbridged child may reach Device without a Call handle.
+  // The signed server completion releases it; it is not a microphone failure.
+  await page.evaluate(() => window.phoneProof.error!({ code: 31603 }));
+  const wait = page.getByRole("complementary", {
+    name: "Prochain appel",
+    exact: true,
+  });
+  await expect(wait).toBeVisible();
+  await expect(wait.getByRole("timer")).toHaveText("10 s");
+  expect(f.controls).toEqual(["start"]);
+  await page.clock.runFor(9_999);
+  expect(f.nextCount).toBe(1);
+  await page.clock.runFor(1);
+  await expect.poll(() => f.nextCount, { timeout: 20_000 }).toBe(2);
+  expect(f.controls).toEqual(["start"]);
+});
+
 for (const source of [
   "call",
   "device-call",

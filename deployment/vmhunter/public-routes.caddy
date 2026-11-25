@@ -1,0 +1,22 @@
+# Import inside the application's site, before the perimeter catch-all handle.
+# Narrow routing only: the API still authenticates both Twilio form callbacks
+# and the sidecar authenticates the admitted stream's first start frame.
+@ut_vm_screen {
+    method POST
+    path_regexp ut_vm_screen ^/api/telephony/twilio/screen-(start|result)/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+}
+handle @ut_vm_screen {
+    reverse_proxy 127.0.0.1:8110 {
+        header_up -Authorization
+    }
+}
+@ut_vm_media {
+    method GET
+    path /api/telephony/vmhunter/media
+    header Upgrade websocket
+}
+handle @ut_vm_media {
+    reverse_proxy 127.0.0.1:8110 {
+        header_up -Authorization
+    }
+}

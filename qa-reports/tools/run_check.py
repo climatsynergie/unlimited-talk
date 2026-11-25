@@ -22,7 +22,7 @@ try:
    code=124;status='BLOCKED'
 except OSError as error:
  log.write_text(type(error).__name__+': '+str(error)+'\n');code=127;status='BLOCKED'
-patch_hash=hashlib.sha256(subprocess.check_output(['git','diff','--binary'],cwd=root)).hexdigest()
+patch_hash=hashlib.sha256(subprocess.check_output(['git','diff','HEAD','--binary'],cwd=root)).hexdigest()
 record=dict(working_diff_sha256=patch_hash,check=name,command=command,cwd=str(a.cwd or root),revision=revision,started_at=started,
  finished_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),duration_seconds=round(time.monotonic()-clock,3),
  exit_code=code,status=status,log=str(log.relative_to(root)),log_sha256=hashlib.sha256(log.read_bytes()).hexdigest())

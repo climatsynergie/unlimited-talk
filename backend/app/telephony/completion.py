@@ -49,7 +49,9 @@ def settle(db,identifier):
         if (card and card['is_active'] and card['version']==expected and not contact['do_not_contact']
                 and not contact['non_interested'] and card['stage_kind'] not in {'appointment','non_interested','do_not_contact'}
                 and not pending):
-            kind='no_answer' if row['outcome'] in {'no-answer','busy'} else 'other'
+            filtered=query(db,"""SELECT 1 FROM staging.voice_events WHERE intent_id=:id
+                AND kind='vmhunter.screen.decision' AND details->>'action'='hangup' LIMIT 1""",id=identifier).first()
+            kind='no_answer' if filtered or row['outcome'] in {'no-answer','busy'} else 'other'
             target=query(db,'SELECT id,name FROM staging.campaign_stages WHERE campaign_id=:campaign AND kind=:kind AND is_active',
                          campaign=campaign['id'],kind=kind).mappings().first()
             if target:

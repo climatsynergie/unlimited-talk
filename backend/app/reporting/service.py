@@ -165,8 +165,8 @@ def report(db,period,agent_id=None):
         agents=summaries,daily=days,hourly=hours,totals=combined,
         definitions={
             'calls':'Appels lancés : réservations effectivement autorisées par Twilio ; les préparations annulées sont exclues.',
-            'answered':'Connexions téléphoniques établies, hors boîtes vocales signalées par les agents. Une boîte vocale non signalée ne peut pas être reconnue automatiquement.',
-            'voicemail':'Boîtes vocales signalées par les agents ; une seule par appel, exclue des décrochés clients et des durées de conversation.',
+            'answered':'Connexions téléphoniques établies, hors boîtes vocales signalées par les agents ou identifiées par le filtre téléphonique. Les appels non analysés peuvent inclure des boîtes vocales non signalées.',
+            'voicemail':'Boîtes vocales signalées par les agents ou identifiées par le filtre téléphonique ; une seule par appel, exclue des décrochés clients et des durées de conversation.',
             'talk':'Durée fournisseur, sinon durée de l’enregistrement, hors boîtes vocales signalées. Une durée absente reste inconnue.',
             'incoming':'Appels entrants proposés aux agents, attribués à leur heure de présentation. Chaque agent sollicité compte une proposition ; les décrochés et durées connues sont indiqués séparément des appels sortants. Les appels restés dans la file sans agent ne sont pas attribués.',
             'bookings':'RDV comptés à leur création, au nom de leur créateur ; les annulations indiquent le statut actuel.',
