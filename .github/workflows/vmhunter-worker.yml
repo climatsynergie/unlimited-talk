@@ -54,6 +54,10 @@ jobs:
         env:
           FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
         run: python3 tests/verify_vmhunter_screen.py vmhunter-integration.py
+      - name: Test explicit campaign selection and shared account safety limits
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-multicampaign-integration.py
       - name: Publish the exact tested worker
         if: github.ref == 'refs/heads/main'
         id: publish

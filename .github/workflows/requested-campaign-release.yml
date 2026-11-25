@@ -1,0 +1,25 @@
+name: Requested campaign release
+on:
+  push:
+    branches: [main]
+    paths: [deployment/vmhunter/cvc-release-request.json]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: requested-campaign-release
+  cancel-in-progress: true
+jobs:
+  request-normal-deployment:
+    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    steps:
+      - name: Check out the explicitly requested release
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Validate the request and dispatch only after exact-source Foundation CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/dispatch_campaign_release.py

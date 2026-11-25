@@ -114,6 +114,7 @@ class Pilot:
     mode: str = 'observe'
     screening_approved: bool = False
     scope: str = 'pilot'
+    campaigns: frozenset = frozenset({PILOT_CAMPAIGN})
 
     @classmethod
     def parse(cls, value):
@@ -121,21 +122,24 @@ class Pilot:
             if not isinstance(value, dict):
                 raise ProtocolError()
             version = value.get('version')
-            screening = type(version) is int and version in {2, 3}
-            campaign_scope = type(version) is int and version == 3
+            screening = type(version) is int and version in {2, 3, 4}
+            campaign_scope = type(version) is int and version in {3, 4}
             expected = {
                     'version', 'pilot_id', 'enabled', 'mode', 'campaign_id',
                     'agent_ids', 'max_analyses', 'test_numbers', 'audio_approved'}
+            if version == 4:
+                expected.remove('campaign_id')
+                expected.add('campaign_ids')
             if screening:
                 expected.add('screening_approved')
             if campaign_scope:
                 expected.add('scope')
             if (set(value) != expected
-                    or type(version) is not int or version not in {1, 2, 3}
+                    or type(version) is not int or version not in {1, 2, 3, 4}
                     or campaign_scope and value['scope'] != 'campaign'
                     or value['mode'] != ('screen' if screening else 'observe')
                     or screening and type(value['screening_approved']) is not bool
-                    or UUID(value['campaign_id']) != PILOT_CAMPAIGN
+                    or version != 4 and UUID(value['campaign_id']) != PILOT_CAMPAIGN
                     or type(value['enabled']) is not bool
                     or type(value['audio_approved']) is not bool
                     or type(value['max_analyses']) is not int
@@ -143,6 +147,15 @@ class Pilot:
                     or not isinstance(value['agent_ids'], list)
                     or not isinstance(value['test_numbers'], list)):
                 raise ProtocolError()
+            if version == 4:
+                values = value['campaign_ids']
+                if not isinstance(values, list) or not 1 <= len(values) <= 20:
+                    raise ProtocolError()
+                campaigns = frozenset(UUID(item) for item in values)
+                if len(campaigns) != len(values):
+                    raise ProtocolError()
+            else:
+                campaigns = frozenset({PILOT_CAMPAIGN})
             agents = frozenset(UUID(item) for item in value['agent_ids'])
             numbers = frozenset(value['test_numbers'])
             if (len(agents) != len(value['agent_ids']) or len(agents) > 2
@@ -156,13 +169,13 @@ class Pilot:
             return cls(UUID(value['pilot_id']), value['enabled'], agents,
                        value['max_analyses'], numbers, value['audio_approved'],
                        value['mode'], value.get('screening_approved', False),
-                       'campaign' if campaign_scope else 'pilot')
+                       'campaign' if campaign_scope else 'pilot', campaigns)
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ProtocolError() from None
 
     def includes(self, row, *, campaign_member=False):
         return bool(self.enabled and self.audio_approved
-            and row.get('campaign_id') == PILOT_CAMPAIGN
+            and row.get('campaign_id') in self.campaigns
             and (self.scope == 'campaign' and campaign_member is True
                 and row.get('actor_id') is not None and row.get('contact_id') is not None
                 and isinstance(row.get('destination'), str)

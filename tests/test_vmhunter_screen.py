@@ -44,6 +44,37 @@ class ScreenContractTests(unittest.TestCase):
                     dict(dialer_generation=None),dict(state='finished'),dict(destination='invalid')):
                 self.assertFalse(approved.includes(row | changes,campaign_member=True))
 
+    def test_multiple_campaigns_are_explicit_and_all_assigned_agents_are_eligible(self):
+        other=uuid4()
+        value=screening_policy() | dict(version=4,scope='campaign',enabled=True,
+            audio_approved=True,screening_approved=True,campaign_ids=[str(vm.PILOT_CAMPAIGN),str(other)])
+        value.pop('campaign_id')
+        approved=vm.Pilot.parse(value)
+        self.assertEqual(approved.campaigns,frozenset({vm.PILOT_CAMPAIGN,other}))
+        for campaign in approved.campaigns:
+            for _ in range(20):
+                row=dict(actor_id=uuid4(),contact_id=uuid4(),campaign_id=campaign,
+                    destination='+14165550101',dialer_generation=1,state='authorized')
+                self.assertFalse(approved.includes(row))
+                self.assertTrue(approved.includes(row,campaign_member=True))
+                for changes in (dict(campaign_id=uuid4()),dict(contact_id=None),
+                        dict(dialer_generation=None),dict(state='finished')):
+                    self.assertFalse(approved.includes(row | changes,campaign_member=True))
+
+    def test_multiple_campaigns_cannot_enable_wildcards_or_implicit_scope(self):
+        value=screening_policy() | dict(version=4,scope='campaign',enabled=True,
+            audio_approved=True,screening_approved=True,campaign_ids=[str(uuid4())])
+        value.pop('campaign_id')
+        for changes in (dict(campaign_ids=[]),dict(campaign_ids='all'),dict(campaign_ids=['*']),
+                dict(campaign_ids=[value['campaign_ids'][0]]*2),dict(campaign_ids=[str(uuid4()) for _ in range(21)]),
+                dict(campaign_id=str(vm.PILOT_CAMPAIGN)),dict(version=3),dict(version=True),
+                dict(scope='all'),dict(audio_approved=False),dict(screening_approved=False),
+                dict(agent_ids=[str(uuid4())]),dict(test_numbers=['+14165550101'])):
+            with self.subTest(changes=changes),self.assertRaises(vm.ProtocolError):
+                vm.Pilot.parse(value | changes)
+        approved=vm.Pilot.parse(value)
+        self.assertNotIn(vm.PILOT_CAMPAIGN,approved.campaigns)
+
     def test_campaign_scope_cannot_be_implicitly_selected_or_mix_allowlists(self):
         value=screening_policy() | dict(version=3,scope='campaign',enabled=True,
             audio_approved=True,screening_approved=True)

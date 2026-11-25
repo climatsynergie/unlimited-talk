@@ -111,7 +111,7 @@ class Store:
             # a process death. These append-only facts require operator review.
             unresolved = db.execute(text('''SELECT 1 FROM staging.voice_events c
                 JOIN staging.voice_intents i ON i.id=c.intent_id
-                WHERE i.campaign_id=:campaign AND i.account_sid=:account
+                WHERE i.account_sid=:account
                 AND c.kind='vmhunter.claim'
                 AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
                     AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
@@ -125,22 +125,22 @@ class Store:
                 AND (c.created_at<clock_timestamp()-interval '20 seconds'
                     OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
                         AND r.kind='vmhunter.result')) LIMIT 1'''),
-                {'campaign': vm.PILOT_CAMPAIGN, 'account': self.profile.account_sid}).first()
+                {'account': self.profile.account_sid}).first()
             if unresolved:
                 return None
             used = db.execute(text('''SELECT count(*) FROM (
                 SELECT 1 FROM staging.voice_intents i JOIN staging.voice_events c ON c.intent_id=i.id
-                WHERE i.campaign_id=:campaign AND i.account_sid=:account AND c.kind='vmhunter.claim'
+                WHERE i.account_sid=:account AND c.kind='vmhunter.claim'
                   AND c.details->>'pilot_id'=:pilot LIMIT :budget) used'''),
-                {'campaign': vm.PILOT_CAMPAIGN, 'account': self.profile.account_sid,
+                {'account': self.profile.account_sid,
                  'pilot': str(pilot_id), 'budget': self.pilot.max_analyses}).scalar_one()
             active = db.execute(text('''SELECT count(*) FROM staging.voice_events c
                 JOIN staging.voice_intents i ON i.id=c.intent_id
-                WHERE i.account_sid=:account AND i.campaign_id=:campaign
+                WHERE i.account_sid=:account
                 AND i.created_at>clock_timestamp()-interval '35 minutes'
                 AND c.kind='vmhunter.claim' AND c.created_at>clock_timestamp()-interval '20 seconds'
                 AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id AND r.kind='vmhunter.result')'''),
-                {'account': self.profile.account_sid, 'campaign': vm.PILOT_CAMPAIGN}).scalar_one()
+                {'account': self.profile.account_sid}).scalar_one()
             if used >= self.pilot.max_analyses or active >= 2:
                 return None
             nonce = uuid4().hex
