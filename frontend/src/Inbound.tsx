@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { InboundBooking } from "./InboundBooking";
 import { ReceptionControl } from "./IncomingPhone";
 import { RecordingPlayer } from "./CallHistory";
+import { CallAppointment } from "./CallAppointment";
+import type { ClientAppointment } from "./CallAppointment";
 import { usePhone } from "./Phone";
 import { RecallButton, RecallControls } from "./Recall";
 import type { RecallPhone } from "./Recall";
@@ -35,6 +37,7 @@ type Queue = {
   routing_state?: string;
 };
 type Followup = {
+  client_appointment?: ClientAppointment | null;
   id: string;
   queue_id: string;
   caller_number: string | null;
@@ -76,6 +79,7 @@ type IncomingRecording = {
   state: string;
 };
 type Call = {
+  client_appointment?: ClientAppointment | null;
   id: string;
   called_number: string;
   outcome: string;
@@ -943,7 +947,17 @@ function FollowupDetail({
                 <strong>{outcomes[c.outcome]}</strong>
                 <span>{when(c.received_at, queue.timezone)}</span>
                 <span>Numéro appelé : {c.called_number}</span>
-                <IncomingRecordings items={c.recordings || []} />
+                {c.recordings?.length || c.client_appointment ? (
+                  <div className="call-recording-context">
+                    <div>
+                      <IncomingRecordings items={c.recordings || []} />
+                    </div>
+                    <CallAppointment
+                      appointment={c.client_appointment}
+                      onChanged={() => void refresh()}
+                    />
+                  </div>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -1407,13 +1421,22 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                                     </small>
                                   </span>
                                 </button>
-                                <RecallButton
-                                  phone={phone}
-                                  number={row.caller_number}
-                                  blocked={row.do_not_contact}
-                                  name={contact(row)}
-                                  onOpen={() => setDetail(row.id)}
-                                />
+                                <div className="inbound-contact-actions">
+                                  <button
+                                    type="button"
+                                    className="button secondary"
+                                    onClick={() => setDetail(row.id)}
+                                  >
+                                    Voir la fiche client
+                                  </button>
+                                  <RecallButton
+                                    phone={phone}
+                                    number={row.caller_number}
+                                    blocked={row.do_not_contact}
+                                    name={contact(row)}
+                                    onOpen={() => setDetail(row.id)}
+                                  />
+                                </div>
                               </li>
                             ))}
                           </ul>
@@ -1472,13 +1495,22 @@ export function Inbound({ admin, userId }: { admin: boolean; userId: string }) {
                                   Fiche client →
                                 </small>
                               </button>
-                              <RecallButton
-                                phone={phone}
-                                number={row.caller_number}
-                                blocked={row.do_not_contact}
-                                name={contact(row)}
-                                onOpen={() => setDetail(row.id)}
-                              />
+                              <div className="inbound-contact-actions">
+                                <button
+                                  type="button"
+                                  className="button secondary"
+                                  onClick={() => setDetail(row.id)}
+                                >
+                                  Voir la fiche client
+                                </button>
+                                <RecallButton
+                                  phone={phone}
+                                  number={row.caller_number}
+                                  blocked={row.do_not_contact}
+                                  name={contact(row)}
+                                  onOpen={() => setDetail(row.id)}
+                                />
+                              </div>
                             </div>
                           ))}
                           {!column.items.length ? (
@@ -1559,6 +1591,7 @@ function IncomingRecordings({ items }: { items: IncomingRecording[] }) {
   );
 }
 type ReceivedCall = {
+  client_appointment?: ClientAppointment | null;
   id: string;
   caller_number: string | null;
   received_at: string;
@@ -1685,7 +1718,17 @@ function IncomingHistory({
                     Voir la fiche client
                   </button>
                 </div>
-                <IncomingRecordings items={c.recordings} />
+                {c.recordings.length || c.client_appointment ? (
+                  <div className="call-recording-context">
+                    <div>
+                      <IncomingRecordings items={c.recordings} />
+                    </div>
+                    <CallAppointment
+                      appointment={c.client_appointment}
+                      onChanged={() => setRefresh((r) => r + 1)}
+                    />
+                  </div>
+                ) : null}
               </li>
             ))}
           </ol>

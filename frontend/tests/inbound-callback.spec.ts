@@ -819,3 +819,188 @@ test("appel reçu sans suivi : ouvrir la qualification depuis l’historique", a
   ).toBeEnabled();
   expect(f.unexpected).toEqual([]);
 });
+
+for (const view of ["Liste", "Pipeline"]) {
+  test(`entrant : accès explicite à la fiche depuis ${view}, sans ouvrir l’historique`, async ({
+    page,
+  }) => {
+    const f = await setup(page);
+    const board = page.getByRole("region", {
+      name: "Suivis des appels entrants",
+      exact: true,
+    });
+    await board.getByRole("button", { name: view, exact: true }).click();
+    await board
+      .getByRole("button", { name: "Voir la fiche client", exact: true })
+      .click();
+    await expect(
+      page
+        .getByRole("dialog")
+        .getByText("nina@example.invalid", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Appeler ce client", exact: true }),
+    ).toBeEnabled();
+    expect(f.reservations).toHaveLength(0);
+    expect(f.unexpected).toEqual([]);
+  });
+}
+
+test("entrant : enregistrement, rendez-vous confirmé et sa fiche complète sur mobile", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  const appointment = {
+    id: uuid(801),
+    starts_at: "2026-12-01T19:00:00Z",
+    ends_at: "2026-12-01T19:30:00Z",
+    timezone: "America/Toronto",
+    status: "booked",
+    phase: "confirmed",
+    creator_name: "Agent RDV QA",
+    campaign_name: "Campagne réception",
+    notes: "Prévoir l’accès au sous-sol.",
+  };
+  await page.route(`**/api/inbound/queues/${uuid(50)}/calls`, (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: uuid(60),
+            caller_number: number,
+            profile: f.followup.profile,
+            received_at: "2026-11-25T12:00:00Z",
+            outcome: "answered",
+            followup_id: null,
+            recordings: [
+              {
+                sid: "RE" + "a".repeat(32),
+                kind: "conversation",
+                duration: 90,
+                state: "pending_archive",
+              },
+            ],
+            client_appointment: appointment,
+          },
+        ],
+        has_more: false,
+      },
+    }),
+  );
+  await page.route(`**/api/calendar/${appointment.id}`, (route) =>
+    route.fulfill({
+      json: {
+        appointment: {
+          ...appointment,
+          campaign_id: uuid(100),
+          contact_id: uuid(101),
+          created_by: uuid(12),
+          version: 0,
+          phone: number,
+          profile: f.followup.profile,
+          qualification: {
+            schema_version: 3,
+            answers: { comments: "Les propriétaires seront présents." },
+          },
+        },
+        qualification_schema: qualificationSchema,
+        events: [],
+        has_more: false,
+        can_edit: false,
+      },
+    }),
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .getByRole("button", { name: /Historique des appels reçus/ })
+    .click();
+  const summary = page.getByRole("complementary", {
+    name: "Rendez-vous du client",
+  });
+  await expect(summary.getByText("Confirmé", { exact: true })).toBeVisible();
+  await expect(summary).toContainText("30 min");
+  await expect(summary).toContainText("Agent RDV QA");
+  await expect(summary).toContainText("America/Toronto");
+  await summary.getByText("Notes du rendez-vous", { exact: true }).click();
+  await expect(summary).toContainText(appointment.notes);
+  await expect(
+    page.getByText("Enregistrement : sauvegarde privée en cours."),
+  ).toBeVisible();
+  await summary
+    .getByRole("button", { name: "Voir les informations du RDV", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Les propriétaires seront présents.",
+  );
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: /Modifier/ }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true);
+  expect(f.reservations).toHaveLength(0);
+  expect(f.unexpected).toEqual([]);
+});
+
+test("conversations : le dernier rendez-vous annulé reste distinct de l’appel et de son audio", async ({
+  page,
+}) => {
+  const f = await setup(page);
+  await page.route("**/api/telephony/calls*", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: uuid(700),
+            created_at: "2026-11-25T12:00:00Z",
+            destination: number,
+            actor_name: "Agent appel QA",
+            caller_number: "+14165550102",
+            state: "finished",
+            outcome: "completed",
+            recordings: [
+              {
+                sid: "RE" + "b".repeat(32),
+                state: "pending_archive",
+                duration: 90,
+                playback_path: null,
+              },
+            ],
+            client_appointment: {
+              id: uuid(701),
+              starts_at: "2026-12-01T19:00:00Z",
+              ends_at: "2026-12-01T19:45:00Z",
+              timezone: "America/Toronto",
+              status: "cancelled",
+              phase: "invalid",
+              creator_name: "Autre agent RDV",
+              campaign_name: "Campagne du rendez-vous",
+              notes: "Client indisponible.",
+            },
+          },
+        ],
+        next_cursor: null,
+      },
+    }),
+  );
+  await page.goto("/conversations");
+  const summary = page.getByRole("complementary", {
+    name: "Rendez-vous du client",
+  });
+  await expect(summary).toContainText("Dernier rendez-vous du client");
+  await expect(summary.getByText("Non Valide", { exact: true })).toBeVisible();
+  await expect(summary).toContainText("45 min");
+  await expect(summary).toContainText("Autre agent RDV");
+  await expect(summary).not.toContainText("Agent appel QA");
+  await expect(
+    page.getByText("Enregistrement : sauvegarde privée en cours."),
+  ).toBeVisible();
+  expect(f.reservations).toHaveLength(0);
+  expect(f.unexpected).toEqual([]);
+});

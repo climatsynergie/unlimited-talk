@@ -3,6 +3,8 @@ import { api, date, message } from "./api";
 import { Notice, Field, Icon } from "./ui";
 import { CallContactDialog } from "./Campaigns";
 import { RecallControls } from "./Recall";
+import { CallAppointment } from "./CallAppointment";
+import type { ClientAppointment } from "./CallAppointment";
 
 export type Recording = {
   sid: string;
@@ -26,6 +28,7 @@ type Call = {
   caller_number?: string;
   finished_at?: string | null;
   recordings: Recording[];
+  client_appointment?: ClientAppointment | null;
 };
 type Cursor = { id: string; created_at: string };
 type Result = { items: Call[]; next_cursor: Cursor | null };
@@ -484,19 +487,27 @@ export function CallHistory({
                         ? outcomes[call.outcome]
                         : states[call.state]}
                     </p>
-                    {call.recordings.length ? (
-                      call.recordings.map((recording) => (
-                        <RecordingPlayer
-                          key={call.id + recording.sid}
-                          recording={recording}
-                          disabled={disabled}
-                        />
-                      ))
-                    ) : (
-                      <p className="call-recording-empty">
-                        Aucun enregistrement disponible pour cet appel.
-                      </p>
-                    )}
+                    <div className="call-recording-context">
+                      <div>
+                        {call.recordings.length ? (
+                          call.recordings.map((recording) => (
+                            <RecordingPlayer
+                              key={call.id + recording.sid}
+                              recording={recording}
+                              disabled={disabled}
+                            />
+                          ))
+                        ) : (
+                          <p className="call-recording-empty">
+                            Aucun enregistrement disponible pour cet appel.
+                          </p>
+                        )}
+                      </div>
+                      <CallAppointment
+                        appointment={call.client_appointment}
+                        onChanged={() => void load(pages)}
+                      />
+                    </div>
                   </div>
                 </article>
               </>

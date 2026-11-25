@@ -12,6 +12,7 @@ from app.identity import service as identity
 from app.identity.service import query
 from app.telephony import archive_storage
 from app.telephony.twilio_voice import sid
+from app.telephony.client_appointment import enrich
 
 router=APIRouter(prefix='/api/telephony',tags=['Enregistrements'])
 # Bounded streaming, not whole-file buffering: twenty agents plus supervisors.
@@ -72,7 +73,7 @@ def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UU
                     if r['state']=='archived' and r['content_bytes'] is not None else None}
                 for r in recordings if r['intent_id']==item['id']]
         cursor={'id':str(items[-1]['id']),'created_at':items[-1]['created_at'].isoformat()} if len(rows)>20 else None
-        return {'items':items,'next_cursor':cursor}
+        return {'items':enrich(db,items,phone_key='destination'),'next_cursor':cursor}
 
 
 @router.get('/call-agents')

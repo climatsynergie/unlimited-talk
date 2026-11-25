@@ -3898,6 +3898,92 @@ dialog:has(.campaign-settings-shell) > .modal-heading {
   gap: 12px;
   align-items: center;
 }
+.inbound-contact-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.inbound-pipeline-item > .inbound-contact-actions {
+  margin: 0 12px;
+}
+.call-recording-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 12px;
+}
+.call-recording-context > div,
+.call-appointment {
+  min-width: 0;
+}
+.call-recording-context audio {
+  width: 100%;
+  max-width: 100%;
+}
+.call-appointment {
+  padding: 14px;
+  border: 1px solid #cbdcf1;
+  border-radius: 12px;
+  background: #f7faff;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.call-appointment-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.call-appointment-phase {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.call-appointment-time {
+  color: #263d62;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.call-appointment-zone {
+  display: block;
+  color: #5c6474;
+  font-weight: 400;
+}
+.call-appointment dl {
+  display: grid;
+  gap: 7px;
+}
+.call-appointment dl > div {
+  display: grid;
+  grid-template-columns: 75px minmax(0, 1fr);
+  gap: 8px;
+}
+.call-appointment dt,
+.call-appointment-empty {
+  color: #5c6474;
+  font-size: 12px;
+}
+.call-appointment dd {
+  margin: 0;
+  color: #263d62;
+}
+.call-appointment details {
+  margin: 12px 0;
+}
+.call-appointment details p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.call-appointment .button {
+  margin-top: 8px;
+  white-space: normal;
+}
+@media (max-width: 1050px) {
+  .call-recording-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .recall-action {
   display: grid;
   gap: 5px;

@@ -5,6 +5,7 @@ from app.identity.routes import same_origin
 from app.identity.service import authenticate,query
 from app.telephony.inbound_service import queue
 from app.telephony.incoming_schema import installed
+from app.telephony.client_appointment import enrich
 
 router=APIRouter(prefix='/api/inbound',dependencies=[Depends(same_origin)])
 
@@ -33,5 +34,6 @@ def listing(identifier:UUID,request:Request,before:UUID|None=None):
             WHERE c.queue_id=:queue AND (CAST(:before AS uuid) IS NULL OR (c.received_at,c.id)<(CAST(:stamp AS timestamptz),CAST(:before AS uuid)))
             ORDER BY c.received_at DESC,c.id DESC LIMIT 21''',queue=identifier,before=before,stamp=cursor).mappings().all()
         media=recordings(db,[row['id'] for row in rows[:20]])
-        return {'items':[{**row,'recordings':[{key:value for key,value in recording.items() if key!='call_id'}
-            for recording in media if recording['call_id']==row['id']]} for row in rows[:20]],'has_more':len(rows)>20}
+        items=[{**row,'recordings':[{key:value for key,value in recording.items() if key!='call_id'}
+            for recording in media if recording['call_id']==row['id']]} for row in rows[:20]]
+        return {'items':enrich(db,items,phone_key='caller_number'),'has_more':len(rows)>20}

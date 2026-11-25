@@ -166,7 +166,9 @@ def detail(identifier: UUID, request: Request, before: int | None = Query(None, 
         events = identity.query(db, '''SELECT e.id,e.action,e.details,e.created_at,u.display_name AS actor_name
             FROM staging.inbound_followup_events e LEFT JOIN staging.identity_users u ON u.id=e.actor_id
             WHERE e.followup_id=:id AND (CAST(:before AS bigint) IS NULL OR e.id<:before) ORDER BY e.id DESC LIMIT 51''', id=identifier, before=before).mappings().all()
-        return {'followup':row,'events':[dict(e,id=str(e['id'])) for e in events[:50]],'has_more':len(events)>50}
+        from app.telephony.client_appointment import enrich
+        return {'followup':enrich(db,[row],phone_key='caller_number')[0],
+            'events':[dict(e,id=str(e['id'])) for e in events[:50]],'has_more':len(events)>50}
 
 
 @router.get('/followups/{identifier}/calls')
@@ -191,7 +193,8 @@ def calls(identifier: UUID, request: Request, before: UUID | None = None):
             ids={r['id']:r['call_id'] for r in linked};media=recordings(db,list(ids.values()))
             for row in result:
                 row['recordings']=[{k:v for k,v in item.items() if k!='call_id'} for item in media if item['call_id']==ids.get(row['id'])]
-        return {'items':result,'has_more':len(rows)>50}
+        from app.telephony.client_appointment import enrich
+        return {'items':enrich(db,result,phone_key='caller_number'),'has_more':len(rows)>50}
 
 
 @router.post('/followups/{identifier}')
