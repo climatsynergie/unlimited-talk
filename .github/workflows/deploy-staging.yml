@@ -29,7 +29,7 @@ jobs:
         env:
           REQUESTED_REVISION: ${{ inputs.revision }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_USER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           [[ "$REQUESTED_REVISION" =~ ^[a-f0-9]{40}$ ]] || exit 1
@@ -55,7 +55,7 @@ jobs:
           STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
           REQUESTED_REVISION: ${{ inputs.revision }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_USER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           test -n "$STAGING_SSH_HOST" && test -n "$STAGING_SSH_KEY" && test -n "$STAGING_SSH_KNOWN_HOSTS" || { echo 'Configure the three staging environment secrets first.'; exit 1; }
