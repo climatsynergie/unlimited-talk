@@ -196,7 +196,7 @@ class Streams:
                 auth=aiohttp.BasicAuth(self.profile.api_key_sid, self.profile.api_key_secret),
                 timeout=aiohttp.ClientTimeout(total=2), allow_redirects=False) as response:
             raw = await response.content.read(vm.MAX_MESSAGE + 1)
-            if response.status != 201:
+            if response.status not in {200, 201}:
                 code = None
                 try:
                     value = vm.object_json(raw)

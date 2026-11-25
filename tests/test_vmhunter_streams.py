@@ -13,7 +13,7 @@ from test_vmhunter import PROFILE
 
 class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.requests=[];self.status=None;self.redirect=None
+        self.requests=[];self.status=None;self.redirect=None;self.create_status=201;self.create_override=None
         self.call='CA'+'1'*32;self.stream='MZ'+'2'*32
         self.name='ut-vm-'+'a'*32
         async def handle(request):
@@ -25,7 +25,7 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
                 return web.json_response({'code':20004},status=405)
             if 'Status' in data:
                 return web.json_response({'sid':self.stream,'call_sid':self.call,'name':self.name,'status':data['Status']})
-            return web.json_response({'sid':self.stream,'call_sid':self.call},status=201)
+            return web.json_response(self.create_override if self.create_override is not None else {'sid':self.stream,'call_sid':self.call},status=self.create_status)
         app=web.Application();app.router.add_route('*','/{path:.*}',handle)
         self.server=TestServer(app);await self.server.start_server()
         self.session=aiohttp.ClientSession(trust_env=False)
@@ -51,6 +51,14 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
     async def test_stop_updates_only_the_stream_not_the_call(self):
         self.assertTrue(await self.client.stop(self.call,self.stream))
         self.assertEqual(self.requests[0][:3],('POST','/Calls/'+self.call+'/Streams/'+self.stream+'.json',{'Status':'stopped'}))
+
+    async def test_real_provider_success_http_200_keeps_bound_stream_checks(self):
+        self.create_status=200
+        self.assertEqual(await self.client.start({'call_sid':self.call},self.name,'SYNTHETIC-CAPABILITY'),self.stream)
+        for invalid in ({'sid':self.stream,'call_sid':'CA'+'3'*32},{'sid':'invalid','call_sid':self.call},{}):
+            self.create_override=invalid
+            with self.assertRaises(vm.ProtocolError):
+                await self.client.start({'call_sid':self.call},self.name,'SYNTHETIC-CAPABILITY')
 
     async def test_timeout_recovery_stops_exact_named_stream_using_supported_post(self):
         self.assertEqual(await self.client.recover(self.call,self.name),self.stream)
