@@ -58,6 +58,10 @@ jobs:
         env:
           FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
         run: python3 tests/verify_vmhunter_screen.py vmhunter-multicampaign-integration.py
+      - name: Test Free subscription quota across prior-period history and preserved safety
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-provider-quota-integration.py
       - name: Publish the exact tested worker
         if: github.ref == 'refs/heads/main'
         id: publish

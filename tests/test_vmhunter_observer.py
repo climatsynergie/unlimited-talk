@@ -227,6 +227,34 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch()
         self.assertEqual(len(self.store.claims),1)
 
+    async def test_subscription_health_reports_monthly_provider_allowance_not_old_total_cap(self):
+        self.store.provider_quota=module.ProviderQuota()
+        async with self.session.get(self.server.make_url('/health/live')) as response:
+            self.assertEqual(response.status,200)
+            value=await response.json()
+        self.assertEqual(value['quota'],dict(source='vmhunter_subscription',monthly_allowance=5000,internal_total_limit=None))
+        self.assertTrue(value['accepting'])
+
+    async def test_provider_quota_exhaustion_preserves_calls_and_recovers_after_provider_reset(self):
+        self.answer={'AMDSTATUS':'FAILED','AMDCAUSE':'LIMIT_REACHED'}
+        self.observer.clock=lambda:100.0
+        await self.dispatch();await self.streams.started.wait()
+        async with await self.twilio(protocol_version='0.2.0') as ws:
+            await ws.send_json(media());await ws.receive()
+        _,result,details=await self.finish()
+        self.assertEqual(result,vm.Result('FAILED','LIMIT_REACHED'))
+        self.assertEqual(vm.screen_action(result,stop_confirmed=details['stop_confirmed']),'continue')
+        self.assertFalse(self.observer.degraded)
+        self.assertEqual(self.observer.backoff_until,130.0)
+        self.store.claims.clear();self.store.results.clear();self.streams.started.clear()
+        await self.dispatch();self.assertFalse(self.store.claims)
+        self.observer.clock=lambda:131.0
+        self.answer={'AMDSTATUS':'HUMAN','AMDCAUSE':'HUMAN'}
+        await self.dispatch();await self.streams.started.wait()
+        async with await self.twilio(protocol_version='0.2.0') as ws:
+            await ws.send_json(media());await ws.receive()
+        self.assertEqual((await self.finish())[1],vm.Result('HUMAN','HUMAN'))
+
     async def test_shutdown_stops_active_stream_and_persists_failure(self):
         await self.dispatch();await self.streams.started.wait()
         await self.observer.close()

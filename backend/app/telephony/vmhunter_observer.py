@@ -6,6 +6,7 @@ The sidecar independently rechecks the campaign, agent, test number and budget.
 """
 import asyncio
 from contextlib import suppress
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -71,9 +72,45 @@ async def dispatch(profile, identifier, params):
         log.warning('vmhunter_observation_unavailable')
 
 
+@dataclass(frozen=True)
+class ProviderQuota:
+    """The subscribed provider owns monthly usage and its renewal boundary.
+
+    A routing policy's historical canary cap must not become a lifetime quota.
+    This explicitly configured Free allowance never changes the subscription.
+    """
+    monthly_allowance: int = 5000
+
+    def __post_init__(self):
+        if type(self.monthly_allowance) is not int or self.monthly_allowance != 5000:
+            raise ValueError('Quota gratuit VM Hunter invalide.')
+
+    @classmethod
+    def from_environment(cls, pilot):
+        source = os.environ.get('VMHUNTER_QUOTA_SOURCE')
+        allowance = os.environ.get('VMHUNTER_MONTHLY_ALLOWANCE')
+        if source is None and allowance is None:
+            return None
+        if source != 'provider' or allowance != '5000':
+            raise ValueError('Configuration du quota VM Hunter invalide.')
+        value = cls()
+        value.validate_scope(pilot)
+        return value
+
+    def validate_scope(self, pilot):
+        if (pilot.scope != 'campaign' or pilot.mode != 'screen'
+                or not pilot.audio_approved or not pilot.screening_approved):
+            raise ValueError('Quota fournisseur réservé aux campagnes approuvées.')
+
+
 class Store:
-    def __init__(self, engine, profile, pilot):
+    def __init__(self, engine, profile, pilot, *, provider_quota=None):
+        if provider_quota is not None:
+            if not isinstance(provider_quota, ProviderQuota):
+                raise ValueError('Quota fournisseur invalide.')
+            provider_quota.validate_scope(pilot)
         self.engine, self.profile, self.pilot = engine, profile, pilot
+        self.provider_quota = provider_quota
 
     def claim(self, payload):
         identifier, call, pilot_id = parse_payload(payload)
@@ -128,12 +165,17 @@ class Store:
                 {'account': self.profile.account_sid}).first()
             if unresolved:
                 return None
-            used = db.execute(text('''SELECT count(*) FROM (
-                SELECT 1 FROM staging.voice_intents i JOIN staging.voice_events c ON c.intent_id=i.id
-                WHERE i.account_sid=:account AND c.kind='vmhunter.claim'
-                  AND c.details->>'pilot_id'=:pilot LIMIT :budget) used'''),
-                {'account': self.profile.account_sid,
-                 'pilot': str(pilot_id), 'budget': self.pilot.max_analyses}).scalar_one()
+            # Keep explicit fixed canary budgets for legacy/test operation.
+            # Subscription mode delegates the monthly quota and renewal to VM
+            # Hunter, which refuses exhausted Free accounts without overages.
+            used = 0
+            if self.provider_quota is None:
+                used = db.execute(text('''SELECT count(*) FROM (
+                    SELECT 1 FROM staging.voice_intents i JOIN staging.voice_events c ON c.intent_id=i.id
+                    WHERE i.account_sid=:account AND c.kind='vmhunter.claim'
+                      AND c.details->>'pilot_id'=:pilot LIMIT :budget) used'''),
+                    {'account': self.profile.account_sid,
+                     'pilot': str(pilot_id), 'budget': self.pilot.max_analyses}).scalar_one()
             active = db.execute(text('''SELECT count(*) FROM staging.voice_events c
                 JOIN staging.voice_intents i ON i.id=c.intent_id
                 WHERE i.account_sid=:account
@@ -141,7 +183,7 @@ class Store:
                 AND c.kind='vmhunter.claim' AND c.created_at>clock_timestamp()-interval '20 seconds'
                 AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id AND r.kind='vmhunter.result')'''),
                 {'account': self.profile.account_sid}).scalar_one()
-            if used >= self.pilot.max_analyses or active >= 2:
+            if (self.provider_quota is None and used >= self.pilot.max_analyses) or active >= 2:
                 return None
             nonce = uuid4().hex
             event(db, identifier, 'vmhunter.claim', {'pilot_id': str(pilot_id), 'call_sid': call, 'nonce': nonce})
@@ -426,7 +468,11 @@ def application(observer):
     app.router.add_get(MEDIA_PATH, observer.media)
 
     async def live(_request):
-        return web.json_response({'status': 'alive', 'mode': observer.pilot.mode,
+        provider_quota = getattr(observer.store, 'provider_quota', None)
+        quota = ({'source': 'vmhunter_subscription', 'monthly_allowance': provider_quota.monthly_allowance,
+                  'internal_total_limit': None} if provider_quota is not None else
+                 {'source': 'internal_canary', 'internal_total_limit': observer.pilot.max_analyses})
+        return web.json_response({'status': 'alive', 'mode': observer.pilot.mode, 'quota': quota,
                                   'accepting': observer.pilot.enabled and not observer.degraded
                                       and observer.clock() >= observer.backoff_until})
     app.router.add_get('/health/live', live)
@@ -454,7 +500,7 @@ async def runtime():
         raise RuntimeError('Identifiants de détection invalides.')
     engine = make_engine()
     session = aiohttp.ClientSession(trust_env=False, timeout=aiohttp.ClientTimeout(total=8))
-    observer = Observer(profile, pilot, Store(engine, profile, pilot), Streams(profile, session),
+    observer = Observer(profile, pilot, Store(engine, profile, pilot, provider_quota=ProviderQuota.from_environment(pilot)), Streams(profile, session),
                         vm.Client(credentials['api_key'], session=session))
     app = application(observer)
 

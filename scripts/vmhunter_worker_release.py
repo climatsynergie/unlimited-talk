@@ -19,6 +19,7 @@ STATE=ROOT/'vmhunter-runtime'
 REPOSITORY='climatsynergie/unlimited-talk'
 PACKAGE='ghcr.io/'+REPOSITORY+'-api'
 API_BASE='36a451a4e974dc0a8ff80bbe5540806f57fa3c6f'
+POLICY_V4_API='35b4ba8f076b9ead2712aed239656a8423eb09ff'
 
 
 def run(args,*,data=None,env=None,timeout=120):
@@ -56,9 +57,31 @@ def verify(revision):
  print(json.dumps({'worker_provenance_verified':True,**receipt}),flush=True)
 
 
+def compatible_api_revision(release_name,health,worker_revision):
+ revision=release_name.removeprefix('git-')
+ if (not release_name.startswith('git-') or not re.fullmatch('[a-f0-9]{40}',revision)
+     or revision not in {API_BASE,POLICY_V4_API,worker_revision}
+     or health.get('status')!='ready' or health.get('environment')!='staging'
+     or health.get('migration')!='0012_incoming_runtime'
+     or health.get('communications')!='manual' or health.get('calling_enabled') is not True
+     or health.get('revision')!=revision):
+  raise ValueError('Compatible healthy manual-call API required')
+ return revision
+
+
+def configured_worker(candidate,image,monthly_quota=None):
+ if set(candidate['services'])!={'vmhunter'}:raise ValueError('Only the media worker may change')
+ if monthly_quota is not None and (type(monthly_quota) is not int or monthly_quota!=5000):raise ValueError('Only the owner-authorized Free allowance is supported')
+ candidate=json.loads(json.dumps(candidate));service=candidate['services']['vmhunter'];service['image']=image
+ if monthly_quota is not None:
+  service['environment']['VMHUNTER_QUOTA_SOURCE']='provider'
+  service['environment']['VMHUNTER_MONTHLY_ALLOWANCE']=str(monthly_quota)
+ return candidate
+
+
 def update_policy(enabled):
  path=ROOT/'vmhunter-campaign-policy.json';value=json.loads(path.read_text())
- assert value['version']==3 and value['scope']=='campaign' and value['audio_approved'] and value['screening_approved']
+ assert value['version'] in {3,4} and value['scope']=='campaign' and value['audio_approved'] and value['screening_approved']
  value['enabled']=enabled
  fd=os.open(path,os.O_WRONLY|os.O_NOFOLLOW)
  with os.fdopen(fd,'wb') as f:f.write((json.dumps(value)+'\n').encode());f.truncate();f.flush();os.fsync(f.fileno())
@@ -82,9 +105,10 @@ async def main():
   query(db,'SET TRANSACTION READ ONLY')
   claims=[dict(r) for r in query(db,"""SELECT i.id,i.child_call_sid,c.details FROM staging.voice_intents i
    JOIN staging.voice_events c ON c.intent_id=i.id AND c.kind='vmhunter.claim'
-   WHERE i.account_sid=:account AND i.campaign_id=:campaign AND i.state IN ('finished','cancelled','expired')
+   WHERE i.account_sid=:account AND i.state IN ('finished','cancelled','expired')
    AND NOT EXISTS(SELECT 1 FROM staging.voice_events r WHERE r.intent_id=i.id AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
-   LIMIT 10""",account=profile.account_sid,campaign=vm.PILOT_CAMPAIGN).mappings()]
+   AND NOT EXISTS(SELECT 1 FROM staging.voice_events r WHERE r.intent_id=i.id AND r.kind='vmhunter.cleanup_verified' AND r.details->>'nonce'=c.details->>'nonce' AND r.details->>'call_sid'=c.details->>'call_sid' AND r.details->>'stream_stop_confirmed'='true' AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
+   LIMIT 10""",account=profile.account_sid).mappings()]
  async with aiohttp.ClientSession(trust_env=False,timeout=aiohttp.ClientTimeout(total=5)) as session:
   for row in claims:
    child=row['child_call_sid'];nonce=row['details']['nonce']
@@ -106,7 +130,7 @@ asyncio.run(main())
  print(run([*base,'exec','-T','vmhunter','python','-'],data=program,timeout=60),flush=True)
 
 
-def rollout(revision):
+def rollout(revision,monthly_quota=None):
  import fcntl
  receipt_path=Path('/root/vmhunter-worker-'+revision[:7]+'/approved-image.json')
  receipt=json.loads(receipt_path.read_text())
@@ -114,37 +138,42 @@ def rollout(revision):
  assert receipt_path.stat().st_uid==0 and receipt_path.stat().st_mode&0o077==0
  with open('/run/lock/unlimited-talk-staging-deploy.lock','a') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-  release=Path('/srv/unlimited-talk-staging/current').resolve();assert release.name=='git-'+API_BASE
+  release=Path('/srv/unlimited-talk-staging/current').resolve()
   import urllib.request
   with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=5) as response:health=json.load(response)
-  assert health['calling_enabled'] and health['revision']==API_BASE
+  api_revision=compatible_api_revision(release.name,health,revision)
   base=command(release)
   update_policy(False)
-  time.sleep(10) # Let the bounded nine-second jobs drain; ordinary calls continue.
+  time.sleep(20) # Nine-second jobs plus bounded cleanup/database work; calls continue.
   recover_terminal_calls(base)
-  path=STATE/'compose.json';original=path.read_bytes();candidate=json.loads(original)
-  assert set(candidate['services'])=={'vmhunter'}
-  candidate['services']['vmhunter']['image']=receipt['image']
+  path=STATE/'compose.json';original=path.read_bytes();candidate=configured_worker(json.loads(original),receipt['image'],monthly_quota)
   path.write_text(json.dumps(candidate,indent=2)+'\n');path.chmod(0o600)
   try:
    run([*base,'up','-d','--pull','never','--force-recreate','--wait','--wait-timeout','60'],timeout=90)
    update_policy(True)
    run([*base,'up','-d','--pull','never','--force-recreate','--wait','--wait-timeout','60'],timeout=90)
    with urllib.request.urlopen('http://127.0.0.1:8110/health/ready',timeout=5) as response:after=json.load(response)
-   assert after['calling_enabled'] and after['revision']==API_BASE
+   assert compatible_api_revision(release.name,after,revision)==api_revision
+   probe="import json,urllib.request\nwith urllib.request.urlopen('http://127.0.0.1:8080/health/live') as r:print(json.dumps(json.load(r)))"
+   worker_health=json.loads(run([*base,'exec','-T','vmhunter','python','-'],data=probe,timeout=15))
+   assert worker_health['accepting'] is True
+   if monthly_quota is not None:
+    assert worker_health['quota']==dict(source='vmhunter_subscription',monthly_allowance=monthly_quota,internal_total_limit=None)
   except Exception:
    update_policy(False);path.write_bytes(original)
    run([*base,'up','-d','--pull','never','--force-recreate','--wait','--wait-timeout','60'],timeout=90)
    raise
-  print(json.dumps(dict(worker_revision=revision,worker_image=receipt['image'],api_revision=API_BASE,api_restarted=False,ordinary_calls_enabled=True,vmhunter_enabled=True)),flush=True)
+  print(json.dumps(dict(worker_revision=revision,worker_image=receipt['image'],api_revision=api_revision,api_restarted=False,ordinary_calls_enabled=True,vmhunter_enabled=True,effective_quota=worker_health.get('quota'))),flush=True)
 
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['verify','rollout','disable']);p.add_argument('revision',nargs='?');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['verify','rollout','disable']);p.add_argument('revision',nargs='?');p.add_argument('--provider-monthly-quota',type=int,choices=[5000]);a=p.parse_args()
  assert os.geteuid()==0;os.umask(0o077)
+ assert a.provider_monthly_quota is None or a.action=='rollout'
  if a.action=='disable':update_policy(False);print('VM filtering disabled; ordinary calls unchanged');return
  assert isinstance(a.revision,str) and re.fullmatch('[a-f0-9]{40}',a.revision)
- {'verify':verify,'rollout':rollout}[a.action](a.revision)
+ if a.action=='verify':verify(a.revision)
+ else:rollout(a.revision,a.provider_monthly_quota)
 
 if __name__=='__main__':
  try:main()
