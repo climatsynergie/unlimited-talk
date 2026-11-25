@@ -1,0 +1,34 @@
+name: Retry approved CVC main deployment
+on:
+  push:
+    branches: [ops/cvc-deployment-retry-20261125]
+    paths: [.github/workflows/cvc-deployment-retry.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  request-approved-main-only:
+    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/cvc-deployment-retry-20261125'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Retry the same tested main release through the normal protected workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_REVISION: 35b4ba8f076b9ead2712aed239656a8423eb09ff
+        run: |
+          python3 - <<'PY'
+          import json,os,subprocess
+          repository='climatsynergie/unlimited-talk'
+          revision=os.environ['REQUESTED_REVISION']
+          assert os.environ['GITHUB_REPOSITORY']==repository
+          assert os.environ['GITHUB_REF']=='refs/heads/ops/cvc-deployment-retry-20261125'
+          def api(path):
+              return json.loads(subprocess.check_output(['gh','api','repos/'+repository+'/'+path],text=True))
+          assert api('commits/main')['sha']==revision,'Main moved; this one-time retry is stale'
+          runs=api('actions/workflows/ci.yml/runs?head_sha='+revision+'&branch=main&status=success')['workflow_runs']
+          assert any(r['head_sha']==revision and r['head_branch']=='main' and r['event']=='push'
+              and r['head_repository']['full_name']==repository and r['conclusion']=='success' for r in runs)
+          subprocess.run(['gh','workflow','run','deploy-staging.yml','--repo',repository,'--ref','main','-f','revision='+revision],check=True)
+          print('Requested the existing protected main deployment; its idle-call guard remains enforced.')
+          PY
