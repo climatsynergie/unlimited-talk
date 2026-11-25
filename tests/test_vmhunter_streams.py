@@ -13,7 +13,7 @@ from test_vmhunter import PROFILE
 
 class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.requests=[];self.status=None;self.redirect=None;self.create_status=201;self.create_override=None
+        self.requests=[];self.status=None;self.redirect=None;self.create_status=201;self.create_override=None;self.call_override=None
         self.call='CA'+'1'*32;self.stream='MZ'+'2'*32
         self.name='ut-vm-'+'a'*32
         async def handle(request):
@@ -22,6 +22,8 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
             if self.redirect:return web.Response(status=302,headers={'Location':self.redirect})
             if self.status:return web.json_response({'private':'must not be reported'},status=self.status)
             if request.method=='GET':
+                if request.path=='/Calls/'+self.call+'.json' and self.call_override is not None:
+                    return web.json_response(self.call_override)
                 return web.json_response({'code':20004},status=405)
             if 'Status' in data:
                 return web.json_response({'sid':self.stream,'call_sid':self.call,'name':self.name,'status':data['Status']})
@@ -91,6 +93,33 @@ class StreamHTTPTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(vm.ProtocolError):
             await self.client.start({'call_sid':self.call},'unique-test','SYNTHETIC-CAPABILITY')
         self.assertEqual(len(self.requests),1)
+
+    async def test_terminal_call_proof_requires_exact_account_sid_and_known_final_state(self):
+        valid=dict(sid=self.call,account_sid=PROFILE.account_sid,status='completed')
+        for status in ('completed','busy','no-answer','failed','canceled'):
+            self.call_override=valid | {'status':status}
+            self.assertTrue(await self.client.call_finished(self.call))
+        for change in ({'status':'in-progress'},{'status':'ringing'},{'status':'queued'},
+                {'status':'future'},{'status':[]},{'sid':'CA'+'3'*32},
+                {'account_sid':'AC'+'4'*32}):
+            self.call_override=valid | change
+            self.assertFalse(await self.client.call_finished(self.call))
+        self.call_override={}
+        self.assertFalse(await self.client.call_finished(self.call))
+        self.assertTrue(all(r[0]=='GET' and r[1]=='/Calls/'+self.call+'.json'
+                            and r[2]=={} and r[4]=={} for r in self.requests))
+        self.assertTrue(all(r[3]==aiohttp.BasicAuth(PROFILE.api_key_sid,PROFILE.api_key_secret).encode()
+                            for r in self.requests))
+
+    async def test_terminal_read_never_trusts_error_missing_resource_or_redirect(self):
+        self.call_override=dict(sid=self.call,account_sid=PROFILE.account_sid,status='completed')
+        for status in (400,401,403,404,500):
+            self.status=status
+            self.assertFalse(await self.client.call_finished(self.call))
+        self.status=None;self.redirect=str(self.server.make_url('/credential-stealer'))
+        self.assertFalse(await self.client.call_finished(self.call))
+        self.assertEqual(len(self.requests),6)
+        self.assertFalse(any(r[1]=='/credential-stealer' for r in self.requests))
 
     async def test_completed_call_with_already_removed_stream_is_safe(self):
         self.status=404

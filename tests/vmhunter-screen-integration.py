@@ -193,7 +193,7 @@ async def main():
     session=aiohttp.ClientSession(trust_env=False,timeout=aiohttp.ClientTimeout(total=10))
 
     class Streams:
-        def __init__(self):self.started=0;self.stopped=0;self.stop_ok=True;self.pumps=[]
+        def __init__(self):self.started=0;self.stopped=0;self.stop_ok=True;self.pumps=[];self.terminal=False
         async def start(self,payload,name,token):
             self.started+=1;sid='MZ'+uuid4().hex
             async def pump():
@@ -209,6 +209,7 @@ async def main():
             return sid
         async def stop(self,call,sid):self.stopped+=1;return self.stop_ok
         async def recover(self,call,name):return None
+        async def call_finished(self,call):return self.terminal
 
     streams=Streams()
     classifier=vm.Client('SYNTHETIC-KEY',session=session,endpoint=str(upstream.make_url('/ws')).replace('http:','ws:'))
@@ -438,6 +439,38 @@ async def main():
         screen.RPC_URL=saved;assert not events(unavailable,'disposition.voicemail')
         await finish_call(session,unavailable)
 
+        # A real callee hangup can end the call before the stop POST. An
+        # authenticated final provider state proves there is no billable stream;
+        # persist the proof and allow the next agent call to be analysed.
+        provider_state['answer']={'AMDSTATUS':'HUMAN','AMDCAUSE':'HUMAN'}
+        gate=asyncio.Event();provider_state['gate']=gate
+        streams.stop_ok=False;streams.terminal=True
+        # Keep these two extra calls on the second fixture contact so the
+        # existing first contact's 20-attempt daily budget is not exhausted.
+        ended=new_call(1);await voice(session,ended);await progress(session,ended)
+        fields=dict(CallSid=ended['child'],ParentCallSid=ended['parent'])
+        before=len(provider_configs)
+        assert (await signed(session,'screen-start',ended,fields)).find('Gather') is not None
+        for _ in range(100):
+            if len(provider_configs)>before:break
+            await asyncio.sleep(.005)
+        assert len(provider_configs)==before+1
+        await finish_call(session,ended)
+        assert row(ended)['state']=='finished'
+        gate.set()
+        ended_result=await wait_result(ended)
+        assert ended_result['stream_stop_confirmed'] is True and not observer.degraded
+        assert not events(ended,'disposition.voicemail')
+        provider_state['gate']=None;streams.stop_ok=True;streams.terminal=False
+        following=new_call(1);await voice(session,following);await progress(session,following)
+        fields=dict(CallSid=following['child'],ParentCallSid=following['parent'])
+        before=streams.started
+        assert (await signed(session,'screen-start',following,fields)).find('Gather') is not None
+        assert (await wait_result(following))['status']=='HUMAN'
+        assert len(list(await signed(session,'screen-result',following,fields)))==0
+        assert streams.started==before+1 and not observer.degraded
+        await finish_call(session,following)
+
         # A cleanup failure cannot reject a caller and disables later analyses.
         streams.stop_ok=False;provider_state['answer']={'AMDSTATUS':'MACHINE','AMDCAUSE':'MACHINE_BEEP'}
         cleanup=new_call();await voice(session,cleanup);await progress(session,cleanup)
@@ -457,7 +490,7 @@ async def main():
             'real_local_two_agent_concurrency':True,'voicemail_excluded_from_talk':True,
             'voicemail_pipeline_no_answer':True,'dialers_remain_running':True,
             'manual_and_unselected_unchanged':True,'human_pipeline_edit_preserved':True,'actual_deadline_recovery':True,
-            'explicit_pause_and_stop_preserved':True,
+            'explicit_pause_and_stop_preserved':True,'terminal_cleanup_keeps_next_analysis':True,
             'missing_start_database_outage_recovers':True,
             'late_start_cannot_reverse_recovery':True,'ringing_does_not_expire_screening':True,
             'provider_analyses':len(provider_configs),'real_calls':0}))

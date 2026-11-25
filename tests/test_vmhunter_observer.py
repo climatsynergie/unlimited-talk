@@ -26,7 +26,7 @@ class Store:
 class Streams:
     def __init__(self):
         self.stopped=[];self.token=None;self.recovered=[]
-        self.started=asyncio.Event();self.fail=False;self.stop_ok=True
+        self.started=asyncio.Event();self.fail=False;self.stop_ok=True;self.terminal=False
     async def start(self,payload,name,token):
         self.token=token;self.started.set()
         if self.fail:raise TimeoutError()
@@ -34,6 +34,7 @@ class Streams:
     async def recover(self,call,name):
         self.recovered.append((call,name));return 'MZ'+'c'*32
     async def stop(self,call,stream):self.stopped.append((call,stream));return self.stop_ok
+    async def call_finished(self,call):return self.terminal
 
 
 class ObserverTests(unittest.IsolatedAsyncioTestCase):
@@ -184,6 +185,32 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.store.claims.clear()
         self.assertEqual(await self.dispatch(),202)
         self.assertFalse(self.store.claims)
+
+    async def test_verified_terminal_call_does_not_open_cleanup_circuit(self):
+        # The real completed one-second call's stop endpoint returns 400/21220.
+        # Only the independently bound authenticated Call GET can release it.
+        self.streams.stop_ok=False
+        self.streams.call_finished=AsyncMock(return_value=True)
+        await self.dispatch()
+        await self.streams.started.wait()
+        async with await self.twilio(protocol_version='0.2.0') as ws:
+            await ws.send_json(media())
+            await ws.receive()
+        _,result,details=await self.finish()
+        self.assertEqual(result,vm.Result('MACHINE','MACHINE_BEEP'))
+        self.assertTrue(details['stop_confirmed'])
+        self.assertFalse(self.observer.degraded)
+        self.streams.call_finished.assert_awaited_once_with(self.payload['call_sid'])
+
+    async def test_terminal_status_read_failure_keeps_safety_circuit_and_result(self):
+        self.streams.fail=True;self.streams.stop_ok=False
+        self.streams.call_finished=AsyncMock(side_effect=TimeoutError())
+        await self.dispatch()
+        _,result,details=await self.finish()
+        self.assertEqual(result.status,'FAILED')
+        self.assertFalse(details['stop_confirmed'])
+        self.assertTrue(self.observer.degraded)
+        self.streams.call_finished.assert_awaited_once_with(self.payload['call_sid'])
 
     async def test_auth_failure_bypasses_new_analysis_until_backoff_expires(self):
         self.answer={'AMDSTATUS':'FAILED','AMDCAUSE':'AUTH_FAILED'}

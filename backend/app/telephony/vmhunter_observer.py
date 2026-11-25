@@ -177,7 +177,7 @@ def parse_payload(payload, nonce=False):
 
 
 class Streams:
-    """Only Media Streams creation/stopping; no call update/hangup capability."""
+    """Create/stop streams and read their bound call; never update/hang up calls."""
     def __init__(self, profile, session):
         self.profile, self.session = profile, session
 
@@ -224,6 +224,24 @@ class Streams:
                 return False
             result = vm.object_json(raw)
             return result.get('sid') == stream and result.get('status') == 'stopped'
+
+    async def call_finished(self, call):
+        """A verified terminal Call cannot retain a billable live Media Stream.
+
+        A failed stop alone proves nothing. Read only the exact call already
+        validated by url(); require its account, SID and terminal provider state.
+        """
+        url = self.url(call).removesuffix('/Streams.json') + '.json'
+        async with self.session.get(url,
+                auth=aiohttp.BasicAuth(self.profile.api_key_sid, self.profile.api_key_secret),
+                timeout=aiohttp.ClientTimeout(total=2), allow_redirects=False) as response:
+            if response.status != 200:
+                return False
+            value = vm.object_json(await response.content.read(vm.MAX_MESSAGE + 1))
+            status = value.get('status')
+            return (value.get('sid') == call and value.get('account_sid') == self.profile.account_sid
+                    and isinstance(status, str)
+                    and status in {'completed', 'busy', 'no-answer', 'failed', 'canceled'})
 
     async def recover(self, call, name):
         """Stop an uncertain creation by its unique name; never create again.
@@ -311,6 +329,14 @@ class Observer:
             if job['stream']:
                 try:
                     stopped = await self.streams.stop(payload['call_sid'], job['stream'])
+                except Exception:
+                    stopped = False
+            if not stopped:
+                # A fast callee hangup races the stop POST (Twilio 21220).
+                # Preserve the circuit unless the authenticated provider read
+                # independently proves this exact child call is terminal.
+                try:
+                    stopped = await self.streams.call_finished(payload['call_sid'])
                 except Exception:
                     stopped = False
             if not stopped:
