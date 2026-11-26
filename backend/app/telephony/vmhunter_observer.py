@@ -217,7 +217,7 @@ class Store:
             event(db, identifier, 'vmhunter.result', details)
 
 
-    def cleanup_candidates(self):
+    def cleanup_candidates(self, *, include_recent=False):
         """Bounded account-wide recovery also discovers interrupted prior workers."""
         with self.engine.connect() as db:
             db.execute(text('SET TRANSACTION READ ONLY'))
@@ -233,10 +233,10 @@ class Store:
                     AND r.details->>'call_sid'=c.details->>'call_sid'
                     AND r.details->>'nonce'=c.details->>'nonce'
                     AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
-                AND (c.created_at<clock_timestamp()-interval '20 seconds'
+                AND (:include_recent OR c.created_at<clock_timestamp()-interval '20 seconds'
                     OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
                         AND r.kind='vmhunter.result'))
-                ORDER BY c.id LIMIT 10"""), {'account': self.profile.account_sid}).mappings()
+                ORDER BY c.id LIMIT 10"""), {'account': self.profile.account_sid, 'include_recent': include_recent}).mappings()
             return [dict(row['details'], intent_id=str(row['intent_id'])) for row in rows]
 
     def verify_cleanup(self, payload, status):
@@ -452,7 +452,7 @@ class Observer:
     async def recover_cleanup(self):
         """Retry terminal reads after transient cleanup errors; never clear on a timer."""
         try:
-            pending = await asyncio.to_thread(self.store.cleanup_candidates)
+            pending = await asyncio.to_thread(self.store.cleanup_candidates, include_recent=self.degraded)
             if pending:
                 self.degraded = True
             for payload in pending:
@@ -464,7 +464,7 @@ class Observer:
                 except Exception as error:
                     log.warning('vmhunter_cleanup_retry_failed type=%s', type(error).__name__)
             if not self.jobs:
-                remaining = await asyncio.to_thread(self.store.cleanup_candidates) if pending else pending
+                remaining = await asyncio.to_thread(self.store.cleanup_candidates, include_recent=True) if pending else pending
                 self.degraded = bool(remaining)
         except Exception as error:
             self.degraded = True

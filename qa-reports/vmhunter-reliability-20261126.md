@@ -32,3 +32,10 @@ Two initial focused local attempts failed to import `app` after the working dire
 ## Deployment and limits
 
 PENDING: exact-source worker CI, signed image verification, isolated worker rollout, explicit eleven-campaign scope activation and independent live checks. The primary API should remain revision35, with unchanged container start time; no API restart is needed for this extension. Normal protected API deployment guards are unchanged. Real carrier audio, provider accuracy, a 17–20-agent all-filtered capacity test, and browser UI testing of this server-only change are NOT EXECUTED. Wider existing production certification blockers remain; this scoped repair does not certify the entire app as defect-free.
+
+
+## Pre-expansion failure-boundary follow-up
+
+A further executed regression identified a narrow gap when both cleanup and its result write fail before the 20-second lease expires: a recovery poll using only stale claims could incorrectly clear the in-memory degraded flag. Normal admission still retained the two-slot durable capacity and subsequently blocked at lease expiry, but unconfirmed cleanup must never be cleared in that interval. A degraded worker now requests recent unconfirmed claims too; normal healthy in-flight analysis is excluded from routine recovery discovery. This is covered by a specific failed pre-fix regression and the expanded PostgreSQL proof.
+
+Latest complete backend run: **329 PASS**, `evidence/vmhunter-recovery-fresh-lease-backend-20261126.json`, exit 0. Expanded PostgreSQL proof: `evidence/vmhunter-recovery-fresh-lease-postgres-20261126.json`, exit 0. Earlier tests and intermediate rollout evidence remain preserved. The first repair restored the two existing campaigns and independently verified the two historical terminal calls. The broader campaign expansion remains pending the final worker's exact-source CI and verification.

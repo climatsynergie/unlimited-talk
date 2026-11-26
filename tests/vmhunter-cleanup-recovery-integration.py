@@ -43,5 +43,14 @@ with engine.connect() as db:
  assert query(db,"SELECT details->'audio_stats' FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.result'",id=next_claim['intent_id']).scalar_one()==dict(pcm_bytes=320,frames=1,signal_frames=0)
  assert query(db,'SELECT version_num FROM staging.alembic_version').scalar_one()=='0012_incoming_runtime'
 finish(next_claim)
+# Lost result writes must not allow a recent unconfirmed claim to disappear
+# during its 20-second lease. Healthy in-flight jobs remain outside discovery.
+recent=call(campaigns[0],0);recent_claim=store.claim(recent);assert recent_claim
+assert store.cleanup_candidates()==[]
+assert store.cleanup_candidates(include_recent=True)==[recent_claim]
+assert not store.verify_cleanup(recent_claim,'completed')
+finish(recent_claim)
+assert store.verify_cleanup(recent_claim,'completed')
+assert store.cleanup_candidates(include_recent=True)==[]
 print(json.dumps(dict(late_terminal_recovery=True,live_call_protected=True,nonce_call_pilot_account_binding=True,concurrent_recovery_idempotent=True,history_unchanged=True,initialsilence_continues=True,schema='0012_incoming_runtime',migration_required=False,real_calls=0)))
 engine.dispose()

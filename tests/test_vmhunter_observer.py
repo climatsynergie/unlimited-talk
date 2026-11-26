@@ -232,7 +232,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch();await self.finish()
         self.assertTrue(self.observer.degraded)
         pending=list(self.store.claims)
-        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.cleanup_candidates=lambda **_:pending.copy()
         self.store.verify_cleanup=lambda payload,status:pending.remove(payload) is None
         self.streams.terminal_status=AsyncMock(return_value=None)
         await self.observer.recover_cleanup()
@@ -249,7 +249,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_failure_never_clears_unverified_streams(self):
         self.observer.degraded=True
-        self.store.cleanup_candidates=lambda:list(self.store.claims) or [self.payload | {'nonce':'a'*32}]
+        self.store.cleanup_candidates=lambda **_:list(self.store.claims) or [self.payload | {'nonce':'a'*32}]
         self.store.verify_cleanup=lambda *_:self.fail('Unverified cleanup must not be persisted')
         self.streams.terminal_status=AsyncMock(side_effect=TimeoutError('private provider body'))
         with self.assertLogs(module.log,level='WARNING') as logs:
@@ -260,17 +260,32 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_only_unknown_or_live_result_cannot_resume_filter(self):
         self.observer.degraded=True
         pending=[self.payload | {'nonce':'a'*32}]
-        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.cleanup_candidates=lambda **_:pending.copy()
         self.store.verify_cleanup=lambda *_:False # DB state/binding has not verified terminal.
         self.streams.terminal_status=AsyncMock(return_value='completed')
         await self.observer.recover_cleanup()
         self.assertTrue(self.observer.degraded)
         self.assertEqual(pending,[self.payload | {'nonce':'a'*32}])
 
+    async def test_recent_unconfirmed_claim_is_not_cleared_after_a_result_write_failure(self):
+        self.observer.degraded=True
+        pending=[self.payload | {'nonce':'a'*32}]
+        requested=[]
+        def snapshot(*,include_recent=False):
+            requested.append(include_recent)
+            return pending.copy() if include_recent else []
+        self.store.cleanup_candidates=snapshot
+        self.store.verify_cleanup=lambda *_:self.fail('A live call cannot be cleared')
+        self.streams.terminal_status=AsyncMock(return_value=None)
+        await self.observer.recover_cleanup()
+        self.assertTrue(self.observer.degraded)
+        self.assertTrue(all(requested))
+        self.assertEqual(len(pending),1)
+
     async def test_periodic_recovery_runs_and_stops_with_the_application(self):
         await self.server.close()
         pending=[self.payload | {'nonce':'a'*32}]
-        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.cleanup_candidates=lambda **_:pending.copy()
         self.store.verify_cleanup=lambda payload,status:pending.remove(payload) is None
         self.streams.terminal_status=AsyncMock(return_value=None)
         self.server=TestServer(module.application(self.observer,recovery_interval=0.01))
