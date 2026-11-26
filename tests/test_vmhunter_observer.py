@@ -94,7 +94,7 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result,vm.Result('MACHINE','MACHINE_BEEP'))
         self.assertEqual(result.observation_action,'continue')
         self.assertEqual(self.received[1],b'\0'*320)
-        self.assertEqual(details,{'stop_confirmed':True})
+        self.assertEqual(details,{'stop_confirmed':True,'audio_stats':dict(pcm_bytes=320,frames=1,signal_frames=0)})
         self.assertEqual(len(self.streams.stopped),1)
         self.assertNotIn('SYNTHETIC-VM-KEY',repr(self.store.results))
 
@@ -111,6 +111,19 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(details['stop_confirmed'])
         self.assertEqual(len(self.streams.stopped),1)
         self.assertFalse(self.observer.degraded)
+
+    async def test_initial_silence_is_kept_with_content_free_audio_diagnostics(self):
+        self.answer={'AMDSTATUS':'MACHINE','AMDCAUSE':'INITIALSILENCE'}
+        await self.dispatch();await self.streams.started.wait()
+        async with await self.twilio(protocol_version='0.2.0') as ws:
+            # Nonzero synthetic samples prove delivery; they do not prove speech.
+            import base64
+            message=media();message['media']['payload']=base64.b64encode(b'\x00'*160).decode()
+            await ws.send_json(message);await ws.receive()
+        _,result,details=await self.finish()
+        self.assertEqual(result,vm.Result('MACHINE','INITIALSILENCE'))
+        self.assertEqual(vm.screen_action(result,stop_confirmed=details['stop_confirmed']),'continue')
+        self.assertEqual(details['audio_stats'],dict(pcm_bytes=320,frames=1,signal_frames=1))
 
     async def test_unknown_protocol_version_is_rejected_without_consuming_valid_job(self):
         await self.dispatch()
@@ -211,6 +224,68 @@ class ObserverTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(details['stop_confirmed'])
         self.assertTrue(self.observer.degraded)
         self.streams.call_finished.assert_awaited_once_with(self.payload['call_sid'])
+
+    async def test_late_terminal_proof_recovers_circuit_and_accepts_next_call(self):
+        # The real 21:48 timeout occurred while the customer call was still live.
+        # A later verified end must recover without an operator or API restart.
+        self.streams.fail=True;self.streams.stop_ok=False
+        await self.dispatch();await self.finish()
+        self.assertTrue(self.observer.degraded)
+        pending=list(self.store.claims)
+        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.verify_cleanup=lambda payload,status:pending.remove(payload) is None
+        self.streams.terminal_status=AsyncMock(return_value=None)
+        await self.observer.recover_cleanup()
+        self.assertTrue(self.observer.degraded)
+        self.assertEqual(len(pending),1)
+        self.streams.terminal_status.return_value='completed'
+        await self.observer.recover_cleanup()
+        self.assertFalse(pending)
+        self.assertFalse(self.observer.degraded)
+        self.store.claims.clear();self.store.results.clear()
+        self.observer.backoff_until=0
+        await self.dispatch()
+        self.assertEqual(len(self.store.claims),1)
+
+    async def test_recovery_failure_never_clears_unverified_streams(self):
+        self.observer.degraded=True
+        self.store.cleanup_candidates=lambda:list(self.store.claims) or [self.payload | {'nonce':'a'*32}]
+        self.store.verify_cleanup=lambda *_:self.fail('Unverified cleanup must not be persisted')
+        self.streams.terminal_status=AsyncMock(side_effect=TimeoutError('private provider body'))
+        with self.assertLogs(module.log,level='WARNING') as logs:
+            await self.observer.recover_cleanup()
+        self.assertTrue(self.observer.degraded)
+        self.assertNotIn('private provider body',str(logs.output))
+
+    async def test_provider_only_unknown_or_live_result_cannot_resume_filter(self):
+        self.observer.degraded=True
+        pending=[self.payload | {'nonce':'a'*32}]
+        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.verify_cleanup=lambda *_:False # DB state/binding has not verified terminal.
+        self.streams.terminal_status=AsyncMock(return_value='completed')
+        await self.observer.recover_cleanup()
+        self.assertTrue(self.observer.degraded)
+        self.assertEqual(pending,[self.payload | {'nonce':'a'*32}])
+
+    async def test_periodic_recovery_runs_and_stops_with_the_application(self):
+        await self.server.close()
+        pending=[self.payload | {'nonce':'a'*32}]
+        self.store.cleanup_candidates=lambda:pending.copy()
+        self.store.verify_cleanup=lambda payload,status:pending.remove(payload) is None
+        self.streams.terminal_status=AsyncMock(return_value=None)
+        self.server=TestServer(module.application(self.observer,recovery_interval=0.01))
+        await self.server.start_server()
+        self.assertTrue(self.observer.degraded)
+        self.streams.terminal_status.return_value='completed'
+        for _ in range(100):
+            if not self.observer.degraded:break
+            await asyncio.sleep(0.005)
+        self.assertFalse(self.observer.degraded)
+        self.assertFalse(pending)
+        await self.server.close()
+        count=self.streams.terminal_status.await_count
+        await asyncio.sleep(0.03)
+        self.assertEqual(self.streams.terminal_status.await_count,count)
 
     async def test_auth_failure_bypasses_new_analysis_until_backoff_expires(self):
         self.answer={'AMDSTATUS':'FAILED','AMDCAUSE':'AUTH_FAILED'}

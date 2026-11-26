@@ -40,3 +40,13 @@ class QuotaTests(unittest.TestCase):
             with self.subTest(value=value),self.assertRaises(ValueError):
                 Store(None,PROFILE,value,provider_quota=ProviderQuota())
         with self.assertRaises(ValueError):Store(None,PROFILE,pilot,provider_quota=True)
+
+    def test_audio_diagnostics_reject_raw_content_and_invalid_unbounded_counters(self):
+        from uuid import uuid4
+        pilot=self.pilot();store=Store(None,PROFILE,pilot)
+        payload=dict(intent_id=str(uuid4()),call_sid='CA'+'a'*32,pilot_id=str(pilot.identifier),nonce='b'*32)
+        for stats in ({'raw_audio':'private'},dict(pcm_bytes=320,frames=True,signal_frames=0),
+                dict(pcm_bytes=320,frames=1,signal_frames=2),dict(pcm_bytes=1,frames=1,signal_frames=0),
+                dict(pcm_bytes=320*176,frames=176,signal_frames=1)):
+            with self.subTest(stats=stats),self.assertRaises(ValueError):
+                store.result(payload,vm.Result('MACHINE','INITIALSILENCE'),stop_confirmed=True,audio_stats=stats)

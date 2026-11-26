@@ -14,7 +14,7 @@ from uuid import uuid4
 
 root=Path(__file__).resolve().parents[1]
 proof_script=sys.argv[1] if len(sys.argv)>1 else 'vmhunter-screen-integration.py'
-assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py'}
+assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py','vmhunter-cleanup-recovery-integration.py'}
 base=['sudo','-n','docker','compose','--project-directory',str(root)]
 base+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*base,'config','--format','json']))

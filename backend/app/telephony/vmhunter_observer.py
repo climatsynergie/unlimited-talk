@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import struct
 import time
 from uuid import UUID, uuid4
 
@@ -26,6 +27,7 @@ from app.telephony.twilio_voice import ManualVoiceProfile, sid
 log = logging.getLogger(__name__)
 RPC_URL = 'http://vmhunter:8080/private/observe'
 MEDIA_PATH = '/api/telephony/vmhunter/media'
+TERMINAL_PROVIDER_STATES = frozenset({'completed', 'busy', 'no-answer', 'failed', 'canceled'})
 
 
 def policy_from_file(path):
@@ -189,8 +191,14 @@ class Store:
             event(db, identifier, 'vmhunter.claim', {'pilot_id': str(pilot_id), 'call_sid': call, 'nonce': nonce})
             return {**payload, 'nonce': nonce}
 
-    def result(self, payload, result, *, stop_confirmed):
+    def result(self, payload, result, *, stop_confirmed, audio_stats=None):
         identifier, call, pilot_id = parse_payload(payload, nonce=True)
+        if audio_stats is not None and (not isinstance(audio_stats, dict)
+                or set(audio_stats) != {'pcm_bytes','frames','signal_frames'}
+                or any(type(v) is not int for v in audio_stats.values())
+                or not 0 <= audio_stats['signal_frames'] <= audio_stats['frames'] <= vm.MAX_AUDIO_BYTES // 160
+                or audio_stats['pcm_bytes'] != audio_stats['frames'] * 320):
+            raise ValueError('Compteurs audio invalides.')
         with self.engine.begin() as db:
             db.execute(text("SET LOCAL lock_timeout='250ms'"))
             db.execute(text("SET LOCAL statement_timeout='1500ms'"))
@@ -201,9 +209,55 @@ class Store:
                                  {'id': identifier}).scalar_one_or_none()
             if exists or claimed != {'pilot_id': str(pilot_id), 'call_sid': call, 'nonce': payload['nonce']}:
                 return
-            event(db, identifier, 'vmhunter.result', {
+            details = {
                 'pilot_id': str(pilot_id), 'status': result.status, 'cause': result.cause,
-                'action': result.observation_action, 'stream_stop_confirmed': stop_confirmed})
+                'action': result.observation_action, 'stream_stop_confirmed': stop_confirmed}
+            if audio_stats is not None:
+                details['audio_stats'] = dict(audio_stats)
+            event(db, identifier, 'vmhunter.result', details)
+
+
+    def cleanup_candidates(self):
+        """Bounded account-wide recovery also discovers interrupted prior workers."""
+        with self.engine.connect() as db:
+            db.execute(text('SET TRANSACTION READ ONLY'))
+            db.execute(text("SET LOCAL statement_timeout='1500ms'"))
+            rows = db.execute(text("""SELECT c.intent_id, c.details FROM staging.voice_events c
+                JOIN staging.voice_intents i ON i.id=c.intent_id
+                WHERE i.account_sid=:account AND c.kind='vmhunter.claim'
+                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                    AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
+                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                    AND r.kind='vmhunter.cleanup_verified' AND i.state IN ('finished','cancelled','expired')
+                    AND r.details->>'stream_stop_confirmed'='true'
+                    AND r.details->>'call_sid'=c.details->>'call_sid'
+                    AND r.details->>'nonce'=c.details->>'nonce'
+                    AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
+                AND (c.created_at<clock_timestamp()-interval '20 seconds'
+                    OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+                        AND r.kind='vmhunter.result'))
+                ORDER BY c.id LIMIT 10"""), {'account': self.profile.account_sid}).mappings()
+            return [dict(row['details'], intent_id=str(row['intent_id'])) for row in rows]
+
+    def verify_cleanup(self, payload, status):
+        """Append a late authenticated terminal proof; never edit call/history facts."""
+        identifier, call, pilot_id = parse_payload(payload, nonce=True)
+        if not isinstance(status, str) or status not in TERMINAL_PROVIDER_STATES:
+            return False
+        with self.engine.begin() as db:
+            db.execute(text("SET LOCAL lock_timeout='250ms'"))
+            db.execute(text("SET LOCAL statement_timeout='1500ms'"))
+            row = db.execute(text('''SELECT state,child_call_sid FROM staging.voice_intents
+                WHERE id=:id AND account_sid=:account FOR UPDATE'''),
+                {'id': identifier, 'account': self.profile.account_sid}).mappings().first()
+            claim = db.execute(text("SELECT details FROM staging.voice_events WHERE intent_id=:id AND kind='vmhunter.claim'"),
+                {'id': identifier}).scalar_one_or_none()
+            if (not row or row['state'] not in {'finished','cancelled','expired'}
+                    or row['child_call_sid'] != call or claim != dict(pilot_id=str(pilot_id),call_sid=call,nonce=payload['nonce'])):
+                return False
+            event(db, identifier, 'vmhunter.cleanup_verified', dict(call_sid=call, nonce=payload['nonce'],
+                stream_stop_confirmed=True, provider_status=status, source='automatic-terminal-recovery'))
+            return True
 
 
 def parse_payload(payload, nonce=False):
@@ -267,7 +321,7 @@ class Streams:
             result = vm.object_json(raw)
             return result.get('sid') == stream and result.get('status') == 'stopped'
 
-    async def call_finished(self, call):
+    async def terminal_status(self, call):
         """A verified terminal Call cannot retain a billable live Media Stream.
 
         A failed stop alone proves nothing. Read only the exact call already
@@ -278,12 +332,16 @@ class Streams:
                 auth=aiohttp.BasicAuth(self.profile.api_key_sid, self.profile.api_key_secret),
                 timeout=aiohttp.ClientTimeout(total=2), allow_redirects=False) as response:
             if response.status != 200:
-                return False
+                return None
             value = vm.object_json(await response.content.read(vm.MAX_MESSAGE + 1))
             status = value.get('status')
-            return (value.get('sid') == call and value.get('account_sid') == self.profile.account_sid
-                    and isinstance(status, str)
-                    and status in {'completed', 'busy', 'no-answer', 'failed', 'canceled'})
+            if (value.get('sid') == call and value.get('account_sid') == self.profile.account_sid
+                    and isinstance(status, str) and status in TERMINAL_PROVIDER_STATES):
+                return status
+            return None
+
+    async def call_finished(self, call):
+        return await self.terminal_status(call) is not None
 
     async def recover(self, call, name):
         """Stop an uncertain creation by its unique name; never create again.
@@ -385,10 +443,32 @@ class Observer:
                 self.degraded = True
                 log.warning('vmhunter_stream_stop_unconfirmed')
             try:
-                await asyncio.to_thread(self.store.result, payload, result, stop_confirmed=stopped)
+                await asyncio.to_thread(self.store.result, payload, result, stop_confirmed=stopped,
+                    **({'audio_stats': dict(job['audio_stats'])} if 'audio_stats' in job else {}))
             except Exception:
                 log.warning('vmhunter_result_unavailable')
             self.jobs.pop(payload['nonce'], None)
+
+    async def recover_cleanup(self):
+        """Retry terminal reads after transient cleanup errors; never clear on a timer."""
+        try:
+            pending = await asyncio.to_thread(self.store.cleanup_candidates)
+            if pending:
+                self.degraded = True
+            for payload in pending:
+                parse_payload(payload, nonce=True)
+                try:
+                    status = await self.streams.terminal_status(payload['call_sid'])
+                    if isinstance(status, str) and status in TERMINAL_PROVIDER_STATES:
+                        await asyncio.to_thread(self.store.verify_cleanup, payload, status)
+                except Exception as error:
+                    log.warning('vmhunter_cleanup_retry_failed type=%s', type(error).__name__)
+            if not self.jobs:
+                remaining = await asyncio.to_thread(self.store.cleanup_candidates) if pending else pending
+                self.degraded = bool(remaining)
+        except Exception as error:
+            self.degraded = True
+            log.warning('vmhunter_cleanup_store_unavailable type=%s', type(error).__name__)
 
     async def media(self, request):
         if self.handshakes >= 4 or not self.pilot.enabled:
@@ -430,6 +510,8 @@ class Observer:
                     raise vm.ProtocolError()
                 job['socket'], job['stream'] = ws, audio.sid
 
+            job['audio_stats'] = dict(pcm_bytes=0, frames=0, signal_frames=0)
+
             async def frames():
                 while audio.total < vm.MAX_AUDIO_BYTES:
                     message = vm.object_json(await ws.receive_str())
@@ -438,6 +520,11 @@ class Observer:
                             raise vm.ProtocolError()
                         break
                     for frame in audio.feed(message):
+                        stats = job['audio_stats']
+                        stats['frames'] += 1
+                        stats['pcm_bytes'] += len(frame)
+                        # Signal energy is a diagnostic, never a speech verdict.
+                        stats['signal_frames'] += int(any(abs(v[0]) > 256 for v in struct.iter_unpack('<h', frame)))
                         yield frame
 
             phase = 'provider_audio'
@@ -462,8 +549,23 @@ class Observer:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def application(observer):
+def application(observer, *, recovery_interval=None):
     app = web.Application(client_max_size=vm.MAX_MESSAGE)
+    if recovery_interval is not None:
+        async def recovery_context(_app):
+            await observer.recover_cleanup()
+            async def watch():
+                while True:
+                    await asyncio.sleep(recovery_interval)
+                    await observer.recover_cleanup()
+            task = asyncio.create_task(watch())
+            try:
+                yield
+            finally:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        app.cleanup_ctx.append(recovery_context)
     app.router.add_post('/private/observe', observer.observe)
     app.router.add_get(MEDIA_PATH, observer.media)
 
@@ -473,6 +575,7 @@ def application(observer):
                   'internal_total_limit': None} if provider_quota is not None else
                  {'source': 'internal_canary', 'internal_total_limit': observer.pilot.max_analyses})
         return web.json_response({'status': 'alive', 'mode': observer.pilot.mode, 'quota': quota,
+                                  'cleanup_pending': observer.degraded, 'active_analyses': len(observer.jobs),
                                   'accepting': observer.pilot.enabled and not observer.degraded
                                       and observer.clock() >= observer.backoff_until})
     app.router.add_get('/health/live', live)
@@ -502,7 +605,7 @@ async def runtime():
     session = aiohttp.ClientSession(trust_env=False, timeout=aiohttp.ClientTimeout(total=8))
     observer = Observer(profile, pilot, Store(engine, profile, pilot, provider_quota=ProviderQuota.from_environment(pilot)), Streams(profile, session),
                         vm.Client(credentials['api_key'], session=session))
-    app = application(observer)
+    app = application(observer, recovery_interval=15)
 
     async def cleanup(_app):
         await session.close()

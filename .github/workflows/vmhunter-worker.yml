@@ -9,6 +9,10 @@ on:
       - tests/vmhunter*.py
       - tests/verify_vmhunter*.py
       - .github/workflows/vmhunter-worker.yml
+      - scripts/configure_vmhunter_campaigns.py
+      - scripts/vmhunter_worker_release.py
+      - tests/host/test_campaign_release_request.py
+      - tests/host/test_vmhunter_worker_release.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,6 +33,8 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - name: Test host deployment and campaign scope boundaries
+        run: python3 -m unittest discover -s tests/host -p 'test_*.py' -v
       - name: Build the isolated worker from the pinned tested application image
         run: docker build --build-arg GIT_REVISION="$GITHUB_SHA" -f deployment/vmhunter/Dockerfile -t unlimited-talk-vmhunter:test .
       - name: Test backend boundaries and real loopback provider contracts
@@ -62,6 +68,10 @@ jobs:
         env:
           FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
         run: python3 tests/verify_vmhunter_screen.py vmhunter-provider-quota-integration.py
+      - name: Test delayed terminal cleanup, concurrent recovery and preserved history
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-cleanup-recovery-integration.py
       - name: Publish the exact tested worker
         if: github.ref == 'refs/heads/main'
         id: publish

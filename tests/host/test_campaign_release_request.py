@@ -54,3 +54,17 @@ class CampaignConfigurationTests(unittest.TestCase):
         for change in ({'version':2},{'campaign_id':str(uuid4())},{'scope':'all'},{'audio_approved':False},
                 {'screening_approved':False},{'agent_ids':[str(uuid4())]},{'test_numbers':['+14165550101']}):
             with self.subTest(change=change),self.assertRaises(ValueError):configuration.candidate_policy(self.previous() | change)
+
+    def test_explicit_expansion_of_v4_policy_preserves_quota_and_scope(self):
+        previous=configuration.candidate_policy(self.previous())
+        selected=[*configuration.CAMPAIGNS,str(uuid4())]
+        value=configuration.candidate_policy(previous,selected)
+        self.assertEqual(value['campaign_ids'],selected)
+        self.assertEqual(value['pilot_id'],previous['pilot_id'])
+        self.assertEqual(value['max_analyses'],500)
+        self.assertEqual(previous['campaign_ids'],configuration.CAMPAIGNS)
+        self.assertEqual(value['agent_ids'],[])
+        for invalid in ([],['*'],[selected[0],selected[0]],[str(uuid4()) for _ in range(21)]):
+            with self.subTest(invalid=invalid),self.assertRaises((ValueError,TypeError)):
+                configuration.candidate_policy(previous,invalid)
+        with self.assertRaises(ValueError):configuration.candidate_policy(previous | {'audio_approved':False},selected)
