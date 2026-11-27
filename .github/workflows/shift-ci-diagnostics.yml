@@ -4,7 +4,7 @@ on:
     branches: [ops/shift-ci-diagnostics-20261127]
     paths: [.github/workflows/shift-ci-diagnostics.yml]
 permissions:
-  contents: write
+  contents: read
   actions: read
 jobs:
   diagnostics:
@@ -29,27 +29,20 @@ jobs:
           assert job['run_id']==45921665592 and job['conclusion']=='failure'
           raw=subprocess.check_output(['gh','api','repos/'+repo+'/actions/jobs/140253575334/logs'],text=True)
           marker='Run python3 tests/verify_import_dispatch_race.py'
-          assert marker in raw
-          fragment=raw.split(marker,1)[1].split('##[group]',1)[0]
+          fragment=raw.split(marker,1)[1].split('##[group]',1)[0] if marker in raw else raw
           selected=[]
           for line in fragment.splitlines():
               line=re.sub(r'^\d{4}-\d\d-\d\dT\S+\s+','',line)
               line=re.sub(r'\x1b\[[0-9;]*m','',line)
-              if not re.search(r'(?:FAIL|ERROR): test_|test_.*\.\.\. (?:FAIL|ERROR)|(?:AssertionError|TypeError|RuntimeError|KeyError|ValueError|TimeoutError):|psycopg\.errors\.|sqlalchemy\.exc\.|^Ran \d+ tests|^FAILED',line):continue
+              if not re.search(r'(?:FAIL|ERROR): test_|test_.*\.\.\. (?:FAIL|ERROR)|(?:AssertionError|TypeError|RuntimeError|KeyError|ValueError|TimeoutError|ImportError|ModuleNotFoundError|AttributeError|IndexError):|psycopg\.errors\.|sqlalchemy\.exc\.|^Ran \d+ tests|^FAILED',line):continue
               if re.search(r'password|secret|token|authorization|bearer|credential',line,re.I):
                   line=re.sub(r'(:).*',r'\1 [sensitive content redacted]',line)
               line=re.sub(r'(?:AC|SK|CA|RE)[0-9a-fA-F]{32}','[synthetic identifier]',line)
               line=re.sub(r'\+\d{9,15}','[synthetic phone]',line)
               selected.append(line[:800])
-          assert selected and any('FAIL' in line or 'ERROR' in line for line in selected)
+          if not selected:selected=['No exception pattern matched the selected synthetic step.']
           record=dict(source_run=45921665592,source_job=140253575334,scope='Sanitized synthetic import test failures only; raw logs never published',lines=selected)
           output=json.dumps(record,indent=2)+'\n'
-          target='contents/qa-reports/evidence/ci-import-diagnostics-b526.json'
-          payload=dict(message='Record sanitized synthetic import QA diagnostics',content=base64.b64encode(output.encode()).decode(),branch=branch,author=dict(name='oumayma el haddam',email='oumayma.elhaddam@gmail.com'))
-          existing=subprocess.run(['gh','api','repos/'+repo+'/'+target+'?ref='+branch],capture_output=True,text=True)
-          if existing.returncode==0:payload['sha']=json.loads(existing.stdout)['sha']
-          with tempfile.TemporaryDirectory() as folder:
-              path=Path(folder)/'request.json';path.write_text(json.dumps(payload))
-              subprocess.run(['gh','api','--method','PUT','repos/'+repo+'/'+target,'--input',str(path),'--silent'],check=True)
-          print('Sanitized synthetic failure evidence saved on the dedicated diagnostics branch. No deployment or provider requests.')
+          notice=output.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A')
+          print('::notice title=Sanitized synthetic import failure::'+notice)
           PY
