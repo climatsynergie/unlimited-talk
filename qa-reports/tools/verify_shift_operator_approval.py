@@ -1,12 +1,12 @@
 """Prepare a pinned API approval for root-maintained VM operations, without applying.
 
-Only the exact current-main API557 is added. Existing provenance, readiness,
+Only the exact current-main APIb526a44 is added. Existing provenance, readiness,
 manual calling, campaign scope, quota, media drain and rollback checks remain.
 """
 from pathlib import Path
 import ast,difflib,hashlib,importlib.util,json,types,unittest
 root=Path(__file__).resolve().parents[2];out=root/'qa-reports/evidence';out.mkdir(parents=True,exist_ok=True)
-revision='55717a944e5a48eb39e10c9f83cfcbf802681f24';worker='276673bb997924b82c7e8ad89871113e15d8a212'
+revision='b526a44750c5b2f01795d9d7fdc538102df148ea';worker='276673bb997924b82c7e8ad89871113e15d8a212'
 sources=[('vmhunter_worker_release.py','/usr/local/sbin/unlimited-talk-vmhunter-worker-release',
  'revision not in {API_BASE,POLICY_V4_API,worker_revision}',
  'revision not in {API_BASE,POLICY_V4_API,worker_revision,'+repr(revision)+'}'),
@@ -21,7 +21,7 @@ for filename,destination,needle,replacement in sources:
  exec(compile(candidate,module.__file__,'exec'),module.__dict__);modules.append(module)
  records.append(dict(destination=destination,before_sha256=hashlib.sha256(source.encode()).hexdigest(),after_sha256=hashlib.sha256(candidate.encode()).hexdigest(),source=candidate))
  (out/('shift-approved-'+filename)).write_text(candidate)
- (out/('shift-approved-'+filename+'.patch')).write_text(''.join(difflib.unified_diff(source.splitlines(True),candidate.splitlines(True),fromfile=filename,tofile=filename+' (API557 approval)')))
+ (out/('shift-approved-'+filename+'.patch')).write_text(''.join(difflib.unified_diff(source.splitlines(True),candidate.splitlines(True),fromfile=filename,tofile=filename+' (APIb526a44 approval)')))
 
 def load(name,filename):
  spec=importlib.util.spec_from_file_location(name,root/'tests/host'/filename)
@@ -48,5 +48,5 @@ class ExactApprovalTests(unittest.TestCase):
 suite=unittest.TestSuite([unittest.defaultTestLoader.loadTestsFromTestCase(wt.WorkerReleaseTests),unittest.defaultTestLoader.loadTestsFromTestCase(ct.CampaignConfigurationTests),unittest.defaultTestLoader.loadTestsFromTestCase(ExactApprovalTests)])
 result=unittest.TextTestRunner(verbosity=2).run(suite)
 if not result.wasSuccessful():raise SystemExit(1)
-(out/'shift-operator-compatibility-approved-55717a94.json').write_text(json.dumps(dict(api_revision=revision,files=records,applied=False),indent=2)+'\n')
+(out/'shift-operator-compatibility-approved-b526a447.json').write_text(json.dumps(dict(api_revision=revision,files=records,applied=False),indent=2)+'\n')
 print(json.dumps(dict(tests=result.testsRun,approved_api=revision,root_operators_applied=False,files=[{k:v for k,v in r.items() if k!='source'} for r in records])))

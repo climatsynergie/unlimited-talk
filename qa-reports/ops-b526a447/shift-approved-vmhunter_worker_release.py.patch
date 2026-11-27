@@ -1,11 +1,11 @@
 --- vmhunter_worker_release.py
-+++ vmhunter_worker_release.py (API557 approval)
++++ vmhunter_worker_release.py (APIb526a44 approval)
 @@ -60,7 +60,7 @@
  def compatible_api_revision(release_name,health,worker_revision):
   revision=release_name.removeprefix('git-')
   if (not release_name.startswith('git-') or not re.fullmatch('[a-f0-9]{40}',revision)
 -     or revision not in {API_BASE,POLICY_V4_API,worker_revision}
-+     or revision not in {API_BASE,POLICY_V4_API,worker_revision,'55717a944e5a48eb39e10c9f83cfcbf802681f24'}
++     or revision not in {API_BASE,POLICY_V4_API,worker_revision,'b526a44750c5b2f01795d9d7fdc538102df148ea'}
       or health.get('status')!='ready' or health.get('environment')!='staging'
       or health.get('migration')!='0012_incoming_runtime'
       or health.get('communications')!='manual' or health.get('calling_enabled') is not True
