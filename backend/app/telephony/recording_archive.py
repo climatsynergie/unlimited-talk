@@ -298,7 +298,7 @@ def main():
     from app.database import make_engine
     from app.telephony.configuration import load_profile
     profile=load_profile()
-    engine=make_engine() if profile is not None else None
+    engine=make_engine(pool_size=1) if profile is not None else None
     reader=RecordingReader(profile) if profile is not None else None
     Path('/tmp/voice-archive-heartbeat').touch()
     try:

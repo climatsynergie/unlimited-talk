@@ -40,6 +40,35 @@ class IncomingReportingTests(unittest.TestCase):
     VALUES (:sid,:call,:offer,:child,'conversation',:duration,2)""",sid='RE'+uuid4().hex,call=call,offer=offer,child='CA'+uuid4().hex,duration=recording)
   return offer
  def metrics(self):return report(self.db,self.period,self.actor)
+ def test_reception_coverage_matches_actual_admission_and_excludes_stale_sessions(self):
+  query(self.db,"UPDATE staging.identity_users SET role='agent' WHERE id=:id",id=self.actor)
+  query(self.db,"INSERT INTO staging.inbound_lines(queue_id,account_sid,provider_sid,phone,public_origin,route_state) SELECT id,:account,:sid,phone,'https://qa.example.invalid','active' FROM staging.inbound_queues WHERE id=:id",id=self.queue,account='AC'+uuid4().hex,sid='PN'+uuid4().hex)
+  query(self.db,"INSERT INTO staging.inbound_queue_agents(queue_id,user_id,mode,assigned_by) VALUES (:queue,:actor,'mixed',:actor)",queue=self.queue,actor=self.actor)
+  query(self.db,"INSERT INTO staging.identity_sessions(token_hash,csrf_hash,user_id,mfa_verified,expires_at) VALUES (:hash,:csrf,:actor,true,clock_timestamp()+interval '1 hour')",hash='a'*64,csrf='b'*64,actor=self.actor)
+  def ready():
+   row=next(row for row in live(self.db)['reception_coverage'] if row['id']==self.queue)
+   self.assertEqual(row['assigned_agents'],1)
+   return row['ready_agents']
+  self.assertEqual(ready(),1)
+  for field,value in [('available','false'),('media_ready','false'),('lease_until',"clock_timestamp()-interval '1 second'")]:
+   with self.db.begin_nested() as savepoint:
+    query(self.db,'UPDATE staging.inbound_registrations SET '+field+'='+value+' WHERE id=:id',id=self.registration)
+    self.assertEqual(ready(),0)
+    savepoint.rollback()
+  for value in ["mfa_verified=false","expires_at=clock_timestamp()-interval '1 second'","last_seen_at=clock_timestamp()-interval '48 hours'"]:
+   with self.db.begin_nested() as savepoint:
+    query(self.db,'UPDATE staging.identity_sessions SET '+value+' WHERE user_id=:actor',actor=self.actor)
+    self.assertEqual(ready(),0)
+    savepoint.rollback()
+  with self.db.begin_nested() as savepoint:
+   self.offer(active=True)
+   self.assertEqual(ready(),0)
+   savepoint.rollback()
+  with self.db.begin_nested() as savepoint:
+   self.offer(active=False)
+   self.assertEqual(ready(),0,'Ten-second wrap-up must not be reported ready')
+   savepoint.rollback()
+  self.assertEqual(ready(),1)
  def test_incoming_counts_are_separate_in_all_grains_and_excel(self):
   self.offer(duration=60);self.offer(connected=False,duration=0)
   result=self.metrics()

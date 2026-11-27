@@ -13,6 +13,7 @@ from app.identity.service import query
 from app.telephony import archive_storage
 from app.telephony.twilio_voice import sid
 from app.telephony.client_appointment import enrich
+from app.contacts.search import projection
 
 router=APIRouter(prefix='/api/telephony',tags=['Enregistrements'])
 # Bounded streaming, not whole-file buffering: twenty agents plus supervisors.
@@ -31,31 +32,40 @@ def calls(request:Request,before_created_at:AwareDatetime|None=None,before_id:UU
     if destination and not re.fullmatch(r'\+[1-9][0-9]{8,14}',destination):raise HTTPException(400,'Numéro international invalide.')
     search=q.strip()
     if search and all(c in '+0123456789 ().-' for c in search):search=re.sub(r'[ ().-]','',search)
-    search='%'+search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+    pattern='%'+search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
     with request.app.state.engine.begin() as db:
         user=identity.authenticate(db,request)
         if actor_id and user['role']!='admin' and actor_id!=user['id']:raise HTTPException(403,'Vous pouvez consulter uniquement vos appels.')
-        rows=query(db,'''SELECT i.id,i.created_at,i.finished_at,i.destination,i.state,i.outcome,i.caller_number,
-            i.actor_id,i.campaign_id,i.contact_id,u.display_name AS actor_name,ca.name AS campaign_name,
-            coalesce(nullif(trim(c.profile->>'display_name'),''),nullif(trim(concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name')),'')) AS contact_name
-            FROM staging.voice_intents i JOIN staging.identity_users u ON u.id=i.actor_id
+        filters=[]
+        if user['role']!='admin':filters.append('i.actor_id=:actor')
+        if actor_id:filters.append('i.actor_id=:agent')
+        if destination:filters.append('i.destination=:destination')
+        if outcome:filters.append('i.outcome=:outcome')
+        if recordings_only:filters.append('EXISTS(SELECT 1 FROM staging.voice_recordings r WHERE r.intent_id=i.id)')
+        if recording_min_seconds is not None:filters.append('EXISTS(SELECT 1 FROM staging.voice_recordings r WHERE r.intent_id=i.id AND r.duration>:minimum)')
+        if from_at:filters.append('i.created_at>=:from_at')
+        if until_at:filters.append('i.created_at<:until_at')
+        if before_id:filters.append('(i.created_at,i.id)<(:before_at,:before_id)')
+        if search:
+            filters.append('''(i.destination ILIKE :search
+                OR i.actor_id IN (SELECT id FROM staging.identity_users WHERE display_name ILIKE :search)
+                OR i.campaign_id IN (SELECT id FROM staging.campaigns WHERE name ILIKE :search)
+                OR i.contact_id IN (SELECT c.id FROM staging.contacts c WHERE '''+projection('c')+''' LIKE lower(:search) AND (
+                  c.profile->>'display_name' ILIKE :search
+                  OR concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name') ILIKE :search)))''')
+        # Page immutable call IDs before touching the large imported directory.
+        # Empty search must not turn into an ILIKE '%%' across every joined row.
+        statement='''WITH page AS MATERIALIZED (
+            SELECT i.id,i.created_at,i.finished_at,i.destination,i.state,i.outcome,i.caller_number,
+              i.actor_id,i.campaign_id,i.contact_id FROM staging.voice_intents i WHERE '''+(' AND '.join(filters) or 'true')+'''
+            ORDER BY i.created_at DESC,i.id DESC LIMIT 21)
+            SELECT i.*,u.display_name AS actor_name,ca.name AS campaign_name,
+              coalesce(nullif(trim(c.profile->>'display_name'),''),nullif(trim(concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name')),'')) AS contact_name
+            FROM page i JOIN staging.identity_users u ON u.id=i.actor_id
             LEFT JOIN staging.campaigns ca ON ca.id=i.campaign_id LEFT JOIN staging.contacts c ON c.id=i.contact_id
-            WHERE (:admin OR i.actor_id=:actor)
-              AND (CAST(:agent AS uuid) IS NULL OR i.actor_id=CAST(:agent AS uuid))
-              AND (:destination='' OR i.destination=:destination)
-              AND (:outcome='' OR i.outcome=:outcome)
-              AND (NOT :recordings OR EXISTS(SELECT 1 FROM staging.voice_recordings r WHERE r.intent_id=i.id))
-              AND (CAST(:minimum AS int) IS NULL OR EXISTS(SELECT 1 FROM staging.voice_recordings r
-                   WHERE r.intent_id=i.id AND r.duration>CAST(:minimum AS int)))
-              AND (CAST(:from_at AS timestamptz) IS NULL OR i.created_at>=CAST(:from_at AS timestamptz))
-              AND (CAST(:until_at AS timestamptz) IS NULL OR i.created_at<CAST(:until_at AS timestamptz))
-              AND (i.destination ILIKE :search OR u.display_name ILIKE :search OR ca.name ILIKE :search OR c.profile->>'display_name' ILIKE :search
-                   OR concat_ws(' ',c.profile->>'first_name',c.profile->>'last_name') ILIKE :search)
-              AND
-              (:initial OR (i.created_at,i.id)<(CAST(:before_at AS timestamptz),CAST(:before_id AS uuid)))
-            ORDER BY i.created_at DESC,i.id DESC LIMIT 21''',admin=user['role']=='admin',actor=user['id'],
-            initial=before_id is None,before_at=before_created_at,before_id=before_id,
-            agent=actor_id,destination=destination,outcome=outcome,recordings=recordings_only,minimum=recording_min_seconds,from_at=from_at,until_at=until_at,search=search).mappings().all()
+            ORDER BY i.created_at DESC,i.id DESC'''
+        rows=query(db,statement,actor=user['id'],agent=actor_id,destination=destination,outcome=outcome,
+            minimum=recording_min_seconds,from_at=from_at,until_at=until_at,before_at=before_created_at,before_id=before_id,search=pattern).mappings().all()
         items=[dict(row) for row in rows[:20]]
         recordings=[]
         if items:

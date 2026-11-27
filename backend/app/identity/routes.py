@@ -102,7 +102,15 @@ def accept(body: Acceptance, request: Request):
 def me(request: Request):
     with request.app.state.engine.begin() as db:
         user = service.authenticate(db,request,enrollment=True)
-        return {'user':service.public_user(user),'mfa_enrollment_required':not user['mfa_verified']}
+        from app.telephony import incoming_presence
+        from app.telephony.incoming_schema import installed
+        from app.telephony.twilio_voice import ManualVoiceProfile
+        profile=getattr(request.app.state,'voice_profile',None)
+        reception=bool(user['mfa_verified'] and getattr(request.app.state,'voice_calling_enabled',False)
+            and isinstance(profile,ManualVoiceProfile) and installed(db)
+            and incoming_presence.queues(db,user,profile))
+        return {'user':service.public_user(user),'mfa_enrollment_required':not user['mfa_verified'],
+                'reception_enabled':reception}
 
 
 @router.post('/auth/logout')

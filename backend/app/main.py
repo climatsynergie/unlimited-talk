@@ -58,7 +58,10 @@ async def lifespan(app):
     app.state.identity_cipher = encryption_key(os.environ['IDENTITY_KEY_FILE'])
     app.state.voice_profile = load_profile()
     app.state.voice_calling_enabled = os.environ.get('COMMUNICATIONS_MODE') in {'controlled_test', 'manual'}
-    app.state.engine = make_engine()
+    # One API process: five request slots + four single-connection background
+    # processes + the separately pinned observer's two = eleven of the managed
+    # runtime role's twelve connections. No unbounded overflow.
+    app.state.engine = make_engine(pool_size=5)
     yield
     app.state.engine.dispose()
 

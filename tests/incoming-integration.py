@@ -100,6 +100,11 @@ try:
   query(db,'''INSERT INTO staging.inbound_lines(queue_id,account_sid,provider_sid,phone,public_origin,route_state,verified_at)
    VALUES (:id,:account,:sid,:phone,:origin,'active',clock_timestamp())''',id=queue,account=profile.account_sid,sid='PN'+uuid4().hex,phone=profile.caller_number,origin=profile.public_origin)
  assert agents[0].request('GET','/api/inbound/reception')['enabled']
+ assert agents[0].request('GET','/api/auth/me')['reception_enabled']
+ assert not outsider.request('GET','/api/auth/me')['reception_enabled']
+ app.state.voice_calling_enabled=False
+ assert not agents[0].request('GET','/api/auth/me')['reception_enabled']
+ app.state.voice_calling_enabled=True
  outsider.request('POST','/api/inbound/reception/register',dict(browser_id=str(uuid4())),409)
  # Deployment admission closure rejects new media but preserves terminal-ledger
  # recovery. These signed HTTP requests must not create an active call.

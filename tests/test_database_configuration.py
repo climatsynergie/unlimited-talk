@@ -58,6 +58,18 @@ class DatabaseConfigurationTests(unittest.TestCase):
             self.assertEqual(engine.url.port, 5432)
             engine.dispose()
 
+    def test_explicit_request_and_worker_pools_stay_bounded_without_overflow(self):
+        with patch.dict(os.environ,self.env,clear=True):
+            for size in (1,5):
+                engine=make_engine(pool_size=size)
+                self.assertEqual(engine.pool.size(),size)
+                self.assertEqual(engine.pool._max_overflow,0)
+                engine.dispose()
+            for size in (True,0,6,-1,'5',5.0):
+                with self.subTest(size=size),self.assertRaises(RuntimeError):make_engine(pool_size=size)
+        with patch.dict(os.environ,self.env|{'DB_USER':'ut_staging_migrator'},clear=True):
+            with self.assertRaises(RuntimeError):make_engine(pool_size=5)
+
 
 if __name__ == '__main__':
     unittest.main()

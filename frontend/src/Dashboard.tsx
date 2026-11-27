@@ -71,6 +71,12 @@ type LiveAgent = {
   consumed_at: string | null;
 };
 type Live = {
+  reception_coverage?: {
+    id: string;
+    name: string;
+    assigned_agents: number;
+    ready_agents: number;
+  }[];
   directory_warning?: { severity: string; message: string } | null;
   generated_at: string;
   items: LiveAgent[];
@@ -519,6 +525,34 @@ export function Dashboard() {
         </button>
       </div>
       <section className="report-live panel" aria-labelledby="live-heading">
+        {live?.reception_coverage?.length ? (
+          <div
+            className="reception-coverage"
+            aria-label="Couverture des appels entrants"
+          >
+            {live.reception_coverage.map((line) => (
+              <div
+                key={line.id}
+                className={line.ready_agents ? "is-ready" : "is-paused"}
+              >
+                <strong>{line.name}</strong>
+                <span>
+                  {line.ready_agents} agent{line.ready_agents === 1 ? "" : "s"}{" "}
+                  disponible{line.ready_agents === 1 ? "" : "s"} pour recevoir
+                  {" · "}
+                  {line.assigned_agents} attribué
+                  {line.assigned_agents === 1 ? "" : "s"}
+                </span>
+                {!line.ready_agents ? (
+                  <p role="status">
+                    Aucun agent disponible : ouvrez la réception sur un poste
+                    attribué ou terminez l’appel en cours.
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {live?.directory_warning ? (
           <Notice error={live.directory_warning.severity === "critical"}>
             {live.directory_warning.message}

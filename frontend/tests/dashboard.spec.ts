@@ -438,3 +438,44 @@ test("dashboard : ancien rapport sans compteurs entrants conserve les sortants e
   ).toHaveText("24");
   expect(proof.unexpected).toEqual([]);
 });
+
+test("couverture de réception : aucun agent puis poste disponible", async ({
+  page,
+}) => {
+  await fixture(page);
+  let ready = 0;
+  await page.route("**/api/reporting/live", (route) =>
+    route.fulfill({
+      json: {
+        generated_at: "2026-11-05T12:00:00Z",
+        online: 0,
+        in_calls: 0,
+        connected: 0,
+        paused: 0,
+        items: [],
+        reception_coverage: [
+          {
+            id: id(200),
+            name: "Ligne Canada",
+            assigned_agents: 4,
+            ready_agents: ready,
+          },
+        ],
+      },
+    }),
+  );
+  await page.goto("/admin/tableau-de-bord");
+  const coverage = page.locator(".reception-coverage");
+  await expect(coverage).toContainText(
+    "0 agents disponibles pour recevoir · 4 attribués",
+  );
+  await expect(coverage.getByRole("status")).toContainText(
+    "Aucun agent disponible",
+  );
+  ready = 1;
+  await page.clock.runFor(11000);
+  await expect(coverage).toContainText(
+    "1 agent disponible pour recevoir · 4 attribués",
+  );
+  await expect(coverage.getByRole("status")).toHaveCount(0);
+});

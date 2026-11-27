@@ -14,7 +14,7 @@ from uuid import uuid4
 
 root=Path(__file__).resolve().parents[1]
 proof_script=sys.argv[1] if len(sys.argv)>1 else 'vmhunter-screen-integration.py'
-assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py','vmhunter-cleanup-recovery-integration.py'}
+assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py','vmhunter-cleanup-recovery-integration.py','shift-concurrency-integration.py','shift-pool-integration.py','shift-search-integration.py','reporting-incoming-integration.py'}
 base=['sudo','-n','docker','compose','--project-directory',str(root)]
 base+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*base,'config','--format','json']))
@@ -26,7 +26,7 @@ environment=dict(APP_ENV='staging',COMMUNICATIONS_MODE='disabled',DB_HOST='db',
     DB_NAME='unlimited_talk_staging',DB_USER='ut_staging_runtime',
     DB_PASSWORD_FILE='/run/secrets/runtime_password',IDENTITY_KEY_FILE='/run/secrets/identity_key',
     APP_ORIGIN='http://127.0.0.1:8110',PYTHONPATH='/app')
-volumes=[str(root/'tests')+':/tests:ro']
+volumes=[str(root/'tests')+':/tests:ro',str(root/'scripts')+':/scripts:ro']
 if os.environ.get('VMHUNTER_USE_LOCAL_SOURCE')=='1':
     assert not os.environ.get('GITHUB_ACTIONS'),'CI must test the actual built source'
     volumes.append(str(root/'backend/app')+':/app/app:ro')
@@ -49,6 +49,10 @@ definition=dict(name='ut-screen-proof-'+uuid4().hex[:12],
         'migrate':migrate,
         'proof':{**app_service,'command':['python','/tests/'+proof_script]}},
     networks={'isolated':{'internal':True}},secrets=secrets)
+if proof_script=='shift-search-integration.py':
+    definition['services']['db']['tmpfs']=['/var/lib/postgresql:rw,size=2g']
+    definition['services']['db']['mem_limit']='3072m'
+    definition['services']['proof']['secrets'].append('migrator_password')
 with tempfile.TemporaryDirectory(prefix='ut-screen-compose-') as folder:
     path=Path(folder)/'compose.json';path.write_text(json.dumps(definition))
     command=['sudo','-n','docker','compose','--env-file','/dev/null','--project-directory',str(root),'-f',str(path)]

@@ -1,4 +1,5 @@
 import { test, expect } from "./qa-observer";
+import AxeBuilder from "@axe-core/playwright";
 import { disabledDialer } from "./fixtures/dialer-disabled";
 const queue = "00000000-0000-0000-0000-000000000050";
 const offer = "00000000-0000-0000-0000-000000000051";
@@ -33,6 +34,7 @@ test("réception globale : réponse explicite, navigation, pause sans couper et 
           is_active: true,
         },
         mfa_enrollment_required: false,
+        reception_enabled: true,
       },
     }),
   );
@@ -126,9 +128,27 @@ test("réception globale : réponse explicite, navigation, pause sans couper et 
  `,
     }),
   );
-  await page.goto("/appels-entrants");
+  await page.route("**/api/telephony/calls*", (r) =>
+    r.fulfill({ json: { items: [], next_cursor: null } }),
+  );
+  await page.goto("/conversations");
+  const reception = page.getByRole("group", { name: "État de la réception" });
+  await expect(reception).toContainText("Réception suspendue");
+  expect(await page.evaluate(() => "incomingProof" in window)).toBe(false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    reception.getByRole("button", { name: "Activer la réception" }),
+  ).toBeInViewport();
+  await reception.getByRole("button", { name: "Activer la réception" }).click();
+  await expect(reception).toContainText("Réception active");
+  const accessibility = await new AxeBuilder({ page })
+    .include(".reception-presence")
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(accessibility.violations.map((item) => item.id)).toEqual([]);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page
-    .getByRole("button", { name: "Recevoir les appels", exact: true })
+    .getByRole("link", { name: "Appels entrants", exact: true })
     .click();
   await expect(
     page.getByText("Réception ouverte", { exact: true }),

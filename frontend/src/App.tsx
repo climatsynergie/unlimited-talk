@@ -13,7 +13,7 @@ import { Campaigns } from "./Campaigns";
 import { Contacts, Imports } from "./Contacts";
 import { Conversations } from "./Conversations";
 import { Workstation } from "./Workstation";
-import { IncomingPhoneBar } from "./IncomingPhone";
+import { IncomingPhoneBar, ReceptionStatus } from "./IncomingPhone";
 import {
   PhoneBar,
   PhoneProvider,
@@ -399,6 +399,10 @@ function Workspace({
                 ? "Administration de l’équipe"
                 : "Mon espace"}
           </span>
+          <ReceptionStatus
+            enabled={identity.reception_enabled === true}
+            showErrors={selected !== "inbound"}
+          />
           <div>
             <span
               className="avatar avatar-small avatar-purple"
@@ -631,6 +635,27 @@ export function App({ initialEntry }: { initialEntry: PrivateEntry }) {
       document.removeEventListener("visibilitychange", heartbeat);
     };
   }, [identity?.user.id, identity?.mfa_enrollment_required]);
+  useEffect(() => {
+    // Login responses precede optional workspace hints. Refresh once without
+    // hiding the workspace; older servers may omit the hint entirely.
+    if (!identity || identity.reception_enabled !== undefined) return;
+    const controller = new AbortController();
+    api<Identity>("/auth/me", { signal: controller.signal })
+      .then((value) => {
+        if (!controller.signal.aborted)
+          setIdentity((current) =>
+            current?.user.id === value.user.id
+              ? {
+                  ...current,
+                  ...value,
+                  reception_enabled: value.reception_enabled ?? false,
+                }
+              : current,
+          );
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [identity?.user.id, identity?.reception_enabled]);
   function authenticated(value: Identity) {
     setEntry(null);
     setIdentity(value);

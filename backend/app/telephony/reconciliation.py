@@ -263,7 +263,7 @@ def main():
         while True:
             Path('/tmp/voice-reconciliation-heartbeat').touch()
             time.sleep(10)
-    engine = make_engine()
+    engine = make_engine(pool_size=1)
     provider = configured_provider(profile)
     from app.telephony import completion,caller_directory,incoming_settlement,incoming_recovery
     next_reconciliation=0

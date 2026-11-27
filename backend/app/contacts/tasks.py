@@ -24,7 +24,7 @@ def apply(identifier):
     from app.database import make_engine
     from app.contacts.service import apply_chunk
     if _engine is None:
-        _engine=make_engine()
+        _engine=make_engine(pool_size=1)
     # Database rollback plus dispatcher reconciliation recovers all failures.
     deadline=time.monotonic()+60
     while time.monotonic()<deadline and apply_chunk(_engine,identifier):

@@ -11,6 +11,52 @@ const labels = {
   reconnecting: "Rétablissement de la connexion…",
   checking: "Vérification de l’appel…",
 };
+export function ReceptionStatus({
+  enabled,
+  showErrors,
+}: {
+  enabled: boolean;
+  showErrors: boolean;
+}) {
+  const { controller, state } = useIncomingPhone();
+  useEffect(() => {
+    if (enabled && !state.loaded) void controller.prepare();
+  }, [controller, enabled, state.loaded]);
+  if (!state.loaded || (!state.enabled && !state.queues.length)) return null;
+  const ready = state.wanted && state.registered && !state.recovering;
+  const connecting = state.phase === "registering";
+  return (
+    <div
+      className={`reception-presence ${ready ? "is-ready" : "is-paused"}`}
+      role="group"
+      aria-label="État de la réception"
+    >
+      <span className="reception-presence-dot" aria-hidden="true" />
+      <span role="status">
+        {ready
+          ? "Réception active"
+          : connecting || state.wanted
+            ? "Connexion de la réception…"
+            : "Réception suspendue"}
+      </span>
+      <button
+        type="button"
+        className="text-button"
+        disabled={!state.enabled || connecting}
+        onClick={() =>
+          void (state.wanted ? controller.pause() : controller.start())
+        }
+      >
+        {state.wanted ? "Suspendre la réception" : "Activer la réception"}
+      </button>
+      {showErrors && state.error ? (
+        <span role="alert" className="reception-presence-error">
+          {state.error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 export function ReceptionControl() {
   const { controller, state } = useIncomingPhone();
   useEffect(() => {

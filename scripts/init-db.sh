@@ -14,4 +14,8 @@ ALTER ROLE ut_staging_migrator IN DATABASE unlimited_talk_staging SET search_pat
 ALTER ROLE ut_staging_runtime IN DATABASE unlimited_talk_staging SET search_path=staging,pg_catalog;
 ALTER DEFAULT PRIVILEGES FOR ROLE ut_staging_migrator IN SCHEMA staging GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO ut_staging_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE ut_staging_migrator IN SCHEMA staging GRANT USAGE,SELECT ON SEQUENCES TO ut_staging_runtime;
+-- Match managed, owner-provisioned search prerequisites; runtime has no DDL rights.
+CREATE SCHEMA extensions;
+CREATE EXTENSION pg_trgm WITH SCHEMA extensions;
+GRANT USAGE ON SCHEMA extensions TO ut_staging_migrator,ut_staging_runtime;
 SQL

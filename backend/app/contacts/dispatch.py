@@ -24,7 +24,7 @@ def dispatch_once(engine, publish):
 
 
 def main():
-    engine=make_engine()
+    engine=make_engine(pool_size=1)
     while True:
         try:
             dispatch_once(engine,lambda identifier: apply.apply_async(args=[identifier],retry=False))

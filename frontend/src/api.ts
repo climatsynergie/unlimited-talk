@@ -9,6 +9,7 @@ export type User = {
 export type Identity = {
   user: User;
   mfa_enrollment_required: boolean;
+  reception_enabled?: boolean;
   recovery_codes?: string[];
 };
 export type Invitation = {

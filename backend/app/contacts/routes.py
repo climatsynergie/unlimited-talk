@@ -11,6 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from app.identity.routes import same_origin
 from app.identity.service import query, audit
 from app.contacts import service
+from app.contacts.search import projection,pattern
 from app.contacts.csv_input import CsvInputError, inspect_headers, suggest_mapping
 from app.contacts.storage import MAX_BYTES, put_source
 
@@ -38,9 +39,12 @@ def contacts(request: Request, search: str = Query('',max_length=100), offset: i
     with request.app.state.engine.begin() as db:
         service.administrator(db,request)
         # Literal substring matching, including % and _, avoids wildcard surprises.
+        predicate=(' WHERE '+projection()+''' LIKE lower(:pattern)
+            AND strpos(lower(phone||' '||profile::text),lower(:search))>0''') if search else ''
         rows = query(db, '''SELECT id,phone,profile,do_not_contact,non_interested,created_at,updated_at
-            FROM staging.contacts WHERE strpos(lower(phone||' '||profile::text),lower(:search))>0
-            ORDER BY created_at DESC,id LIMIT 51 OFFSET :offset''', search=search,offset=offset).mappings().all()
+            FROM staging.contacts'''+predicate+'''
+            ORDER BY created_at DESC,id LIMIT 51 OFFSET :offset''',
+            search=search,pattern=pattern(search),offset=offset).mappings().all()
         return {'items':[dict(r) for r in rows[:50]],'has_more':len(rows)>50}
 
 

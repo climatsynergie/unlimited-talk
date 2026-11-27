@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy import URL, create_engine
 
 
-def make_engine():
+def make_engine(*, pool_size=None):
     # Calling modes require a complete private, environment-bound profile and
     # the runtime role before creating any engine.
     expected = {'APP_ENV': 'staging', 'DB_NAME': 'unlimited_talk_staging'}
@@ -15,6 +15,10 @@ def make_engine():
     user = os.environ['DB_USER']
     if user not in {'ut_staging_runtime', 'ut_staging_migrator'}:
         raise RuntimeError('Unrecognized staging database role')
+    selected_pool = (1 if user == 'ut_staging_migrator' else 2) if pool_size is None else pool_size
+    if (type(selected_pool) is not int or not 1 <= selected_pool <= 5
+            or user == 'ut_staging_migrator' and selected_pool != 1):
+        raise RuntimeError('Invalid bounded database pool size')
     host = os.environ.get('DB_HOST', '')
     deployment = os.environ.get('DB_DEPLOYMENT', 'local')
     timeout = 60000 if user == 'ut_staging_migrator' else 3000
@@ -41,6 +45,6 @@ def make_engine():
         raise RuntimeError('Invalid staging database credential')
     url = URL.create('postgresql+psycopg', username=user, password=password,
                      host=host, port=port, database='unlimited_talk_staging')
-    return create_engine(url, pool_size=1 if user == 'ut_staging_migrator' else 2,
+    return create_engine(url, pool_size=selected_pool,
                          max_overflow=0, pool_timeout=3, pool_recycle=300,
                          pool_pre_ping=True, hide_parameters=True, connect_args=connection_options)

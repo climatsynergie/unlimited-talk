@@ -3,6 +3,7 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from uuid import UUID
 from fastapi import HTTPException
 from app.identity.service import query
 
@@ -193,12 +194,25 @@ def live(db):
         '''+(" OR EXISTS(SELECT 1 FROM staging.inbound_offers o WHERE o.actor_id=u.id AND o.state<>'finished')" if include_incoming else '')+'''
         ORDER BY lower(u.display_name),u.id''').mappings().all()
     reception={}
+    coverage=[]
     if include_incoming:
         reception={row['actor_id']:row for row in query(db,'''SELECT o.actor_id,o.id AS call_id,o.state AS call_state,
             c.caller_number AS destination,c.connected_at AS consumed_at,o.offered_at AS call_created_at,
             q.name AS campaign_name FROM staging.inbound_offers o JOIN staging.inbound_calls c ON c.id=o.call_id
             JOIN staging.inbound_queues q ON q.id=c.queue_id WHERE o.state<>'finished'
             ''').mappings()}
+        coverage=[dict(row) for row in query(db,'''SELECT q.id,q.name,
+            (SELECT count(*) FROM staging.inbound_queue_agents a JOIN staging.identity_users u ON u.id=a.user_id AND u.is_active
+              WHERE a.queue_id=q.id AND a.is_active) AS assigned_agents
+            FROM staging.inbound_queues q JOIN staging.inbound_lines l ON l.queue_id=q.id
+            WHERE q.is_active AND l.route_state='active' ORDER BY lower(q.name),q.id''').mappings()]
+        from app.telephony.incoming_runtime import ELIGIBLE
+        from app.identity.security import IDLE_SECONDS
+        for line in coverage:
+            # Use exactly the admission rules: session validity, SDK readiness,
+            # booking/call occupancy and wrap-up all affect actual availability.
+            line['ready_agents']=query(db,'SELECT count(*) '+ELIGIBLE,
+                queue=line['id'],call=UUID(int=0),idle=IDLE_SECONDS).scalar_one()
     items=[]
     for row in rows:
         item=dict(row)
@@ -214,6 +228,6 @@ def live(db):
         items.append(item)
     priority={name:index for index,name in enumerate(('connected','calling','dialing','booking','paused','available','offline'))}
     items.sort(key=lambda item:(priority[item['status']],item['display_name'].casefold(),str(item['id'])))
-    return dict(generated_at=datetime.now(timezone.utc),items=items,online=sum(item['online'] for item in items),
+    return dict(generated_at=datetime.now(timezone.utc),items=items,reception_coverage=coverage,online=sum(item['online'] for item in items),
         in_calls=sum(item['call_id'] is not None for item in items),connected=sum(item['status']=='connected' for item in items),
         paused=sum(item['status']=='paused' for item in items))

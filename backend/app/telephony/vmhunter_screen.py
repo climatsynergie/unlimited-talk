@@ -89,6 +89,13 @@ def pending(db, identifier):
 
 
 def bound_child(db, profile, identifier, params):
+    # Agent operations own the actor before the intent. Screening writes an
+    # audit row whose FK also locks that actor: acquire its key-share first so
+    # a concurrent voicemail click cannot create actor <-> intent deadlocks.
+    lookup = service.bound(query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id',
+                                id=identifier).mappings().first(), profile)
+    query(db, 'SELECT id FROM staging.identity_users WHERE id=:id FOR KEY SHARE',
+          id=lookup['actor_id']).one()
     row = service.bound(query(db, 'SELECT * FROM staging.voice_intents WHERE id=:id FOR UPDATE',
                               id=identifier).mappings().first(), profile)
     if (not row['parent_call_sid'] or params.get('ParentCallSid') != row['parent_call_sid']

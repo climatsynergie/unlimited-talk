@@ -117,6 +117,14 @@ jobs:
         run: python3 tests/verify_vmhunter_screen.py
       - name: Verify explicit multi-campaign eligibility and shared account safety
         run: python3 tests/verify_vmhunter_screen.py vmhunter-multicampaign-integration.py
+      - name: Verify voicemail disposition and screening callback deadlock regression
+        run: python3 tests/verify_vmhunter_screen.py shift-concurrency-integration.py
+      - name: Verify bounded API pool under twenty callers and old-pool negative control
+        run: python3 tests/verify_vmhunter_screen.py shift-pool-integration.py
+      - name: Verify directory indexes, permissions and query contracts at 300k contacts
+        run: python3 tests/verify_vmhunter_screen.py shift-search-integration.py
+      - name: Install additive query indexes before populated-schema rollback checks
+        run: python3 tests/verify_query_indexes.py
       - name: Verify inbound settings, manual follow-up and concurrent ownership
         run: python3 tests/verify_inbound.py
       - name: Verify automatic queues, callback ownership, regional callers and pause races
