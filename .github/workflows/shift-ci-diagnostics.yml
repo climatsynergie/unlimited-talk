@@ -1,61 +1,33 @@
-name: Read sanitized synthetic import CI failure
+name: Reproduce synthetic import CI from fresh PostgreSQL
 on:
   push:
     branches: [ops/shift-ci-diagnostics-20261127]
-    paths: [.github/workflows/shift-ci-diagnostics.yml]
+    paths: [.github/workflows/shift-ci-diagnostics.yml, qa-reports/tools/reproduce_fresh_import_ci.py]
 permissions:
   contents: read
-  actions: read
 jobs:
-  diagnostics:
+  reproduce:
     if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/shift-ci-diagnostics-20261127'
     runs-on: ubuntu-24.04
-    timeout-minutes: 3
+    timeout-minutes: 15
     steps:
-      - name: Extract only sanitized failure messages from the fixed synthetic test job
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check out the diagnostic source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Generate disposable-only credentials
+        run: python3 scripts/bootstrap-secrets.py
+      - name: Build the exact backend source on its unchanged tested dependency base
         run: |
-          python3 - <<'PY'
-          import base64,json,os,re,subprocess,tempfile
-          from pathlib import Path
-          stage='identity'
-          try:
-              repo='climatsynergie/unlimited-talk'
-              branch='ops/shift-ci-diagnostics-20261127'
-              assert os.environ['GITHUB_REPOSITORY']==repo and os.environ['GITHUB_REF']=='refs/heads/'+branch
-              def api(path):return json.loads(subprocess.check_output(['gh','api','repos/'+repo+'/'+path],text=True))
-              stage='run_metadata'
-              run=api('actions/runs/45921665592')
-              assert run['head_sha']=='b526a44750c5b2f01795d9d7fdc538102df148ea' and run['path']=='.github/workflows/ci.yml'
-              stage='job_metadata'
-              job=api('actions/jobs/140253575334')
-              assert job['run_id']==45921665592 and job['conclusion']=='failure'
-              stage='download_logs'
-              result=subprocess.run(['gh','api','repos/'+repo+'/actions/jobs/140253575334/logs'],capture_output=True,text=True)
-              if result.returncode:
-                  print('::notice title=Log endpoint outcome::'+str(result.returncode)+' '+(' '.join(re.findall(r'HTTP [0-9]{3}|Resource not accessible|Must have admin rights|Not Found|Bad credentials',result.stderr))))
-                  raise RuntimeError('Authenticated log retrieval failed')
-              raw=result.stdout
-              stage='parse_logs'
-              marker='Run python3 tests/verify_import_dispatch_race.py'
-              fragment=raw.split(marker,1)[1].split('##[group]',1)[0] if marker in raw else raw
-              selected=[]
-              for line in fragment.splitlines():
-                  line=re.sub(r'^\d{4}-\d\d-\d\dT\S+\s+','',line)
-                  line=re.sub(r'\x1b\[[0-9;]*m','',line)
-                  if not re.search(r'(?:FAIL|ERROR): test_|test_.*\.\.\. (?:FAIL|ERROR)|(?:AssertionError|TypeError|RuntimeError|KeyError|ValueError|TimeoutError|ImportError|ModuleNotFoundError|AttributeError|IndexError):|psycopg\.errors\.|sqlalchemy\.exc\.|^Ran \d+ tests|^FAILED',line):continue
-                  if re.search(r'password|secret|token|authorization|bearer|credential',line,re.I):
-                      line=re.sub(r'(:).*',r'\1 [sensitive content redacted]',line)
-                  line=re.sub(r'(?:AC|SK|CA|RE)[0-9a-fA-F]{32}','[synthetic identifier]',line)
-                  line=re.sub(r'\+\d{9,15}','[synthetic phone]',line)
-                  selected.append(line[:800])
-              if not selected:selected=['No exception pattern matched the selected synthetic step.']
-              record=dict(source_run=45921665592,source_job=140253575334,scope='Sanitized synthetic import test failures only; raw logs never published',lines=selected)
-              output=json.dumps(record,indent=2)+'\n'
-              notice=output.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A')
-              print('::notice title=Sanitized synthetic import failure::'+notice)
-          except Exception as error:
-              print('::error title=Sanitized diagnostic stage::'+stage+' '+type(error).__name__)
-              raise
-          PY
+          docker build --build-arg GIT_REVISION="$GITHUB_SHA" -t unlimited-talk-staging-api:foundation -f - . <<'DOCKER'
+          FROM ghcr.io/climatsynergie/unlimited-talk-api@sha256:65bc7e7750006552d129a2466f13cfb7e589bd3f43f202b48f8414b03a6b825c
+          ARG GIT_REVISION
+          ENV APP_REVISION=$GIT_REVISION
+          LABEL org.opencontainers.image.revision="$GIT_REVISION"
+          COPY backend/ /app/
+          DOCKER
+      - name: Reproduce the unchanged migration, identity and import CI prefix
+        run: python3 qa-reports/tools/reproduce_fresh_import_ci.py
+      - name: Stop isolated diagnostic services
+        if: always()
+        run: docker compose down
