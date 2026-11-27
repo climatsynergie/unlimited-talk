@@ -178,6 +178,117 @@ def finish(agent,identifier,outcome='completed'):
     with engine.begin() as db:query(db,"UPDATE staging.voice_completion_jobs SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE intent_id=:id",id=identifier)
     completion.process_once(engine,profile)
 
+
+def verify_browser_recovery(campaign):
+    """Real HTTP/PG ownership fencing, without SDK or provider traffic."""
+    owner=Browser('agent')
+    admin.request('PUT','/api/campaigns/'+campaign['id']+'/agents/'+str(owner.id),dict(is_active=True))
+    path='/api/telephony/dialer/control'
+    def claim(agent,browser,state,expected=200):
+        return agent.request('POST',path,dict(action='start',browser_id=str(browser),
+            campaign_id=campaign['id'],generation=state['generation']),expected)
+    def stop(agent,browser,state):
+        agent.request('POST',path,dict(action='stop',browser_id=str(browser),generation=state['generation']))
+    def new_session(agent):
+        copy=Browser.__new__(Browser);copy.id=agent.id;copy.token=new_token();copy.csrf=new_token()
+        with engine.begin() as db:
+            query(db,"INSERT INTO staging.identity_sessions(token_hash,csrf_hash,user_id,mfa_verified,expires_at) VALUES (:token,:csrf,:user,true,now()+interval '1 hour')",
+                token=digest(copy.token),csrf=digest(copy.csrf),user=copy.id)
+        return copy
+    original_browser=uuid4();state=start(owner,original_browser,campaign)
+    reloaded_browser=uuid4()
+    # Legacy/no-version attempts still cannot take over a live browser.
+    owner.request('POST',path,dict(action='start',browser_id=str(reloaded_browser),campaign_id=campaign['id']),409)
+    # A refresh changes the in-memory UUID but preserves the authenticated session.
+    recovered=claim(owner,reloaded_browser,state)['dialer']
+    assert recovered['browser_id']==str(reloaded_browser) and recovered['generation']==state['generation']+1
+    owner.request('POST','/api/telephony/dialer/heartbeat',dict(browser_id=str(original_browser),generation=state['generation']),409)
+    next_call(owner,original_browser,state,expected=409)
+    owner.request('POST',path,dict(action='pause',browser_id=str(original_browser),generation=state['generation']),409)
+    claim(owner,uuid4(),state,409)  # A stale view cannot take back a newer generation.
+    assert owner.request('POST','/api/telephony/dialer/heartbeat',dict(browser_id=str(reloaded_browser),generation=recovered['generation']))['dialer']['browser_id']==str(reloaded_browser)
+    # The same account in a second still-valid authentication session stays fenced.
+    alternate=new_session(owner)
+    assert alternate.request('GET','/api/telephony/dialer/session')['dialer']['can_resume_here'] is False
+    claim(alternate,uuid4(),recovered,409)
+    forbidden=dict(action='start',browser_id=str(uuid4()),campaign_id=campaign['id'],generation=recovered['generation'])
+    owner.request('POST',path,forbidden,403,**{'X-CSRF-Token':'invalid-csrf'})
+    owner.request('POST',path,forbidden,403,Origin='https://untrusted.example.invalid')
+    Browser('agent').request('POST',path,forbidden,403)
+    assert owner.request('GET','/api/telephony/dialer/session')['dialer']['browser_id']==str(reloaded_browser)
+    stop(owner,reloaded_browser,recovered)
+    print('Ownership: same-session reload recovery, old-tab fencing, stale generation, foreign login, CSRF, origin and campaign authorization: PASS')
+
+    # Recovery may never finish/cancel an existing call or start another one.
+    for index,state_name in enumerate(['reserved','authorized','ringing','answered']):
+        old=uuid4();current=start(owner,old,campaign)
+        contact=seed(campaign,'+1514'+str(1000000+uuid4().int%9000000))
+        result=next_call(owner,old,current)
+        assert result['intent']['automatic'] is True
+        identifier=UUID(result['intent']['id'])
+        assert row(identifier)['dialer_browser_id']==old and row(identifier)['dialer_generation']==current['generation']
+        if state_name!='reserved':
+            parent,_=voice(owner,identifier)
+            if state_name in {'ringing','answered'}:
+                signed('status',identifier,dict(CallSid='CA'+uuid4().hex,ParentCallSid=parent,From=row(identifier)['caller_number'],
+                    To=row(identifier)['destination'],CallStatus='ringing' if state_name=='ringing' else 'in-progress',SequenceNumber='1'))
+        before=row(identifier);assert before['state']==state_name
+        replacement=uuid4();claim(owner,replacement,current,409)
+        assert row(identifier)['state']==state_name
+        assert owner.request('GET','/api/telephony/dialer/session')['dialer']['browser_id']==str(old)
+        if state_name=='reserved':owner.request('POST','/api/telephony/test/intents/'+str(identifier)+'/cancel',{})
+        else:finish(owner,identifier)
+        recovered=claim(owner,replacement,current)['dialer']
+        stop(owner,replacement,recovered)
+        admin.request('POST','/api/campaigns/'+campaign['id']+'/contacts/'+str(contact)+'/remove',
+            dict(request_id=str(uuid4()),version=card(campaign,contact)['version']))
+    print('Ownership: automatic reserved, authorized, ringing and answered calls preserved; explicit recovery after terminal state: PASS')
+
+    # A dead browser login does not make an ongoing call disposable.
+    old=uuid4();current=start(owner,old,campaign)
+    active=owner.request('POST','/api/telephony/test/intents',dict(id=str(uuid4()),destination='+15145550144'),201)
+    identifier=UUID(active['intent']['id']);parent,_=voice(owner,identifier)
+    signed('status',identifier,dict(CallSid='CA'+uuid4().hex,ParentCallSid=parent,From=profile.caller_number,
+        To=row(identifier)['destination'],CallStatus='in-progress',SequenceNumber='1'))
+    replacement=new_session(owner)
+    with engine.begin() as db:query(db,'DELETE FROM staging.identity_sessions WHERE token_hash=:hash',hash=digest(owner.token))
+    assert replacement.request('GET','/api/telephony/dialer/session')['dialer']['can_resume_here'] is True
+    browser=uuid4();claim(replacement,browser,current,409)
+    assert row(identifier)['state']=='answered'
+    finish(replacement,identifier)
+    recovered=claim(replacement,browser,current)['dialer'];stop(replacement,browser,recovered);owner=replacement
+    print('Ownership: revoked login with answered call remains protected until provider-confirmed finish: PASS')
+
+    # Cookie rotation/deleted, expired and idle sessions must not strand a live lease.
+    for invalidation in ['deleted','expired','idle']:
+        old=uuid4();current=start(owner,old,campaign);replacement=new_session(owner)
+        with engine.begin() as db:
+            if invalidation=='deleted':query(db,'DELETE FROM staging.identity_sessions WHERE token_hash=:hash',hash=digest(owner.token))
+            elif invalidation=='expired':query(db,"UPDATE staging.identity_sessions SET expires_at=now()-interval '1 second' WHERE token_hash=:hash",hash=digest(owner.token))
+            else:query(db,"UPDATE staging.identity_sessions SET last_seen_at=now()-interval '25 hours' WHERE token_hash=:hash",hash=digest(owner.token))
+        assert replacement.request('GET','/api/telephony/dialer/session')['dialer']['can_resume_here'] is True
+        new_browser=uuid4();recovered=claim(replacement,new_browser,current)['dialer']
+        owner.request('GET','/api/telephony/dialer/session',expected=401)
+        stop(replacement,new_browser,recovered);owner=replacement
+    print('Ownership: deleted, expired and idle prior sessions recovered under current authentication: PASS')
+
+    # Two explicit claims based on the same snapshot cannot both win.
+    old=uuid4();current=start(owner,old,campaign)
+    def race(browser):
+        body=dict(action='start',browser_id=str(browser),campaign_id=campaign['id'],generation=current['generation'])
+        headers={'Cookie':COOKIE+'='+owner.token+'; '+CSRF_COOKIE+'='+owner.csrf,'X-CSRF-Token':owner.csrf,
+            'Origin':origin,'Content-Type':'application/json'}
+        status,raw,_=http('POST',path,json.dumps(body).encode(),headers)
+        assert status in {200,409},(status,raw[:200])
+        return status,json.loads(raw)
+    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(race,[uuid4(),uuid4()]))
+    assert sorted(status for status,_ in results)==[200,409]
+    winner=next(payload['dialer'] for status,payload in results if status==200)
+    assert winner['generation']==current['generation']+1
+    stop(owner,UUID(winner['browser_id']),winner)
+    print('Ownership: simultaneous recoveries have exactly one winner: PASS')
+
+
 try:
     admin=Browser();agents=[Browser('agent') for _ in range(3)]
     a=admin.request('POST','/api/campaigns',dict(name='Composeur A '+uuid4().hex,timezone='UTC'),201)
@@ -192,6 +303,7 @@ try:
     rule=dict(number_id=numbers[profile.caller_number],country='CA',prefix='+1416')
     config(a,numbers['+14165550200'],rules=[rule,dict(number_id=numbers['+442079460002'],country='GB',prefix='')])
     config(b,numbers['+442079460002'])
+    verify_browser_recovery(a)
     current=admin.request('GET','/api/telephony/campaigns/'+a['id']+'/calling')['settings']
     # Retrying a saved configuration after a lost HTTP response returns the
     # original response shape and does not increment its optimistic version.

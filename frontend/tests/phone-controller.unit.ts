@@ -1536,6 +1536,98 @@ test("composeur : une perte de présence pendant le RDV exige une reprise explic
   assert.equal(f.nextCount, 0);
 });
 
+test("composeur : après rechargement, une reprise explicite utilise la génération fraîche sans démarrage implicite", async (t) => {
+  let row: Dialer = {
+    mode: "stopped",
+    generation: 0,
+    campaign_id: null,
+    browser_id: null,
+  };
+  let nextCount = 0;
+  const requests: Record<string, unknown>[] = [];
+  const server: AutomaticTransport = {
+    session: async () => ({
+      enabled: true,
+      dialer: { ...row, owned_session: true },
+    }),
+    control: async (body) => {
+      requests.push(body);
+      if (
+        row.mode === "running" &&
+        row.browser_id !== body.browser_id &&
+        body.generation !== row.generation
+      )
+        throw Object.assign(
+          new Error("Le composeur est déjà actif dans un autre navigateur."),
+          { status: 409 },
+        );
+      row = {
+        mode: "running",
+        generation: row.generation + 1,
+        campaign_id: String(body.campaign_id),
+        browser_id: String(body.browser_id),
+      };
+      return { dialer: { ...row } };
+    },
+    heartbeat: async () => ({ dialer: { ...row } }),
+    next: async () => {
+      nextCount++;
+      return { idle: "empty", dialer: { ...row } };
+    },
+  };
+  const first = fixture(server);
+  await first.controller.refresh();
+  await first.controller.startAutomatic("campaign");
+  const originalBrowser = row.browser_id;
+  first.controller.dispose();
+  const reloaded = fixture(server);
+  t.after(() => reloaded.controller.dispose());
+  await reloaded.controller.refresh();
+  await reloaded.controller.refreshAutomatic();
+  await reloaded.controller.automaticTick();
+  assert.equal(reloaded.controller.state.automaticRunning, false);
+  assert.equal(nextCount, 0, "refresh never arms the dialer");
+  // The displayed snapshot may become stale before the explicit click.
+  row = { ...row, generation: row.generation + 1 };
+  const currentGeneration = row.generation;
+  await reloaded.controller.startAutomatic("campaign");
+  assert.equal(reloaded.controller.state.automaticRunning, true);
+  assert.equal(requests.at(-1)?.generation, currentGeneration);
+  assert.notEqual(row.browser_id, originalBrowser);
+  assert.equal(reloaded.device.connections.length, 0);
+  await reloaded.controller.automaticTick();
+  assert.equal(nextCount, 1);
+});
+
+test("composeur : une pause pendant la lecture de reprise empêche tout changement de propriétaire", async (t) => {
+  const f = automaticFixture();
+  t.after(() => f.controller.dispose());
+  await f.controller.refresh();
+  const gate = deferred<{ dialer: Dialer; enabled: boolean }>();
+  f.automatic.session = () => gate.promise;
+  let controls = 0;
+  const control = f.automatic.control;
+  f.automatic.control = async (...args) => {
+    controls++;
+    return control(...args);
+  };
+  const starting = f.controller.startAutomatic("campaign");
+  await f.controller.pauseAutomatic();
+  gate.resolve({
+    enabled: true,
+    dialer: {
+      mode: "stopped",
+      generation: 0,
+      campaign_id: null,
+      browser_id: null,
+    },
+  });
+  await starting;
+  assert.equal(controls, 0);
+  assert.equal(f.controller.state.automaticRunning, false);
+  assert.equal(f.nextCount, 0);
+});
+
 test("composeur : un autre navigateur ou une restauration ne redémarre jamais les appels seul", async (t) => {
   const f = automaticFixture();
   t.after(() => f.controller.dispose());

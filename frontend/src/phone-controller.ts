@@ -120,6 +120,7 @@ export type Dialer = {
   browser_id: string | null;
   hold_token?: string | null;
   owned_session?: boolean;
+  can_resume_here?: boolean;
 };
 export type AutomaticTransport = {
   session: (
@@ -459,11 +460,19 @@ export class PhoneController {
     this.automaticFailures = 0;
     this.update({ automaticBusy: true, automaticError: "" });
     try {
+      // A reload creates a new media controller. Only this explicit gesture
+      // may recover its server lease, using a fresh optimistic generation.
+      const snapshot = await this.automaticTransport.session(
+        this.requests.signal,
+      );
+      if (this.closed || epoch !== this.automaticEpoch) return;
+      this.applyAutomatic(snapshot.dialer);
       const result = await this.automaticTransport.control(
         {
           action: "start",
           browser_id: this.browserId,
           campaign_id: campaignId,
+          generation: snapshot.dialer.generation || undefined,
         },
         this.requests.signal,
       );

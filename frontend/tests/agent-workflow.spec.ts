@@ -190,11 +190,43 @@ for (const concurrentChange of [false, true]) {
     });
     expect(replay.status()).toBe(200);
     expect((await replay.json()).version).toBe((await accepted.json()).version);
+    // Recreate a still-live lease in the original tab, without originating a
+    // call, then reload. Only the media SDK is substituted: recovery must cross
+    // the actual browser, authenticated API and PostgreSQL ownership boundary.
+    const priorResponse = await page.request.get(
+      "/api/telephony/dialer/session",
+    );
+    expect(priorResponse.status()).toBe(200);
+    const prior = (await priorResponse.json()).dialer;
+    const running = await page.request.post("/api/telephony/dialer/control", {
+      headers: {
+        Origin: new URL(baseURL!).origin,
+        "X-CSRF-Token": fixture.csrf,
+      },
+      data: {
+        action: "start",
+        browser_id: prior.browser_id,
+        campaign_id: fixture.campaign,
+        generation: prior.generation,
+      },
+    });
+    expect(running.status()).toBe(200);
+    await page.reload();
+    await page
+      .getByRole("combobox", { name: "Campagne d’appel", exact: true })
+      .selectOption(fixture.campaign);
+    expect((await state()).calls).toHaveLength(1);
+    expect(
+      await page.evaluate(() => window.phoneProof?.connections.length || 0),
+    ).toBe(0);
     await expect(
-      page.getByRole("button", { name: "Reprendre les appels", exact: true }),
+      page.getByRole("button", {
+        name: "Reprendre les appels ici",
+        exact: true,
+      }),
     ).toBeEnabled();
     await page
-      .getByRole("button", { name: "Reprendre les appels", exact: true })
+      .getByRole("button", { name: "Reprendre les appels ici", exact: true })
       .click();
     await expect(
       current.getByRole("heading", {

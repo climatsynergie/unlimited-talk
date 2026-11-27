@@ -143,10 +143,16 @@ export function AutoDialerPanel({
     }
   }
   const mode = state.automatic?.mode || "stopped";
+  const resumeHere =
+    mode === "running" &&
+    !state.automaticRunning &&
+    (state.automatic?.can_resume_here || state.automatic?.owned_session);
   const labels = {
     running: state.automaticRunning
       ? "Enchaînement actif"
-      : "Actif dans une autre fenêtre ou à reprendre explicitement",
+      : resumeHere
+        ? "À reprendre sur cet onglet"
+        : "Actif dans une autre session",
     paused: "En pause",
     stopped: "Arrêté",
     booking: "Suspendu pendant la saisie du rendez-vous",
@@ -284,9 +290,11 @@ export function AutoDialerPanel({
         >
           {preparing
             ? "Vérification du microphone…"
-            : mode === "paused" || mode === "booking"
-              ? "Reprendre les appels"
-              : "Démarrer les appels"}
+            : resumeHere
+              ? "Reprendre les appels ici"
+              : mode === "paused" || mode === "booking"
+                ? "Reprendre les appels"
+                : "Démarrer les appels"}
         </button>
         <button
           type="button"

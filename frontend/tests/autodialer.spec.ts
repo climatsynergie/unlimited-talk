@@ -45,7 +45,12 @@ type Dialer = {
   browser_id: string | null;
   hold_token: string | null;
 };
-async function setup(page: Page, role = "agent", sameContact = false) {
+async function setup(
+  page: Page,
+  role = "agent",
+  sameContact = false,
+  strictOwnership = false,
+) {
   const unexpected: string[] = [];
   unknownRequests.set(page, unexpected);
   const rows = new Map<string, Row>();
@@ -138,7 +143,15 @@ async function setup(page: Page, role = "agent", sameContact = false) {
     else if (path === "/api/telephony/active-calls")
       result = { items: [], active_count: 0, answered_count: 0 };
     else if (path === "/api/telephony/dialer/session")
-      result = { enabled: true, dialer: { ...dialer } };
+      result = {
+        enabled: true,
+        dialer: {
+          ...dialer,
+          ...(strictOwnership
+            ? { owned_session: true, can_resume_here: true }
+            : {}),
+        },
+      };
     else if (path === "/api/telephony/dialer/campaigns")
       result = {
         items: [
@@ -151,6 +164,19 @@ async function setup(page: Page, role = "agent", sameContact = false) {
         ],
       };
     else if (path === "/api/telephony/dialer/control") {
+      if (
+        strictOwnership &&
+        body.action === "start" &&
+        dialer.mode === "running" &&
+        body.browser_id !== dialer.browser_id &&
+        body.generation !== dialer.generation
+      )
+        return route.fulfill({
+          status: 409,
+          json: {
+            detail: "Le composeur est déjà actif dans un autre navigateur.",
+          },
+        });
       controls.push(body.action);
       dialer = {
         ...dialer,
@@ -470,6 +496,36 @@ async function start(page: Page) {
     .poll(() => page.evaluate(() => window.phoneProof?.connections.length || 0))
     .toBe(1);
 }
+
+test("composeur : actualisation puis reprise ici sans faux conflit de navigateur", async ({
+  page,
+}) => {
+  const f = await setup(page, "agent", false, true);
+  await start(page);
+  for (const row of f.rows.values()) {
+    row.state = "finished";
+    row.outcome = "no-answer";
+  }
+  await page.reload();
+  await page
+    .getByRole("combobox", { name: "Campagne d’appel", exact: true })
+    .selectOption(campaign);
+  expect(f.nextCount).toBe(1);
+  expect(
+    await page.evaluate(() => window.phoneProof?.connections.length || 0),
+  ).toBe(0);
+  await page
+    .getByRole("button", {
+      name: /^(Démarrer les appels|Reprendre les appels ici)$/,
+    })
+    .click();
+  await expect.poll(() => f.nextCount, { timeout: 5000 }).toBe(2);
+  await expect(
+    page.getByText("Le composeur est déjà actif dans un autre navigateur.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+});
 
 test("agent : rappel prioritaire, pause sans raccrochage puis reprise explicite", async ({
   page,

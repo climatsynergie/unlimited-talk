@@ -5,6 +5,7 @@ from itertools import chain
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from app.identity.service import query,audit
+from app.identity.security import IDLE_SECONDS
 from app.campaigns import service as campaigns
 from app.telephony import service,completion,dialer_policy as policy
 
@@ -19,6 +20,20 @@ def public(row):
     if row is None:return {'mode':'stopped','generation':0,'campaign_id':None,'browser_id':None,'owned_session':False}
     return {key: str(row[key]) if key in {'campaign_id','browser_id','hold_token'} and row[key] is not None else row[key]
             for key in ('mode','generation','campaign_id','browser_id','hold_token')}
+
+
+def can_resume_here(db,actor,row):
+    """Only the same login, an expired lease or a dead login is recoverable.
+
+    A fresh generation and the active-call guard are still required by control.
+    This hint never authorizes a request and contains no session credential.
+    """
+    if row is None:return False
+    if row['session_hash']==actor['session_hash'] or not row['lease_alive']:return True
+    return not bool(query(db,'''SELECT 1 FROM staging.identity_sessions
+        WHERE token_hash=:session AND user_id=:actor AND mfa_verified
+        AND expires_at>now() AND last_seen_at>now()-make_interval(secs=>:idle_seconds)''',
+        session=row['session_hash'],actor=actor['id'],idle_seconds=IDLE_SECONDS).first())
 
 
 def cancel_reserved(db,actor,generation):
@@ -46,7 +61,11 @@ def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_tok
         config=policy.settings(db,campaign_id)
         if not config or not config['enabled'] or not config['default_number_id']:
             raise HTTPException(409,'Un administrateur doit choisir le numéro émetteur de cette campagne.')
-        if row and row['mode']=='running' and row['lease_alive'] and (row['browser_id']!=browser_id or row['session_hash']!=actor['session_hash']):
+        if row and generation is not None and row['generation']!=generation:
+            raise HTTPException(409,'Le composeur a changé. Actualisez son état avant de continuer.')
+        recovering=bool(row and row['mode']=='running' and row['lease_alive']
+            and (row['browser_id']!=browser_id or row['session_hash']!=actor['session_hash']))
+        if recovering and (generation is None or not can_resume_here(db,actor,row)):
             raise HTTPException(409,'Le composeur est déjà actif dans un autre navigateur.')
         active=query(db,'''SELECT * FROM staging.voice_intents WHERE actor_id=:id
             AND state IN ('reserved','authorized','ringing','answered')
@@ -63,6 +82,7 @@ def control(db,actor,browser_id,action,campaign_id=None,generation=None,hold_tok
                 campaign_id=excluded.campaign_id,mode='running',generation=voice_dialer_sessions.generation+1,
                 lease_until=excluded.lease_until,hold_token=NULL,resume_after_hold=false,updated_at=clock_timestamp()
             RETURNING *''',actor=actor['id'],session=actor['session_hash'],browser=browser_id,campaign=campaign_id).mappings().one()
+        if recovering:audit(db,actor['id'],'dialer.recovered',campaign_id)
     else:
         if not row or row['generation']!=generation:
             raise HTTPException(409,'Le composeur a changé. Actualisez son état avant de continuer.')

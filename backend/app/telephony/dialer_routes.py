@@ -55,6 +55,7 @@ def session(request:Request):
         row=dialer.get(db,actor)
         state=dialer.public(row)
         state['owned_session']=bool(row and row['session_hash']==actor['session_hash'])
+        state['can_resume_here']=dialer.can_resume_here(db,actor,row)
         return {'dialer':state,'enabled':isinstance(getattr(request.app.state,'voice_profile',None),ManualVoiceProfile)
             and bool(getattr(request.app.state,'voice_calling_enabled',False))}
 
