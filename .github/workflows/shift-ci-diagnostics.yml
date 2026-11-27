@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   reproduce:
-    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/shift-ci-diagnostics-20261127'
+    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/shift-ci-diagnostics-20261127' && !contains(github.event.head_commit.message, 'diagnostic-log-only')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -31,3 +31,49 @@ jobs:
       - name: Stop isolated diagnostic services
         if: always()
         run: docker compose down
+
+  read-fixed-log:
+    if: github.repository == 'climatsynergie/unlimited-talk' && contains(github.event.head_commit.message, 'diagnostic-log-only')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Retrieve only sanitized synthetic failure evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PYCODE'
+          import datetime,json,os,re,urllib.request,urllib.error
+          from urllib.parse import urlsplit,parse_qs
+          def notice(value):
+              data=json.dumps(value).replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A')
+              print('::notice title=Fixed synthetic CI log diagnostic::'+data,flush=True)
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):return None
+          url='https://api.github.com/repos/climatsynergie/unlimited-talk/actions/jobs/140253575334/logs'
+          request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'User-Agent':'UnlimitedTalks-authorized-QA','Accept':'application/vnd.github+json'})
+          try:
+              response=urllib.request.build_opener(NoRedirect).open(request,timeout=20)
+          except urllib.error.HTTPError as error:
+              if error.code in (301,302,303,307,308):
+                  location=error.headers['Location'];host=urlsplit(location).hostname
+                  assert host.endswith('.blob.core.windows.net') or host.endswith('.githubusercontent.com')
+                  notice(dict(redirect_host=host,expires=parse_qs(urlsplit(location).query).get('se'),now=datetime.datetime.now(datetime.timezone.utc).isoformat()))
+                  try:response=urllib.request.urlopen(location,timeout=20)
+                  except urllib.error.HTTPError as second:
+                      notice(dict(redirect_status=second.code));raise SystemExit(1)
+              else:
+                  try:message=json.loads(error.read()).get('message','No message')
+                  except Exception:message='Non-JSON API refusal'
+                  notice(dict(api_status=error.code,message=message[:300]));raise SystemExit(1)
+          raw=response.read().decode('utf-8',errors='replace')
+          fragment=raw.split('Run python3 tests/verify_import_dispatch_race.py',1)[-1].split('##[group]',1)[0]
+          lines=[]
+          for line in fragment.splitlines():
+              if not any(term in line for term in ('FAIL:','ERROR:','Error:','exit status','not running','OCI runtime','Killed','FAILED')):continue
+              if any(term in line.lower() for term in ('password','secret','token','authorization','credential')):line='Sensitive error detail redacted'
+              lines.append(line[:1000])
+          notice(dict(log_bytes=len(raw),failures=lines[:30]))
+          PYCODE
