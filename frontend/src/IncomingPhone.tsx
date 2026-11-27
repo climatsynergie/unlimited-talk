@@ -22,7 +22,8 @@ export function ReceptionStatus({
   useEffect(() => {
     if (enabled && !state.loaded) void controller.prepare();
   }, [controller, enabled, state.loaded]);
-  if (!state.loaded || (!state.enabled && !state.queues.length)) return null;
+  if (!state.loaded || (!enabled && !state.enabled && !state.queues.length))
+    return null;
   const ready = state.wanted && state.registered && !state.recovering;
   const connecting = state.phase === "registering";
   return (
@@ -42,7 +43,7 @@ export function ReceptionStatus({
       <button
         type="button"
         className="text-button"
-        disabled={!state.enabled || connecting}
+        disabled={(!enabled && !state.enabled) || connecting}
         onClick={() =>
           void (state.wanted ? controller.pause() : controller.start())
         }

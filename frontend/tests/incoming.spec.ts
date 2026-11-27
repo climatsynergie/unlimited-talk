@@ -81,10 +81,23 @@ test("réception globale : réponse explicite, navigation, pause sans couper et 
     state: finished ? "finished" : accepted ? "connected" : "offered",
     call_state: finished ? "finished" : accepted ? "connected" : "offered",
   });
+  let sessionReads = 0;
   await page.route("**/api/inbound/reception", (r) =>
-    r.fulfill({
-      json: { enabled: true, queues: [q], registration: null, active: null },
-    }),
+    r.fulfill(
+      ++sessionReads === 1
+        ? {
+            status: 503,
+            json: { detail: "Réception temporairement indisponible" },
+          }
+        : {
+            json: {
+              enabled: true,
+              queues: [q],
+              registration: null,
+              active: null,
+            },
+          },
+    ),
   );
   await page.route("**/api/inbound/reception/register", (r) =>
     r.fulfill({
@@ -134,6 +147,9 @@ test("réception globale : réponse explicite, navigation, pause sans couper et 
   await page.goto("/conversations");
   const reception = page.getByRole("group", { name: "État de la réception" });
   await expect(reception).toContainText("Réception suspendue");
+  await expect(reception.getByRole("alert")).toContainText(
+    "La réception n’a pas pu être vérifiée",
+  );
   expect(await page.evaluate(() => "incomingProof" in window)).toBe(false);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
