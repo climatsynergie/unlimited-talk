@@ -15,7 +15,7 @@ jobs:
       - name: Dispatch the normal protected workflow for the exact tested release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUESTED_REVISION: b526a44750c5b2f01795d9d7fdc538102df148ea
+          REQUESTED_REVISION: 86230a2fa1a3a6b2af5b8d1e60144fbb9191c5c2
         run: |
           python3 - <<'PYCODE'
           import json,os,subprocess

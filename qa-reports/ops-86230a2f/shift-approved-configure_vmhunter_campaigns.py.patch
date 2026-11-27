@@ -1,11 +1,11 @@
 --- configure_vmhunter_campaigns.py
-+++ configure_vmhunter_campaigns.py (APIb526a44 approval)
++++ configure_vmhunter_campaigns.py (API86230a2 approval)
 @@ -59,7 +59,7 @@
          release=Path('/srv/unlimited-talk-staging/current').resolve()
          api_revision=release.name.removeprefix('git-')
          assert release.name=='git-'+api_revision
 -        assert api_revision in {'35b4ba8f076b9ead2712aed239656a8423eb09ff','36a451a4e974dc0a8ff80bbe5540806f57fa3c6f',revision}
-+        assert api_revision in {'35b4ba8f076b9ead2712aed239656a8423eb09ff','36a451a4e974dc0a8ff80bbe5540806f57fa3c6f',revision,'b526a44750c5b2f01795d9d7fdc538102df148ea'}
++        assert api_revision in {'35b4ba8f076b9ead2712aed239656a8423eb09ff','36a451a4e974dc0a8ff80bbe5540806f57fa3c6f',revision,'86230a2fa1a3a6b2af5b8d1e60144fbb9191c5c2'}
          health(api_revision)
          receipt_path=Path('/root/vmhunter-worker-'+revision[:7]+'/approved-image.json')
          assert receipt_path.stat().st_uid==0 and receipt_path.stat().st_mode&0o077==0
