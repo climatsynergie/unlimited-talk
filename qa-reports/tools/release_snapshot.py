@@ -37,7 +37,7 @@ try:
  command=['docker','run','--rm','--network',network,'--read-only','--tmpfs','/tmp:rw,noexec,nosuid,size=16m','--cap-drop','ALL','--security-opt','no-new-privileges:true','--memory','256m','--cpus','0.25','--pids-limit','64']
  values={'PGHOST':env['DB_HOST'],'PGPORT':str(env.get('DB_PORT','25060')),'PGDATABASE':env['DB_NAME'],'PGUSER':env['DB_USER'],'PGSSLMODE':'verify-full','PGSSLROOTCERT':'/run/postgres-ca','PGPASSFILE':'/run/pgpass','PGCONNECT_TIMEOUT':'15','PGOPTIONS':'-c default_transaction_read_only=on'}
  for key,value in values.items():command+=['-e',key+'='+value]
- command+=['-v',str(passfile)+':/run/pgpass:ro','-v',str(ca)+':/run/postgres-ca:ro','-v',str(backup)+':/backup','--entrypoint','pg_dump',image,'--format=custom','--schema=staging','--no-owner','--no-privileges','--file=/backup/'+filename]
+ command+=['-v',str(passfile)+':/run/pgpass:ro','-v',str(ca)+':/run/postgres-ca:ro','-v',str(backup)+':/backup','--entrypoint','pg_dump',image,'--format=custom','--schema=staging','--schema=extensions','--extension=pg_trgm','--no-owner','--no-privileges','--file=/backup/'+filename]
  if not INCLUDE_DATA:command+=['--schema-only']
  result=subprocess.run(command,capture_output=True,text=True,timeout=300)
  if result.returncode:
@@ -48,6 +48,7 @@ try:
  verify=['docker','run','--rm','--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--memory','128m','--pids-limit','32','-v',str(output)+':/snapshot.dump:ro','--entrypoint','pg_restore',image,'--list','/snapshot.dump']
  checked=subprocess.run(verify,capture_output=True,text=True,timeout=60)
  assert checked.returncode==0,'Snapshot table-of-contents verification failed'
+ assert ' EXTENSION - pg_trgm ' in checked.stdout and ' SCHEMA - extensions ' in checked.stdout,'Required query-index extension missing from snapshot'
  table_data_entries=sum(' TABLE DATA ' in line for line in checked.stdout.splitlines())
  if INCLUDE_DATA:assert table_data_entries>0,'Full snapshot has no table-data sections'
  payload=subprocess.run(verify[:-2]+['--file=/dev/null','--no-owner','--no-privileges','/snapshot.dump'],capture_output=True,text=True,timeout=120)

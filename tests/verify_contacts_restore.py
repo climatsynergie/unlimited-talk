@@ -19,11 +19,20 @@ fingerprint='SELECT '+" || ':' || ".join(
     for table in tables)
 
 before=run('psql','-U','postgres','-d','unlimited_talk_staging','-tAc',fingerprint)
-backup=run('pg_dump','-U','postgres','-d','unlimited_talk_staging','--schema=staging','--no-owner','--no-acl','--format=custom')
+# A schema filter alone omits extension definitions, even if its namespace is
+# also selected. Include both so the GIN operator class restores into an empty DB.
+backup=run('pg_dump','-U','postgres','-d','unlimited_talk_staging','--schema=staging',
+           '--schema=extensions','--extension=pg_trgm','--no-owner','--no-acl','--format=custom')
+toc=run('pg_restore','--list',data=backup).decode()
+assert ' EXTENSION - pg_trgm ' in toc and ' SCHEMA - extensions ' in toc
 try:
     run('createdb','-U','postgres','unlimited_talk_restore_test')
     run('pg_restore','-U','postgres','-d','unlimited_talk_restore_test','--exit-on-error','--no-owner','--no-acl',data=backup)
     assert run('psql','-U','postgres','-d','unlimited_talk_restore_test','-tAc',fingerprint)==before
+    assert run('psql','-U','postgres','-d','unlimited_talk_restore_test','-tAc',
+               "SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_trgm'").strip()==b'extensions'
+    assert run('psql','-U','postgres','-d','unlimited_talk_restore_test','-tAc',
+               "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='staging' AND c.relname IN ('contacts_directory_order','contacts_directory_search') AND i.indisvalid AND i.indisready").strip()==b'2'
 finally:
     run('dropdb','-U','postgres','--if-exists','unlimited_talk_restore_test')
 print('Synthetic backup restored into separate disposable database; all selected CRM/outbound tables plus seven incoming tables verified by row fingerprints: PASS')
