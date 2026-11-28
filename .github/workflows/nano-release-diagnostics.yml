@@ -23,10 +23,10 @@ jobs:
               print('::error title=Diagnostic retrieval failed::'+safe[:3000])
               raise SystemExit(1)
           def api(path):
-              process=subprocess.run(['gh','api',path],capture_output=True)
+              process=subprocess.run(['gh','api','--allow-escape-sequences',path],capture_output=True)
               if process.returncode:
                   failed('GitHub API',process.stderr.decode(errors='replace'))
-              return process.stdout.decode(errors='replace')
+              return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',process.stdout.decode(errors='replace'))
           repository='climatsynergie/unlimited-talk'
           job='140818694873'
           meta=json.loads(api('repos/'+repository+'/actions/jobs/'+job))
