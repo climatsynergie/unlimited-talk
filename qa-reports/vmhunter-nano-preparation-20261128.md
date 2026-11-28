@@ -74,3 +74,9 @@ The current-API run uses `--memory 256m`, adds `-v "$PWD/backend/app:/app/app:ro
 - These fixes do not change reception, campaign membership, DNC, appointments/qualification, normal call duration, explicit dialer pause or existing disposition rules. Existing INITIALSILENCE/MAXWORD/CALLGUARD/failure continuations remain covered by executed regressions.
 
 **Ready to include in the next reviewed release batch; not deployed and not a claim of global production readiness or perfect filtering.**
+
+## Authorized release follow-up: CI fixture boundary
+
+The owner authorized deployment on 28 November. Revision0724ac1 was fast-forwarded to main, but its worker CI run46093224096 failed at the first Nano burst assertion; the service was not deployed. A read-only diagnostic workflow retrieved only the test assertion location. A controlled disposable reproduction (`nano-ci-window-reproduction-20261128`, exit1) inserted and completed a preceding Free analysis immediately before the Nano burst, confirmed one recent account claim, and reproduced the same failure. The global five-starts-per-second limiter correctly counted that prior traffic.
+
+The fixture now deliberately preserves that prior Free claim, waits for an empty rolling-second window and asserts the window is empty before testing the dedicated five-start burst. All capacity, elapsed-time, sixth-start, restart and concurrent-completion assertions remain. No runtime code or rate limit was relaxed. The corrected fixture is rerun against the built image in `nano-ci-window-corrected-20261128`. Exact-source GitHub checks and protected deployment must pass on the subsequent revision before activation.

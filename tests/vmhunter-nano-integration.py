@@ -45,7 +45,7 @@ try:
     # Expand only this synthetic campaign fixture to twenty-one independent
     # actors. Per-agent active-call constraints remain enabled throughout.
     with engine.begin() as db:
-        for i in range(3, 21):
+        for i in range(3, 22):
             actor, contact = uuid4(), uuid4()
             number = '+1416555' + str(1000 + i)
             fixture['actors'].append(actor)
@@ -62,6 +62,24 @@ try:
     quota = ProviderQuota(100000)
     store = Store(engine, profile, pilot, provider_quota=quota)
     payloads = [call(campaigns[0], i) for i in range(21)]
+    # Model an immediate plan transition on the same account. These recently
+    # completed Free analyses must still consume the shared rolling CPS budget.
+    warmup_store = Store(engine, profile, pilot, provider_quota=ProviderQuota())
+    warmup = warmup_store.claim(call(campaigns[0], 21))
+    assert warmup
+    warmup_store.result(warmup, vm.Result('HUMAN', 'HUMAN'), stop_confirmed=True)
+    finish(warmup)
+    with engine.connect() as db:
+        carried = query(db,"SELECT count(*) FROM staging.voice_events c JOIN staging.voice_intents i ON i.id=c.intent_id WHERE i.account_sid=:account AND c.kind='vmhunter.claim' AND c.created_at>statement_timestamp()-interval '1 second'",account=profile.account_sid).scalar_one()
+    assert carried >= 1
+    print(json.dumps({'account_recent_claims_before_nano_burst':carried}),flush=True)
+    # Start the dedicated Nano burst in an empty account-rate window. Without
+    # this boundary a fast CI runner correctly rejects one of the five starts
+    # because the preceding Free fixture consumed a slot. Keep the rate limit,
+    # rolling-window assertion and sixth-start rejection unchanged.
+    time.sleep(1.05)
+    with engine.connect() as db:
+        assert query(db,"SELECT count(*) FROM staging.voice_events c JOIN staging.voice_intents i ON i.id=c.intent_id WHERE i.account_sid=:account AND c.kind='vmhunter.claim' AND c.created_at>statement_timestamp()-interval '1 second'",account=profile.account_sid).scalar_one()==0
     claims = []
     for batch in range(4):
         if batch:
@@ -111,6 +129,7 @@ try:
         simultaneous_five_admissions=True, third_analysis_accepted=True, twenty_slots_used=True,
         account_rate_and_capacity_survive_restart=True, slot_released_on_result=True,
         twenty_concurrent_completions_on_two_db_connections=True,
+        prior_free_traffic_preserved_and_window_isolated=True,
         runtime_ddl_denied=True, online_indexes_repeatable=True, index_rollback_preserves_data=True,
         previous_free_configuration_works=True, schema='0012_incoming_runtime', migration_required=False,
         real_calls=0)))
