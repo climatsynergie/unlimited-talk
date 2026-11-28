@@ -14,7 +14,7 @@ from uuid import uuid4
 
 root=Path(__file__).resolve().parents[1]
 proof_script=sys.argv[1] if len(sys.argv)>1 else 'vmhunter-screen-integration.py'
-assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py','vmhunter-cleanup-recovery-integration.py','shift-concurrency-integration.py','shift-pool-integration.py','shift-search-integration.py','reporting-incoming-integration.py'}
+assert proof_script in {'vmhunter-screen-integration.py','vmhunter-integration.py','vmhunter-multicampaign-integration.py','vmhunter-provider-quota-integration.py','vmhunter-cleanup-recovery-integration.py','vmhunter-nano-integration.py','vmhunter-cleanup-scale-integration.py','shift-concurrency-integration.py','shift-pool-integration.py','shift-search-integration.py','reporting-incoming-integration.py'}
 base=['sudo','-n','docker','compose','--project-directory',str(root)]
 base+=shlex.split(os.environ.get('FOUNDATION_COMPOSE_ARGS',''))
 config=json.loads(subprocess.check_output([*base,'config','--format','json']))
@@ -52,6 +52,8 @@ definition=dict(name='ut-screen-proof-'+uuid4().hex[:12],
 if proof_script=='shift-search-integration.py':
     definition['services']['db']['tmpfs']=['/var/lib/postgresql:rw,size=2g']
     definition['services']['db']['mem_limit']='3072m'
+    definition['services']['proof']['secrets'].append('migrator_password')
+if proof_script in {'vmhunter-nano-integration.py','vmhunter-cleanup-scale-integration.py'}:
     definition['services']['proof']['secrets'].append('migrator_password')
 with tempfile.TemporaryDirectory(prefix='ut-screen-compose-') as folder:
     path=Path(folder)/'compose.json';path.write_text(json.dumps(definition))

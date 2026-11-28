@@ -23,14 +23,14 @@ class QuotaTests(unittest.TestCase):
             with patch.dict(os.environ,env,clear=True):
                 quota=ProviderQuota.from_environment(replace(self.pilot(),enabled=enabled))
             self.assertEqual(quota.monthly_allowance,5000)
-    def test_partial_invalid_or_paid_plan_configuration_cannot_silently_expand(self):
+    def test_partial_invalid_or_unknown_plan_configuration_cannot_silently_expand(self):
         for env in ({'VMHUNTER_QUOTA_SOURCE':'provider'}, {'VMHUNTER_MONTHLY_ALLOWANCE':'5000'},
                 {'VMHUNTER_QUOTA_SOURCE':'all','VMHUNTER_MONTHLY_ALLOWANCE':'5000'},
                 {'VMHUNTER_QUOTA_SOURCE':'provider','VMHUNTER_MONTHLY_ALLOWANCE':'500'},
-                {'VMHUNTER_QUOTA_SOURCE':'provider','VMHUNTER_MONTHLY_ALLOWANCE':'100000'}):
+                {'VMHUNTER_QUOTA_SOURCE':'provider','VMHUNTER_MONTHLY_ALLOWANCE':'300000'}):
             with self.subTest(env=env),patch.dict(os.environ,env,clear=True),self.assertRaises(ValueError):
                 ProviderQuota.from_environment(self.pilot())
-        for count in (True,500,5000.0,'5000',100000):
+        for count in (True,500,5000.0,'5000',300000):
             with self.subTest(count=count),self.assertRaises(ValueError):ProviderQuota(count)
     def test_subscription_quota_cannot_override_unapproved_or_narrow_test_scope(self):
         from dataclasses import replace

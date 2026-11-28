@@ -11,6 +11,7 @@ on:
       - .github/workflows/vmhunter-worker.yml
       - scripts/configure_vmhunter_campaigns.py
       - scripts/vmhunter_worker_release.py
+      - scripts/install_vmhunter_index.py
       - tests/host/test_campaign_release_request.py
       - tests/host/test_vmhunter_worker_release.py
   workflow_dispatch:
@@ -68,6 +69,14 @@ jobs:
         env:
           FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
         run: python3 tests/verify_vmhunter_screen.py vmhunter-provider-quota-integration.py
+      - name: Test Nano rate limits, twenty-analysis capacity, restart and online index compatibility
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-nano-integration.py
+      - name: Test cleanup at journal scale without broad primary-key scans
+        env:
+          FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json
+        run: python3 tests/verify_vmhunter_screen.py vmhunter-cleanup-scale-integration.py
       - name: Test delayed terminal cleanup, concurrent recovery and preserved history
         env:
           FOUNDATION_COMPOSE_ARGS: -f compose.yaml -f worker-ci.json

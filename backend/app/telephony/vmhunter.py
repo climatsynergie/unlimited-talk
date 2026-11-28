@@ -6,6 +6,7 @@ separate decision function which preserves uncertain and failed calls.
 """
 import asyncio
 import base64
+from collections import deque
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -273,9 +274,33 @@ class Audio:
             raise ProtocolError() from None
 
 
+class StartLimiter:
+    """Non-blocking rolling-second gate, shared by this worker's API client.
+
+    Called on the event loop immediately before a provider config frame. No
+    waiting caller, queued audio, background timer or credentials are retained.
+    Durable account-wide admission is independently bounded by Store.claim.
+    """
+    def __init__(self, calls_per_second, *, clock=time.monotonic):
+        if type(calls_per_second) is not int or not 1 <= calls_per_second <= 5:
+            raise ValueError('Débit VM Hunter invalide.')
+        self.limit, self.clock = calls_per_second, clock
+        self.starts = deque()
+
+    def allow(self):
+        now = self.clock()
+        while self.starts and self.starts[0] <= now - 1:
+            self.starts.popleft()
+        if len(self.starts) >= self.limit:
+            return False
+        self.starts.append(now)
+        return True
+
+
 class Client:
-    def __init__(self, api_key, *, session, endpoint=ENDPOINT):
+    def __init__(self, api_key, *, session, endpoint=ENDPOINT, start_limiter=None):
         self._key, self._session, self._endpoint = api_key, session, endpoint
+        self._start_limiter = start_limiter
 
     async def classify(self, identifier, audio, *, seconds=5):
         """Read while sending; cancel the sender on the first verdict or failure."""
@@ -283,6 +308,8 @@ class Client:
             async with asyncio.timeout(seconds):
                 async with self._session.ws_connect(self._endpoint, max_msg_size=MAX_MESSAGE,
                         timeout=aiohttp.ClientWSTimeout(ws_close=0.2), autoping=True) as ws:
+                    if self._start_limiter is not None and not self._start_limiter.allow():
+                        return Result('FAILED', 'local_rate_limit')
                     await ws.send_json({'config': {'vid': str(identifier), 'api_key': self._key,
                                                   'sample_rate': 8000, 'bytes_per_sample': 2}})
 

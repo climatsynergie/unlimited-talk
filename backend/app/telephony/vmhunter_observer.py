@@ -29,6 +29,32 @@ RPC_URL = 'http://vmhunter:8080/private/observe'
 MEDIA_PATH = '/api/telephony/vmhunter/media'
 TERMINAL_PROVIDER_STATES = frozenset({'completed', 'busy', 'no-answer', 'failed', 'canceled'})
 
+# Derive the small set of unconfirmed intents before loading their JSON proofs.
+# EXCEPT is deliberately set based: a LIMIT over the whole append-only journal
+# can choose an expensive primary-key walk or repeated nested anti-join scans.
+# A confirmed result excludes the same intents as the former NOT EXISTS query.
+CLEANUP_LOOKUP_SQL = '''WITH unconfirmed AS MATERIALIZED (
+    SELECT c.intent_id FROM staging.voice_events c
+    JOIN staging.voice_intents i ON i.id=c.intent_id
+    WHERE c.kind='vmhunter.claim' AND i.account_sid=:account
+    EXCEPT
+    SELECT r.intent_id FROM staging.voice_events r
+    WHERE r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true'
+), claims AS MATERIALIZED (
+    SELECT c.id,c.intent_id,c.details,c.created_at,i.state
+    FROM unconfirmed u JOIN staging.voice_events c ON c.intent_id=u.intent_id AND c.kind='vmhunter.claim'
+    JOIN staging.voice_intents i ON i.id=c.intent_id AND i.account_sid=:account
+)
+SELECT c.intent_id,c.details FROM claims c
+WHERE NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
+    AND r.kind='vmhunter.cleanup_verified' AND c.state IN ('finished','cancelled','expired')
+    AND r.details->>'stream_stop_confirmed'='true'
+    AND r.details->>'call_sid'=c.details->>'call_sid'
+    AND r.details->>'nonce'=c.details->>'nonce'
+    AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
+AND (:include_recent OR c.created_at<clock_timestamp()-interval '20 seconds'
+    OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id AND r.kind='vmhunter.result'))'''
+
 
 def policy_from_file(path):
     return vm.Pilot.parse(vm.object_json(private_bytes(path)))
@@ -79,13 +105,27 @@ class ProviderQuota:
     """The subscribed provider owns monthly usage and its renewal boundary.
 
     A routing policy's historical canary cap must not become a lifetime quota.
-    This explicitly configured Free allowance never changes the subscription.
+    These explicitly configured allowances never change the subscription.
+    Nano keeps a local 20-analysis resource bound inside the provider's 50
+    channels and requires a shared five-starts-per-second admission gate.
     """
     monthly_allowance: int = 5000
 
     def __post_init__(self):
-        if type(self.monthly_allowance) is not int or self.monthly_allowance != 5000:
-            raise ValueError('Quota gratuit VM Hunter invalide.')
+        if type(self.monthly_allowance) is not int or self.monthly_allowance not in {5000, 100000}:
+            raise ValueError('Quota VM Hunter invalide.')
+
+    @property
+    def max_concurrent(self):
+        return 20 if self.monthly_allowance == 100000 else 2
+
+    @property
+    def calls_per_second(self):
+        return 5 if self.monthly_allowance == 100000 else None
+
+    @property
+    def provider_channels(self):
+        return 50 if self.monthly_allowance == 100000 else None
 
     @classmethod
     def from_environment(cls, pilot):
@@ -93,9 +133,9 @@ class ProviderQuota:
         allowance = os.environ.get('VMHUNTER_MONTHLY_ALLOWANCE')
         if source is None and allowance is None:
             return None
-        if source != 'provider' or allowance != '5000':
+        if source != 'provider' or allowance not in {'5000', '100000'}:
             raise ValueError('Configuration du quota VM Hunter invalide.')
-        value = cls()
+        value = cls(int(allowance))
         value.validate_scope(pilot)
         return value
 
@@ -148,28 +188,13 @@ class Store:
                 return None
             # A restart must not reset the circuit after an unconfirmed stop or
             # a process death. These append-only facts require operator review.
-            unresolved = db.execute(text('''SELECT 1 FROM staging.voice_events c
-                JOIN staging.voice_intents i ON i.id=c.intent_id
-                WHERE i.account_sid=:account
-                AND c.kind='vmhunter.claim'
-                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                    AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
-                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                    AND r.kind='vmhunter.cleanup_verified'
-                    AND i.state IN ('finished','cancelled','expired')
-                    AND r.details->>'stream_stop_confirmed'='true'
-                    AND r.details->>'call_sid'=c.details->>'call_sid'
-                    AND r.details->>'nonce'=c.details->>'nonce'
-                    AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
-                AND (c.created_at<clock_timestamp()-interval '20 seconds'
-                    OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                        AND r.kind='vmhunter.result')) LIMIT 1'''),
-                {'account': self.profile.account_sid}).first()
+            unresolved = db.execute(text(CLEANUP_LOOKUP_SQL + ' LIMIT 1'),
+                {'account': self.profile.account_sid, 'include_recent': False}).first()
             if unresolved:
                 return None
             # Keep explicit fixed canary budgets for legacy/test operation.
             # Subscription mode delegates the monthly quota and renewal to VM
-            # Hunter, which refuses exhausted Free accounts without overages.
+            # Hunter, which refuses exhausted accounts without overages.
             used = 0
             if self.provider_quota is None:
                 used = db.execute(text('''SELECT count(*) FROM (
@@ -181,12 +206,24 @@ class Store:
             active = db.execute(text('''SELECT count(*) FROM staging.voice_events c
                 JOIN staging.voice_intents i ON i.id=c.intent_id
                 WHERE i.account_sid=:account
-                AND i.created_at>clock_timestamp()-interval '35 minutes'
-                AND c.kind='vmhunter.claim' AND c.created_at>clock_timestamp()-interval '20 seconds'
+                AND i.created_at>statement_timestamp()-interval '35 minutes'
+                AND c.kind='vmhunter.claim' AND c.created_at>statement_timestamp()-interval '20 seconds'
                 AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id AND r.kind='vmhunter.result')'''),
                 {'account': self.profile.account_sid}).scalar_one()
-            if (self.provider_quota is None and used >= self.pilot.max_analyses) or active >= 2:
+            capacity = self.provider_quota.max_concurrent if self.provider_quota is not None else 2
+            if (self.provider_quota is None and used >= self.pilot.max_analyses) or active >= capacity:
                 return None
+            if self.provider_quota is not None and self.provider_quota.calls_per_second is not None:
+                recent = db.execute(text('''SELECT count(*) FROM (
+                    SELECT 1 FROM staging.voice_events c
+                    JOIN staging.voice_intents i ON i.id=c.intent_id
+                    WHERE c.kind='vmhunter.claim' AND i.account_sid=:account
+                      AND c.created_at>statement_timestamp()-interval '1 second'
+                    LIMIT :cps) admitted'''),
+                    {'account': self.profile.account_sid,
+                     'cps': self.provider_quota.calls_per_second}).scalar_one()
+                if recent >= self.provider_quota.calls_per_second:
+                    return None
             nonce = uuid4().hex
             event(db, identifier, 'vmhunter.claim', {'pilot_id': str(pilot_id), 'call_sid': call, 'nonce': nonce})
             return {**payload, 'nonce': nonce}
@@ -222,21 +259,8 @@ class Store:
         with self.engine.connect() as db:
             db.execute(text('SET TRANSACTION READ ONLY'))
             db.execute(text("SET LOCAL statement_timeout='1500ms'"))
-            rows = db.execute(text("""SELECT c.intent_id, c.details FROM staging.voice_events c
-                JOIN staging.voice_intents i ON i.id=c.intent_id
-                WHERE i.account_sid=:account AND c.kind='vmhunter.claim'
-                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                    AND r.kind='vmhunter.result' AND r.details->>'stream_stop_confirmed'='true')
-                AND NOT EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                    AND r.kind='vmhunter.cleanup_verified' AND i.state IN ('finished','cancelled','expired')
-                    AND r.details->>'stream_stop_confirmed'='true'
-                    AND r.details->>'call_sid'=c.details->>'call_sid'
-                    AND r.details->>'nonce'=c.details->>'nonce'
-                    AND r.details->>'provider_status' IN ('completed','busy','no-answer','failed','canceled'))
-                AND (:include_recent OR c.created_at<clock_timestamp()-interval '20 seconds'
-                    OR EXISTS (SELECT 1 FROM staging.voice_events r WHERE r.intent_id=c.intent_id
-                        AND r.kind='vmhunter.result'))
-                ORDER BY c.id LIMIT 10"""), {'account': self.profile.account_sid, 'include_recent': include_recent}).mappings()
+            rows = db.execute(text(CLEANUP_LOOKUP_SQL + ' ORDER BY c.id LIMIT 10'),
+                {'account': self.profile.account_sid, 'include_recent': include_recent}).mappings()
             return [dict(row['details'], intent_id=str(row['intent_id'])) for row in rows]
 
     def verify_cleanup(self, payload, status):
@@ -366,10 +390,18 @@ class Observer:
         self.profile, self.pilot, self.store = profile, pilot, store
         self.streams, self.provider = streams, provider
         self.jobs = {}
+        self.admissions = 0
         self.handshakes = 0
         self.degraded = False
         self.job_seconds, self.handshake_seconds = job_seconds, handshake_seconds
         self.clock, self.backoff_until = clock, 0.0
+        quota = getattr(store, 'provider_quota', None)
+        self.admission_limiter = vm.StartLimiter(quota.calls_per_second, clock=clock) if quota and quota.calls_per_second else None
+
+    @property
+    def max_concurrent(self):
+        quota = getattr(self.store, 'provider_quota', None)
+        return quota.max_concurrent if quota is not None else 2
 
     async def observe(self, request):
         try:
@@ -380,9 +412,17 @@ class Observer:
             parse_payload(payload)
         except (vm.ProtocolError, web.HTTPRequestEntityTooLarge):
             return web.Response(status=403)
-        if (not self.pilot.enabled or self.degraded or len(self.jobs) >= 2
+        if (not self.pilot.enabled or self.degraded or len(self.jobs) + self.admissions >= self.max_concurrent
                 or self.clock() < self.backoff_until):
             return web.json_response({'accepted': False}, status=202)
+        if self.admission_limiter is not None and not self.admission_limiter.allow():
+            # Shed bursts before they queue for the two DB connections. The
+            # persistent account check and actual config-frame gate are also
+            # required: neither process restarts nor delayed streams reset CPS.
+            return web.json_response({'accepted': False}, status=202)
+        # Reserve before the database await: overlapping HTTP requests must not
+        # each observe the same spare slot. Durable account limits still apply.
+        self.admissions += 1
         try:
             claimed = await asyncio.to_thread(self.store.claim, payload)
         except Exception as error:
@@ -391,6 +431,8 @@ class Observer:
             log.warning('vmhunter_claim_error type=%s sqlstate=%s', type(error).__name__, code)
             log.warning('vmhunter_claim_unavailable')
             return web.json_response({'accepted': False}, status=202)
+        finally:
+            self.admissions -= 1
         if claimed:
             nonce = claimed['nonce']
             # No await between admission and registration of this local job.
@@ -416,7 +458,7 @@ class Observer:
                         phase, type(error).__name__, bool(job['stream']), job['socket'] is not None)
             log.warning('vmhunter_stream_unavailable')
         finally:
-            if result.status == 'FAILED':
+            if result.status == 'FAILED' and result.cause != 'local_rate_limit':
                 seconds = 30 if result.cause in {'AUTH_FAILED', 'LIMIT_REACHED', 'PERIOD_EXPIRED', 'NO_SUBSCRIPTION'} else 2
                 self.backoff_until = max(self.backoff_until, self.clock() + seconds)
             # Always stop billing, including on timeout, disconnect or shutdown.
@@ -468,10 +510,13 @@ class Observer:
                 self.degraded = bool(remaining)
         except Exception as error:
             self.degraded = True
-            log.warning('vmhunter_cleanup_store_unavailable type=%s', type(error).__name__)
+            code = getattr(getattr(error, 'orig', None), 'sqlstate', None)
+            if not isinstance(code, str) or not re.fullmatch('[A-Z0-9]{5}', code):
+                code = None
+            log.warning('vmhunter_cleanup_store_unavailable type=%s sqlstate=%s', type(error).__name__, code)
 
     async def media(self, request):
-        if self.handshakes >= 4 or not self.pilot.enabled:
+        if self.handshakes >= 2 * self.max_concurrent or not self.pilot.enabled:
             return web.Response(status=503)
         self.handshakes += 1
         ws = web.WebSocketResponse(max_msg_size=vm.MAX_MESSAGE, heartbeat=None, timeout=0.2)
@@ -574,7 +619,10 @@ def application(observer, *, recovery_interval=None):
         quota = ({'source': 'vmhunter_subscription', 'monthly_allowance': provider_quota.monthly_allowance,
                   'internal_total_limit': None} if provider_quota is not None else
                  {'source': 'internal_canary', 'internal_total_limit': observer.pilot.max_analyses})
-        return web.json_response({'status': 'alive', 'mode': observer.pilot.mode, 'quota': quota,
+        capacity = {'max_concurrent': observer.max_concurrent,
+                    'calls_per_second': provider_quota.calls_per_second if provider_quota else None,
+                    'provider_channels': provider_quota.provider_channels if provider_quota else None}
+        return web.json_response({'status': 'alive', 'mode': observer.pilot.mode, 'quota': quota, 'capacity': capacity,
                                   'cleanup_pending': observer.degraded, 'active_analyses': len(observer.jobs),
                                   'accepting': observer.pilot.enabled and not observer.degraded
                                       and observer.clock() >= observer.backoff_until})
@@ -603,8 +651,10 @@ async def runtime():
         raise RuntimeError('Identifiants de détection invalides.')
     engine = make_engine()
     session = aiohttp.ClientSession(trust_env=False, timeout=aiohttp.ClientTimeout(total=8))
-    observer = Observer(profile, pilot, Store(engine, profile, pilot, provider_quota=ProviderQuota.from_environment(pilot)), Streams(profile, session),
-                        vm.Client(credentials['api_key'], session=session))
+    quota = ProviderQuota.from_environment(pilot)
+    limiter = vm.StartLimiter(quota.calls_per_second) if quota and quota.calls_per_second else None
+    observer = Observer(profile, pilot, Store(engine, profile, pilot, provider_quota=quota), Streams(profile, session),
+                        vm.Client(credentials['api_key'], session=session, start_limiter=limiter))
     app = application(observer, recovery_interval=15)
 
     async def cleanup(_app):

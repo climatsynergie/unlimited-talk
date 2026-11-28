@@ -20,6 +20,8 @@ REPOSITORY='climatsynergie/unlimited-talk'
 PACKAGE='ghcr.io/'+REPOSITORY+'-api'
 API_BASE='36a451a4e974dc0a8ff80bbe5540806f57fa3c6f'
 POLICY_V4_API='35b4ba8f076b9ead2712aed239656a8423eb09ff'
+RELIABILITY_API='86230a2fa1a3a6b2af5b8d1e60144fbb9191c5c2'
+OWNERSHIP_API='3e01fd94606c43a3eb982382ac6ff282a6e13144'
 
 
 def run(args,*,data=None,env=None,timeout=120):
@@ -60,7 +62,7 @@ def verify(revision):
 def compatible_api_revision(release_name,health,worker_revision):
  revision=release_name.removeprefix('git-')
  if (not release_name.startswith('git-') or not re.fullmatch('[a-f0-9]{40}',revision)
-     or revision not in {API_BASE,POLICY_V4_API,worker_revision}
+     or revision not in {API_BASE,POLICY_V4_API,RELIABILITY_API,OWNERSHIP_API,worker_revision}
      or health.get('status')!='ready' or health.get('environment')!='staging'
      or health.get('migration')!='0012_incoming_runtime'
      or health.get('communications')!='manual' or health.get('calling_enabled') is not True
@@ -71,11 +73,16 @@ def compatible_api_revision(release_name,health,worker_revision):
 
 def configured_worker(candidate,image,monthly_quota=None):
  if set(candidate['services'])!={'vmhunter'}:raise ValueError('Only the media worker may change')
- if monthly_quota is not None and (type(monthly_quota) is not int or monthly_quota!=5000):raise ValueError('Only the owner-authorized Free allowance is supported')
+ if monthly_quota is not None and (type(monthly_quota) is not int or monthly_quota not in {5000,100000}):raise ValueError('Only explicit Free or Nano allowances are supported')
  candidate=json.loads(json.dumps(candidate));service=candidate['services']['vmhunter'];service['image']=image
  if monthly_quota is not None:
   service['environment']['VMHUNTER_QUOTA_SOURCE']='provider'
   service['environment']['VMHUNTER_MONTHLY_ALLOWANCE']=str(monthly_quota)
+  if monthly_quota==100000:
+   # This dedicated worker remains private/nonroot and shares only two DB
+   # connections. Reserve CPU/memory for up to twenty bounded media jobs.
+   service['mem_limit']='512m'
+   service['cpus']=1.0
  return candidate
 
 
@@ -159,6 +166,8 @@ def rollout(revision,monthly_quota=None):
    assert worker_health['accepting'] is True
    if monthly_quota is not None:
     assert worker_health['quota']==dict(source='vmhunter_subscription',monthly_allowance=monthly_quota,internal_total_limit=None)
+   if monthly_quota==100000:
+    assert worker_health['capacity']==dict(max_concurrent=20,calls_per_second=5,provider_channels=50)
   except Exception:
    update_policy(False);path.write_bytes(original)
    run([*base,'up','-d','--pull','never','--force-recreate','--wait','--wait-timeout','60'],timeout=90)
@@ -167,7 +176,7 @@ def rollout(revision,monthly_quota=None):
 
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['verify','rollout','disable']);p.add_argument('revision',nargs='?');p.add_argument('--provider-monthly-quota',type=int,choices=[5000]);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['verify','rollout','disable']);p.add_argument('revision',nargs='?');p.add_argument('--provider-monthly-quota',type=int,choices=[5000,100000]);a=p.parse_args()
  assert os.geteuid()==0;os.umask(0o077)
  assert a.provider_monthly_quota is None or a.action=='rollout'
  if a.action=='disable':update_policy(False);print('VM filtering disabled; ordinary calls unchanged');return
