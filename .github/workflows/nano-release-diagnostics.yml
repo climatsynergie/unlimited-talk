@@ -1,0 +1,38 @@
+name: Read the exact failed Nano CI diagnostic
+on:
+  push:
+    branches: [ops/nano-release-diagnostics-20261128]
+    paths: [.github/workflows/nano-release-diagnostics.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  read-reviewed-failure:
+    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/nano-release-diagnostics-20261128'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Extract only exception classes and source assertion locations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PYCODE'
+          import json,re,subprocess
+          repository='climatsynergie/unlimited-talk'
+          job='140818694873'
+          meta=json.loads(subprocess.check_output(['gh','api','repos/'+repository+'/actions/jobs/'+job],text=True))
+          assert meta['run_id']==46093224096 and meta['head_sha']=='0724ac16a424c8ae1e157ab0fe91b6c56e2063fd'
+          assert meta['conclusion']=='failure'
+          log=subprocess.check_output(['gh','api','repos/'+repository+'/actions/jobs/'+job+'/logs'],text=True)
+          selected=[]
+          for raw in log.splitlines():
+              line=re.sub(r'^\d{4}-\d\d-\d\dT\S+\s+','',raw).strip()
+              if re.search(r'File "/tests/[^"\r\n]+", line \d+',line) or line.startswith('assert ') or line.startswith('AssertionError'):
+                  selected.append(line[:700])
+              for error in re.findall(r'(?:psycopg\.errors|sqlalchemy\.exc)\.[A-Za-z_]+',line):
+                  selected.append(error)
+          assert selected,'No allowed diagnostic lines found'
+          message='\n'.join(selected[-35:]).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::warning title=Exact Nano CI failure::'+message)
+          print('Read-only failure inspection completed; no deployment requested.')
+          PYCODE
