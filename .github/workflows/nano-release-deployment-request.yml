@@ -1,0 +1,35 @@
+name: Request approved Nano and dialer corrections deployment
+on:
+  push:
+    branches: [ops/nano-release-deployment-20261128]
+    paths: [.github/workflows/nano-release-deployment-request.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  request-reviewed-current-main:
+    if: github.repository == 'climatsynergie/unlimited-talk' && github.ref == 'refs/heads/ops/nano-release-deployment-20261128'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Dispatch normal protected deployment after both exact-source checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_REVISION: 158c23799bf05e07573cf276107242d841eb068c
+        run: |
+          python3 - <<'PYCODE'
+          import json,os,subprocess
+          repository='climatsynergie/unlimited-talk'
+          revision=os.environ['REQUESTED_REVISION']
+          assert os.environ['GITHUB_REPOSITORY']==repository
+          assert os.environ['GITHUB_REF']=='refs/heads/ops/nano-release-deployment-20261128'
+          def api(path):
+              return json.loads(subprocess.check_output(['gh','api','repos/'+repository+'/'+path],text=True))
+          assert api('commits/main')['sha']==revision,'Main moved; this one-time request is stale'
+          for workflow in ('ci.yml','vmhunter-worker.yml'):
+              runs=api('actions/workflows/'+workflow+'/runs?head_sha='+revision+'&branch=main&status=success')['workflow_runs']
+              assert any(r['head_sha']==revision and r['head_branch']=='main' and r['event']=='push'
+                  and r['head_repository']['full_name']==repository and r['conclusion']=='success' for r in runs),workflow+' must pass'
+          subprocess.run(['gh','workflow','run','deploy-staging.yml','--repo',repository,'--ref','main','-f','revision='+revision],check=True)
+          print('Requested normal protected deployment; active-call and provenance guards remain enforced.')
+          PYCODE
